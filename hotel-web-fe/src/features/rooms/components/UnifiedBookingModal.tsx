@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Dialog,
@@ -24,6 +24,9 @@ import {
   Divider,
   Alert,
   Chip,
+  Autocomplete,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   PersonAdd as PersonAddIcon,
@@ -34,7 +37,7 @@ import {
   ArrowForward as ArrowForwardIcon,
   Check as CheckIcon,
 } from '@mui/icons-material';
-import { Room, Guest, Booking } from '../../../types';
+import { Room, Guest, Booking, CheckInRequest, GuestUpdateRequest, BookingUpdateRequest } from '../../../types';
 import { HotelAPIService } from '../../../api';
 import { useCurrency } from '../../../hooks/useCurrency';
 import { getHotelSettings } from '../../../utils/hotelSettings';
@@ -47,7 +50,8 @@ export type BookingMode = 'direct' | 'reservation';
 interface UnifiedBookingModalProps {
   open: boolean;
   onClose: () => void;
-  room: Room | null;
+  room?: Room | null;  // Optional - if not provided, room selection step will be shown
+  rooms?: Room[];      // List of rooms for selection when room is not pre-selected
   guests: Guest[];
   initialBookingType?: BookingType;
   onSuccess: (message: string) => void;
@@ -97,7 +101,8 @@ const RESERVATION_TYPE_CONFIG = {
 const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
   open,
   onClose,
-  room,
+  room: roomProp,
+  rooms = [],
   guests,
   initialBookingType,
   onSuccess,
@@ -108,6 +113,9 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
   const { format: formatCurrency, symbol: currencySymbol } = useCurrency();
   const BOOKING_CHANNELS = getHotelSettings().booking_channels;
   const roomCardDepositDefault = getHotelSettings().room_card_deposit;
+
+  // Determine if we need room selection (when room is not pre-selected)
+  const needsRoomSelection = !roomProp;
 
   // Stepper state
   const [activeStep, setActiveStep] = useState(0);
@@ -137,6 +145,23 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
   // Processing state
   const [processing, setProcessing] = useState(false);
 
+  // Room selection state (when room is not pre-selected)
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
+  const [loadingAvailableRooms, setLoadingAvailableRooms] = useState(false);
+
+  // Check-in step state (for direct booking)
+  const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
+  const [createdGuest, setCreatedGuest] = useState<Guest | null>(null);
+  const [checkInTabIndex, setCheckInTabIndex] = useState(0);
+  const [guestUpdateData, setGuestUpdateData] = useState<GuestUpdateRequest>({});
+  const [bookingUpdateData, setBookingUpdateData] = useState<BookingUpdateRequest>({});
+  const [rateCodes, setRateCodes] = useState<string[]>([]);
+  const [marketCodes, setMarketCodes] = useState<string[]>([]);
+
+  // Use selected room or prop room
+  const room = roomProp || selectedRoom;
+
   // Reset form when modal opens/closes
   useEffect(() => {
     if (open) {
@@ -149,6 +174,8 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       setActiveStep(0);
       setBookingMode(null);
       setReservationType(null);
+      setSelectedRoom(null);
+      setAvailableRooms([]);
     } else {
       // Reset all state when closing
       setActiveStep(0);
@@ -166,8 +193,45 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       setDeposit(0);
       setPaymentMethod('cash');
       setRoomCardDeposit(roomCardDepositDefault);
+      setSelectedRoom(null);
+      setAvailableRooms([]);
+      // Reset check-in state
+      setCreatedBooking(null);
+      setCreatedGuest(null);
+      setCheckInTabIndex(0);
+      setGuestUpdateData({});
+      setBookingUpdateData({});
     }
   }, [open, roomCardDepositDefault]);
+
+  // Store rooms in a ref to avoid dependency issues
+  const roomsRef = useRef(rooms);
+  roomsRef.current = rooms;
+
+  // Fetch available rooms when dates change (for room selection mode)
+  useEffect(() => {
+    // Only fetch when we need room selection and have valid dates
+    if (!needsRoomSelection || !checkInDate || !checkOutDate) {
+      return;
+    }
+
+    const fetchAvailableRooms = async () => {
+      setLoadingAvailableRooms(true);
+      try {
+        // Fetch available rooms for the date range
+        const available = await HotelAPIService.getAvailableRoomsForDates(checkInDate, checkOutDate);
+        setAvailableRooms(available);
+      } catch (error) {
+        console.error('Failed to fetch available rooms:', error);
+        // Fall back to all rooms if search fails
+        setAvailableRooms(roomsRef.current);
+      } finally {
+        setLoadingAvailableRooms(false);
+      }
+    };
+
+    fetchAvailableRooms();
+  }, [needsRoomSelection, checkInDate, checkOutDate]);
 
   // Load guests with credits when complimentary reservation is selected
   useEffect(() => {
@@ -175,6 +239,26 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       loadGuestsWithCredits();
     }
   }, [reservationType, open]);
+
+  // Load rate/market codes when entering check-in step
+  useEffect(() => {
+    const loadDropdownData = async () => {
+      try {
+        const [ratesResp, marketsResp] = await Promise.all([
+          HotelAPIService.getRateCodes(),
+          HotelAPIService.getMarketCodes(),
+        ]);
+        setRateCodes(ratesResp.rate_codes);
+        setMarketCodes(marketsResp.market_codes);
+      } catch (err) {
+        console.error('Failed to load dropdown data:', err);
+      }
+    };
+
+    if (createdBooking && open) {
+      loadDropdownData();
+    }
+  }, [createdBooking, open]);
 
   const loadGuestsWithCredits = async () => {
     setLoadingGuestsWithCredits(true);
@@ -216,59 +300,82 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
     }
   };
 
-  // Get steps based on booking mode
+  // Get steps based on booking mode and room selection need
   const getSteps = (): string[] => {
-    if (bookingMode === 'direct') {
-      return ['Mode', 'Guest', 'Dates & Payment', 'Confirm'];
-    } else if (bookingMode === 'reservation') {
-      return ['Mode', 'Type', 'Guest', 'Details', 'Confirm'];
+    if (needsRoomSelection) {
+      // Room selection mode: add Room step after Mode
+      if (bookingMode === 'direct') {
+        return ['Mode', 'Room', 'Guest', 'Dates & Payment', 'Confirm', 'Check-In'];
+      } else if (bookingMode === 'reservation') {
+        return ['Mode', 'Type', 'Room', 'Guest', 'Details', 'Confirm'];
+      }
+      return ['Mode', 'Room', 'Guest', 'Details', 'Confirm'];
+    } else {
+      // Room pre-selected: original flow
+      if (bookingMode === 'direct') {
+        return ['Mode', 'Guest', 'Dates & Payment', 'Confirm', 'Check-In'];
+      } else if (bookingMode === 'reservation') {
+        return ['Mode', 'Type', 'Guest', 'Details', 'Confirm'];
+      }
+      return ['Mode', 'Guest', 'Details', 'Confirm'];
     }
-    return ['Mode', 'Guest', 'Details', 'Confirm'];
+  };
+
+  // Get step indices dynamically based on booking mode and room selection
+  const getStepIndex = (stepName: string): number => {
+    const steps = getSteps();
+    return steps.indexOf(stepName);
   };
 
   // Validation for each step
   const isStepValid = (): boolean => {
-    switch (activeStep) {
-      case 0: // Mode selection
+    const steps = getSteps();
+    const currentStepName = steps[activeStep];
+
+    switch (currentStepName) {
+      case 'Mode':
         return !!bookingMode;
 
-      case 1: // Type selection (reservation) or Guest (direct)
-        if (bookingMode === 'reservation') {
-          return !!reservationType;
+      case 'Type':
+        return !!reservationType;
+
+      case 'Room':
+        // Room selection step - need dates and room selected
+        if (!checkInDate || !checkOutDate) return false;
+        if (new Date(checkOutDate) <= new Date(checkInDate)) return false;
+        return !!selectedRoom;
+
+      case 'Guest':
+        if (reservationType === 'complimentary') {
+          return !!selectedGuestWithCredits;
         }
-        // Direct booking - this is guest step
         if (isCreatingNewGuest) {
           return !!(newGuestForm.first_name && newGuestForm.last_name);
         }
         return !!selectedGuest;
 
-      case 2: // Guest (reservation) or Details (direct)
-        if (bookingMode === 'reservation') {
-          if (reservationType === 'complimentary') {
-            return !!selectedGuestWithCredits;
-          }
-          if (isCreatingNewGuest) {
-            return !!(newGuestForm.first_name && newGuestForm.last_name);
-          }
-          return !!selectedGuest;
-        }
-        // Direct booking - this is details step
+      case 'Dates & Payment':
+        // For direct booking with room pre-selected
         if (!checkInDate || !checkOutDate) return false;
         if (new Date(checkOutDate) <= new Date(checkInDate)) return false;
         return true;
 
-      case 3: // Details (reservation) or Confirm (direct)
-        if (bookingMode === 'reservation') {
+      case 'Details':
+        // For reservation mode
+        if (!needsRoomSelection) {
+          // Dates validation needed only when room is pre-selected
           if (!checkInDate || !checkOutDate) return false;
           if (new Date(checkOutDate) <= new Date(checkInDate)) return false;
-          if (reservationType === 'online' && !bookingChannel) return false;
-          return true;
         }
-        // Direct booking - this is confirm step
+        if (reservationType === 'online' && !bookingChannel) return false;
         return true;
 
-      case 4: // Confirm (reservation only)
+      case 'Confirm':
         return true;
+
+      case 'Check-In':
+        // Check-in step validation - require first name at minimum
+        return !!(guestUpdateData.first_name && guestUpdateData.first_name.trim());
 
       default:
         return false;
@@ -276,8 +383,150 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
   };
 
   // Handle next step
-  const handleNext = () => {
+  const handleNext = async () => {
+    const steps = getSteps();
+    const currentStepName = steps[activeStep];
+
+    // For direct booking, create the booking when moving from Confirm to Check-In step
+    if (bookingMode === 'direct' && currentStepName === 'Confirm') {
+      await createBookingForCheckIn();
+      return;
+    }
+
     setActiveStep((prev) => prev + 1);
+  };
+
+  // Create booking and transition to check-in step (for direct booking)
+  const createBookingForCheckIn = async () => {
+    if (!room) {
+      onError('No room selected');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      let guestToUse: Guest | null = null;
+
+      // Create new guest if needed
+      if (isCreatingNewGuest) {
+        if (!newGuestForm.first_name || !newGuestForm.last_name) {
+          onError('Please fill in required guest fields');
+          setProcessing(false);
+          return;
+        }
+
+        if (newGuestForm.email && newGuestForm.email.trim() && !isValidEmail(newGuestForm.email)) {
+          onError('Please enter a valid email address');
+          setProcessing(false);
+          return;
+        }
+
+        // Check for duplicate email
+        if (newGuestForm.email && newGuestForm.email.trim()) {
+          const existingGuest = guests.find(g => g.email && g.email.toLowerCase() === newGuestForm.email.toLowerCase());
+          if (existingGuest) {
+            onError(`A guest with email ${newGuestForm.email} already exists`);
+            setProcessing(false);
+            return;
+          }
+        }
+
+        const newGuest = await HotelAPIService.createGuest({
+          first_name: newGuestForm.first_name,
+          last_name: newGuestForm.last_name,
+          email: newGuestForm.email || undefined,
+          phone: newGuestForm.phone,
+          ic_number: newGuestForm.ic_number,
+          nationality: newGuestForm.nationality,
+        });
+
+        guestToUse = newGuest;
+      } else {
+        guestToUse = selectedGuest;
+      }
+
+      if (!guestToUse) {
+        onError('Please select a guest');
+        setProcessing(false);
+        return;
+      }
+
+      const isMember = guestToUse.guest_type === 'member';
+      const effectiveRoomCardDeposit = isMember ? 0 : roomCardDeposit;
+
+      const bookingData = {
+        guest_id: guestToUse.id,
+        room_id: String(room.id),
+        check_in_date: checkInDate,
+        check_out_date: checkOutDate,
+        number_of_guests: 1,
+        post_type: 'normal_stay' as const,
+        booking_remarks: isMember ? 'Walk-In Guest (Member - Card Deposit Waived)' : 'Walk-In Guest',
+        source: 'walk_in' as const,
+        room_card_deposit: effectiveRoomCardDeposit,
+        payment_method: paymentMethod,
+        amount_paid: deposit,
+      };
+
+      const createdBookingResult = await HotelAPIService.createBooking(bookingData);
+
+      // Create booking object for check-in step
+      const bookingForCheckIn: Booking = {
+        id: createdBookingResult.id,
+        guest_id: guestToUse.id.toString(),
+        room_id: room.id,
+        room_type: room.room_type,
+        check_in_date: createdBookingResult.check_in_date,
+        check_out_date: createdBookingResult.check_out_date,
+        total_amount: createdBookingResult.total_amount,
+        status: createdBookingResult.status,
+        folio_number: createdBookingResult.folio_number || `WALKIN-${createdBookingResult.id}`,
+        market_code: 'Walk-In',
+        rate_code: 'RACK',
+        payment_method: paymentMethod === 'cash' ? 'Cash' : paymentMethod === 'card' ? 'Card' : paymentMethod === 'bank_transfer' ? 'Bank Transfer' : 'E-Wallet',
+        post_type: createdBookingResult.post_type,
+        created_at: createdBookingResult.created_at,
+        updated_at: createdBookingResult.updated_at,
+      };
+
+      // Parse full_name into first and last name
+      const nameParts = guestToUse.full_name?.split(' ') || [];
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+
+      // Initialize guest update data from guest
+      setGuestUpdateData({
+        first_name: firstName,
+        last_name: lastName,
+        email: guestToUse.email,
+        phone: guestToUse.phone,
+        ic_number: guestToUse.ic_number,
+        nationality: guestToUse.nationality,
+        address_line1: guestToUse.address_line1,
+        city: guestToUse.city,
+        state_province: guestToUse.state_province,
+        postal_code: guestToUse.postal_code,
+        country: guestToUse.country,
+        title: guestToUse.title,
+        alt_phone: guestToUse.alt_phone,
+      });
+
+      // Initialize booking update data
+      setBookingUpdateData({
+        market_code: 'WKII',
+        rate_code: 'RACK',
+        payment_method: paymentMethod === 'cash' ? 'Cash' : paymentMethod === 'card' ? 'Credit Card' : paymentMethod === 'bank_transfer' ? 'Online Banking' : 'E-Wallet',
+      });
+
+      setCreatedBooking(bookingForCheckIn);
+      setCreatedGuest(guestToUse);
+      setActiveStep((prev) => prev + 1);
+    } catch (error: any) {
+      onError(error.message || 'Failed to create booking');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   // Handle back step
@@ -314,8 +563,17 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
     return reservationType;
   };
 
-  // Submit booking
+  // Submit booking (or complete check-in for direct booking)
   const handleSubmit = async () => {
+    const steps = getSteps();
+    const currentStepName = steps[activeStep];
+
+    // Handle check-in completion for direct booking
+    if (bookingMode === 'direct' && currentStepName === 'Check-In' && createdBooking) {
+      await completeCheckIn();
+      return;
+    }
+
     if (!room) {
       onError('No room selected');
       return;
@@ -378,12 +636,12 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
         }
       }
 
-      // Create booking based on type
+      // Create booking based on type (only for reservation mode, not direct booking)
       switch (effectiveType) {
         case 'walk_in': {
+          // For reservation mode walk-in (direct booking handled via Check-In step now)
           const isMember = guestToUse!.guest_type === 'member';
           const effectiveRoomCardDeposit = isMember ? 0 : roomCardDeposit;
-          const isDirectBooking = bookingMode === 'direct';
 
           const bookingData = {
             guest_id: guestToUse!.id,
@@ -399,38 +657,11 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
             amount_paid: deposit,
           };
 
-          const createdBooking = await HotelAPIService.createBooking(bookingData);
+          await HotelAPIService.createBooking(bookingData);
 
-          if (isDirectBooking) {
-            // Direct booking: open enhanced check-in modal
-            const bookingForModal: Booking = {
-              id: createdBooking.id,
-              guest_id: guestToUse!.id.toString(),
-              room_id: room.id,
-              room_type: room.room_type,
-              check_in_date: createdBooking.check_in_date,
-              check_out_date: createdBooking.check_out_date,
-              total_amount: createdBooking.total_amount,
-              status: createdBooking.status,
-              folio_number: createdBooking.folio_number || `WALKIN-${createdBooking.id}`,
-              market_code: 'Walk-In',
-              rate_code: 'RACK',
-              payment_method: paymentMethod === 'cash' ? 'Cash' : paymentMethod === 'card' ? 'Card' : paymentMethod === 'bank_transfer' ? 'Bank Transfer' : 'E-Wallet',
-              post_type: createdBooking.post_type,
-              created_at: createdBooking.created_at,
-              updated_at: createdBooking.updated_at,
-            };
-
-            onClose();
-            if (onBookingCreated) {
-              onBookingCreated(bookingForModal, guestToUse!);
-            }
-          } else {
-            // Reservation mode: booking created, room status already set by backend
-            onSuccess(`Reservation created for ${guestToUse!.full_name} in Room ${room.room_number}`);
-            onClose();
-            await onRefreshData();
-          }
+          onSuccess(`Reservation created for ${guestToUse!.full_name} in Room ${room.room_number}`);
+          onClose();
+          await onRefreshData();
           break;
         }
 
@@ -492,6 +723,33 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
     }
   };
 
+  // Complete check-in for direct booking
+  const completeCheckIn = async () => {
+    if (!createdBooking) {
+      onError('No booking found for check-in');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const checkinRequest: CheckInRequest = {
+        guest_update: guestUpdateData,
+        booking_update: bookingUpdateData,
+      };
+
+      await HotelAPIService.checkInGuest(createdBooking.id, checkinRequest);
+
+      onSuccess(`Guest checked in successfully to Room ${room?.room_number}`);
+      onClose();
+      await onRefreshData();
+    } catch (error: any) {
+      onError(error.message || 'Failed to complete check-in');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   // Calculate total amount
   const calculateTotal = () => {
     const price = room?.price_per_night || 0;
@@ -499,31 +757,15 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
     return numPrice * numberOfNights;
   };
 
-  // Get current step index based on booking mode
-  const getGuestStepIndex = () => {
-    if (bookingMode === 'direct') return 1;
-    if (bookingMode === 'reservation') return 2;
-    return 1;
-  };
-
-  const getDetailsStepIndex = () => {
-    if (bookingMode === 'direct') return 2;
-    if (bookingMode === 'reservation') return 3;
-    return 2;
-  };
-
-  const getConfirmStepIndex = () => {
-    if (bookingMode === 'direct') return 3;
-    if (bookingMode === 'reservation') return 4;
-    return 3;
-  };
 
   // Render step content
   const renderStepContent = () => {
     const effectiveType = getEffectiveBookingType();
+    const steps = getSteps();
+    const currentStepName = steps[activeStep];
 
-    // Step 0: Mode selection (Direct Booking / Booking Reservation)
-    if (activeStep === 0) {
+    // Mode selection step
+    if (currentStepName === 'Mode') {
       return (
         <Box>
           <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
@@ -582,8 +824,8 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       );
     }
 
-    // Step 1 (for reservation mode): Type selection
-    if (activeStep === 1 && bookingMode === 'reservation') {
+    // Type selection step (for reservation mode)
+    if (currentStepName === 'Type') {
       return (
         <Box>
           <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
@@ -642,44 +884,13 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       );
     }
 
-    // Guest step
-    if (activeStep === getGuestStepIndex()) {
+    // Room selection step (when room is not pre-selected)
+    if (currentStepName === 'Room') {
       return (
         <Box>
           <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
-            {effectiveType === 'complimentary' ? 'Select Guest with Credits' : 'Guest Information'}
+            Select Dates & Room
           </Typography>
-          <GuestSelector
-            selectedGuest={selectedGuest}
-            onGuestSelect={setSelectedGuest}
-            guests={guests}
-            newGuestForm={newGuestForm}
-            onNewGuestFormChange={setNewGuestForm}
-            isCreatingNew={isCreatingNewGuest}
-            onToggleMode={setIsCreatingNewGuest}
-            filterByCredits={effectiveType === 'complimentary'}
-            guestsWithCredits={guestsWithCredits}
-            selectedGuestWithCredits={selectedGuestWithCredits}
-            onGuestWithCreditsSelect={setSelectedGuestWithCredits}
-            loadingGuestsWithCredits={loadingGuestsWithCredits}
-            onMemberSelected={handleMemberSelected}
-          />
-        </Box>
-      );
-    }
-
-    // Details step
-    if (activeStep === getDetailsStepIndex()) {
-      const isWalkIn = effectiveType === 'walk_in';
-      const isOnline = effectiveType === 'online';
-      const showPayment = isWalkIn && bookingMode === 'direct';
-
-      return (
-        <Box>
-          <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
-            {showPayment ? 'Dates & Payment' : isOnline ? 'Booking Details' : 'Select Dates'}
-          </Typography>
-
           <Grid container spacing={2}>
             {/* Dates */}
             <Grid item xs={12} md={6}>
@@ -704,6 +915,143 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
+            {/* Room selection */}
+            <Grid item xs={12}>
+              <Autocomplete
+                fullWidth
+                options={availableRooms}
+                loading={loadingAvailableRooms}
+                getOptionLabel={(option) => `Room ${option.room_number} - ${option.room_type} (${formatCurrency(Number(option.price_per_night))}/night)`}
+                value={selectedRoom}
+                onChange={(event, newValue) => {
+                  setSelectedRoom(newValue);
+                }}
+                noOptionsText={
+                  !checkInDate || !checkOutDate
+                    ? "Select dates first to see available rooms"
+                    : loadingAvailableRooms
+                      ? "Loading available rooms..."
+                      : "No rooms available for selected dates"
+                }
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Select Room"
+                    placeholder={checkInDate && checkOutDate ? "Search available rooms..." : "Select dates first..."}
+                    helperText={checkInDate && checkOutDate ? `${availableRooms.length} room(s) available for selected dates` : ""}
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {loadingAvailableRooms ? <CircularProgress color="inherit" size={20} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                  />
+                )}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                disabled={!checkInDate || !checkOutDate}
+              />
+            </Grid>
+            {/* Show selected room details */}
+            {selectedRoom && (
+              <Grid item xs={12}>
+                <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                  <Grid container spacing={1}>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Room Number</Typography>
+                      <Typography variant="body1" fontWeight={600}>{selectedRoom.room_number}</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Room Type</Typography>
+                      <Typography variant="body1">{selectedRoom.room_type}</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Rate per Night</Typography>
+                      <Typography variant="body1">{formatCurrency(Number(selectedRoom.price_per_night))}</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Total ({numberOfNights} night{numberOfNights > 1 ? 's' : ''})</Typography>
+                      <Typography variant="body1" fontWeight={600}>{formatCurrency(Number(selectedRoom.price_per_night) * numberOfNights)}</Typography>
+                    </Grid>
+                  </Grid>
+                </Paper>
+              </Grid>
+            )}
+          </Grid>
+        </Box>
+      );
+    }
+
+    // Guest step
+    if (currentStepName === 'Guest') {
+      return (
+        <Box>
+          <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
+            {effectiveType === 'complimentary' ? 'Select Guest with Credits' : 'Guest Information'}
+          </Typography>
+          <GuestSelector
+            selectedGuest={selectedGuest}
+            onGuestSelect={setSelectedGuest}
+            guests={guests}
+            newGuestForm={newGuestForm}
+            onNewGuestFormChange={setNewGuestForm}
+            isCreatingNew={isCreatingNewGuest}
+            onToggleMode={setIsCreatingNewGuest}
+            filterByCredits={effectiveType === 'complimentary'}
+            guestsWithCredits={guestsWithCredits}
+            selectedGuestWithCredits={selectedGuestWithCredits}
+            onGuestWithCreditsSelect={setSelectedGuestWithCredits}
+            loadingGuestsWithCredits={loadingGuestsWithCredits}
+            onMemberSelected={handleMemberSelected}
+          />
+        </Box>
+      );
+    }
+
+    // Details step (Dates & Payment or just Details for online)
+    if (currentStepName === 'Dates & Payment' || currentStepName === 'Details') {
+      const isWalkIn = effectiveType === 'walk_in';
+      const isOnline = effectiveType === 'online';
+      const showPayment = isWalkIn && bookingMode === 'direct';
+      // Only show dates if room was pre-selected (dates already entered in Room step otherwise)
+      const showDates = !needsRoomSelection;
+
+      return (
+        <Box>
+          <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
+            {showPayment ? 'Dates & Payment' : isOnline ? 'Booking Details' : showDates ? 'Select Dates' : 'Additional Details'}
+          </Typography>
+
+          <Grid container spacing={2}>
+            {/* Dates - only show if room was pre-selected */}
+            {showDates && (
+              <>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    required
+                    type="date"
+                    label="Check-in Date"
+                    value={checkInDate}
+                    onChange={(e) => handleDateChange('checkIn', e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    required
+                    type="date"
+                    label="Check-out Date"
+                    value={checkOutDate}
+                    onChange={(e) => handleDateChange('checkOut', e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+              </>
+            )}
 
             {/* Online booking specific fields */}
             {isOnline && (
@@ -793,6 +1141,251 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       );
     }
 
+    // Check-In step (for direct booking)
+    if (currentStepName === 'Check-In' && createdBooking) {
+      const titleOptions = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof'];
+      const paymentMethods = ['Cash', 'Credit Card', 'Debit Card', 'DuitNow', 'Online Banking', 'E-Wallet', 'Direct Billing'];
+
+      return (
+        <Box>
+          <Typography variant="subtitle1" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
+            Complete Check-In - Folio: {createdBooking.folio_number}
+          </Typography>
+
+          <Alert severity="success" sx={{ mb: 2 }}>
+            Booking created successfully! Please verify guest details and complete the check-in.
+          </Alert>
+
+          <Tabs
+            value={checkInTabIndex}
+            onChange={(_, newValue) => setCheckInTabIndex(newValue)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ mb: 2 }}
+          >
+            <Tab label="Guest Info" />
+            <Tab label="Stay Details" />
+            <Tab label="Payment" />
+          </Tabs>
+
+          {/* Tab 0: Guest Information */}
+          {checkInTabIndex === 0 && (
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Title</InputLabel>
+                  <Select
+                    value={guestUpdateData.title || ''}
+                    onChange={(e) => setGuestUpdateData({ ...guestUpdateData, title: e.target.value })}
+                    label="Title"
+                  >
+                    {titleOptions.map(title => (
+                      <MenuItem key={title} value={title}>{title}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={4.5}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="First Name"
+                  value={guestUpdateData.first_name || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, first_name: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={4.5}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Last Name"
+                  value={guestUpdateData.last_name || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, last_name: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Email"
+                  type="email"
+                  value={guestUpdateData.email || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, email: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Phone"
+                  value={guestUpdateData.phone || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, phone: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="IC/Passport Number"
+                  value={guestUpdateData.ic_number || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, ic_number: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Nationality"
+                  value={guestUpdateData.nationality || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, nationality: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Address"
+                  value={guestUpdateData.address_line1 || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, address_line1: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="City"
+                  value={guestUpdateData.city || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, city: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Country"
+                  value={guestUpdateData.country || ''}
+                  onChange={(e) => setGuestUpdateData({ ...guestUpdateData, country: e.target.value })}
+                />
+              </Grid>
+            </Grid>
+          )}
+
+          {/* Tab 1: Stay Details */}
+          {checkInTabIndex === 1 && (
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Check-in Date"
+                  type="date"
+                  value={createdBooking.check_in_date}
+                  disabled
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Check-out Date"
+                  type="date"
+                  value={createdBooking.check_out_date}
+                  disabled
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Rate Code</InputLabel>
+                  <Select
+                    value={bookingUpdateData.rate_code || 'RACK'}
+                    onChange={(e) => setBookingUpdateData({ ...bookingUpdateData, rate_code: e.target.value })}
+                    label="Rate Code"
+                  >
+                    {rateCodes.length > 0 ? rateCodes.map(code => (
+                      <MenuItem key={code} value={code}>{code}</MenuItem>
+                    )) : (
+                      <MenuItem value="RACK">RACK</MenuItem>
+                    )}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Market Code</InputLabel>
+                  <Select
+                    value={bookingUpdateData.market_code || 'WKII'}
+                    onChange={(e) => setBookingUpdateData({ ...bookingUpdateData, market_code: e.target.value })}
+                    label="Market Code"
+                  >
+                    {marketCodes.length > 0 ? marketCodes.map(code => (
+                      <MenuItem key={code} value={code}>{code}</MenuItem>
+                    )) : (
+                      <MenuItem value="WKII">WKII</MenuItem>
+                    )}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                  <Typography variant="subtitle2" gutterBottom>Room Details</Typography>
+                  <Grid container spacing={1}>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Room:</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2">{room?.room_number} ({room?.room_type})</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Total:</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" fontWeight="bold">{formatCurrency(Number(createdBooking.total_amount))}</Typography>
+                    </Grid>
+                  </Grid>
+                </Paper>
+              </Grid>
+            </Grid>
+          )}
+
+          {/* Tab 2: Payment */}
+          {checkInTabIndex === 2 && (
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Payment Method</InputLabel>
+                  <Select
+                    value={bookingUpdateData.payment_method || 'Cash'}
+                    onChange={(e) => setBookingUpdateData({ ...bookingUpdateData, payment_method: e.target.value })}
+                    label="Payment Method"
+                  >
+                    {paymentMethods.map(method => (
+                      <MenuItem key={method} value={method}>{method}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 2, bgcolor: 'info.50', borderLeft: 4, borderColor: 'info.main' }}>
+                  <Typography variant="body2">
+                    <strong>Folio Number:</strong> {createdBooking.folio_number}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    <strong>Status:</strong> {createdBooking.status.toUpperCase()}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    <strong>Total Amount:</strong> {formatCurrency(Number(createdBooking.total_amount))}
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
+          )}
+        </Box>
+      );
+    }
+
     // Confirm step
     const getModeLabel = () => {
       if (bookingMode === 'direct') return 'Direct Booking';
@@ -807,6 +1400,11 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
       if (reservationType) return RESERVATION_TYPE_CONFIG[reservationType].color;
       return '#1976d2';
     };
+
+    // Confirm step content (shown for both direct booking and reservation modes)
+    if (currentStepName !== 'Confirm') {
+      return null; // Should not reach here
+    }
 
     return (
       <Box>
@@ -987,8 +1585,20 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
   // Get submit button text
   const getSubmitButtonText = () => {
     if (processing) return 'Processing...';
-    if (bookingMode === 'direct') return 'Check In Now';
+    const currentStepName = steps[activeStep];
+    if (bookingMode === 'direct' && currentStepName === 'Check-In') {
+      return 'Complete Check-In';
+    }
     return 'Create Reservation';
+  };
+
+  // Get next button text (for direct booking Confirm step)
+  const getNextButtonText = () => {
+    const currentStepName = steps[activeStep];
+    if (bookingMode === 'direct' && currentStepName === 'Confirm') {
+      return processing ? 'Creating...' : 'Create Booking';
+    }
+    return 'Next';
   };
 
   return (
@@ -1033,7 +1643,7 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
           Cancel
         </Button>
         <Box sx={{ flex: 1 }} />
-        {activeStep > 0 && (
+        {activeStep > 0 && steps[activeStep] !== 'Check-In' && (
           <Button
             onClick={handleBack}
             disabled={processing}
@@ -1046,10 +1656,10 @@ const UnifiedBookingModal: React.FC<UnifiedBookingModalProps> = ({
           <Button
             variant="contained"
             onClick={handleNext}
-            disabled={!canProceed}
-            endIcon={<ArrowForwardIcon />}
+            disabled={!canProceed || processing}
+            endIcon={processing ? <CircularProgress size={20} /> : <ArrowForwardIcon />}
           >
-            Next
+            {getNextButtonText()}
           </Button>
         ) : (
           <Button

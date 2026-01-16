@@ -341,9 +341,9 @@ const RoomsPage: React.FC = () => {
         checkIn.setHours(0, 0, 0, 0);
         checkOut.setHours(0, 0, 0, 0);
 
-        // Occupied if status is checked_in AND dates overlap today
+        // Occupied if status is checked_in or auto_checked_in AND dates overlap today
         return (
-          booking.status === 'checked_in' &&
+          (booking.status === 'checked_in' || booking.status === 'auto_checked_in') &&
           checkIn <= today &&
           checkOut >= today
         );

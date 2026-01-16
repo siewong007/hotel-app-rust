@@ -23,12 +23,9 @@ import {
   CircularProgress,
   Snackbar,
   Box as MuiBox,
-  Autocomplete,
   IconButton,
   Grid,
   FormControl,
-  FormControlLabel,
-  Checkbox,
   InputLabel,
   Select,
   InputAdornment,
@@ -39,12 +36,10 @@ import {
 import {
   Refresh as RefreshIcon,
   EventAvailable as BookIcon,
-  Person as PersonIcon,
   Hotel as HotelIcon,
   Edit as EditIcon,
   CheckCircle as CheckCircleIcon,
   ExitToApp as CheckOutIcon,
-  Delete as DeleteIcon,
   Cancel as CancelIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
@@ -62,6 +57,7 @@ import { useAuth } from '../../../auth/AuthContext';
 import { useCurrency } from '../../../hooks/useCurrency';
 import CheckoutInvoiceModal from '../../invoices/components/CheckoutInvoiceModal';
 import EnhancedCheckInModal from '../../bookings/components/EnhancedCheckInModal';
+import UnifiedBookingModal from '../../rooms/components/UnifiedBookingModal';
 import { getHotelSettings } from '../../../utils/hotelSettings';
 
 type SortField = 'check_in_date' | 'check_out_date' | 'guest_name' | 'room_number' | 'status' | 'folio_number';
@@ -70,7 +66,7 @@ type DateFilter = 'all' | 'today' | 'week' | 'month' | 'custom';
 
 const BookingsPage: React.FC = () => {
   const { hasRole, hasPermission } = useAuth();
-  const { symbol: currencySymbol, format: formatCurrency } = useCurrency();
+  const { format: formatCurrency } = useCurrency();
   const isAdmin = hasRole('admin') || hasRole('receptionist') || hasRole('manager') || hasPermission('bookings:update');
 
   const [bookings, setBookings] = useState<BookingWithDetails[]>([]);
@@ -93,19 +89,8 @@ const BookingsPage: React.FC = () => {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
-  // Create booking dialog
+  // Create booking dialog (using UnifiedBookingModal)
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [selectedGuestId, setSelectedGuestId] = useState<number | null>(null);
-  const [selectedRoomId, setSelectedRoomId] = useState<string>('');
-  const [checkInDate, setCheckInDate] = useState('');
-  const [checkOutDate, setCheckOutDate] = useState('');
-  const [postType, setPostType] = useState<'normal_stay' | 'same_day'>('normal_stay');
-  const [rateCode, setRateCode] = useState('RACK');
-  const [bookingSource, setBookingSource] = useState<string>('walk_in');
-  const [folioNumber, setFolioNumber] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [bookingRemarks, setBookingRemarks] = useState('');
-  const [creating, setCreating] = useState(false);
 
   // Edit booking dialog (admin only)
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -292,41 +277,6 @@ const BookingsPage: React.FC = () => {
     setSortOrder('desc');
   };
 
-  // State for rooms available for selected dates
-  const [availableRoomsForDates, setAvailableRoomsForDates] = useState<Room[]>([]);
-  const [loadingAvailableRooms, setLoadingAvailableRooms] = useState(false);
-
-  // Fetch available rooms when dates change
-  useEffect(() => {
-    const fetchAvailableRooms = async () => {
-      if (checkInDate && checkOutDate && createDialogOpen) {
-        try {
-          setLoadingAvailableRooms(true);
-          const availableRooms = await HotelAPIService.getAvailableRoomsForDates(checkInDate, checkOutDate);
-          setAvailableRoomsForDates(availableRooms);
-          // Clear selected room if it's no longer available
-          if (selectedRoomId && !availableRooms.find(r => String(r.id) === selectedRoomId)) {
-            setSelectedRoomId('');
-          }
-        } catch (err) {
-          console.error('Failed to fetch available rooms:', err);
-          // Fall back to showing all available rooms
-          setAvailableRoomsForDates(rooms.filter(room => room.available));
-        } finally {
-          setLoadingAvailableRooms(false);
-        }
-      } else if (!checkInDate || !checkOutDate) {
-        // Reset to all available rooms when dates are cleared
-        setAvailableRoomsForDates(rooms.filter(room => room.available));
-      }
-    };
-
-    fetchAvailableRooms();
-  }, [checkInDate, checkOutDate, createDialogOpen, rooms]);
-
-  // Use date-filtered rooms if dates are set, otherwise use all available rooms
-  const availableRooms = (checkInDate && checkOutDate) ? availableRoomsForDates : rooms.filter(room => room.available);
-
   const handleEditBooking = (booking: BookingWithDetails) => {
     setEditingBooking(booking);
     setEditFormData({
@@ -498,75 +448,6 @@ const BookingsPage: React.FC = () => {
     }
   };
 
-  const handleCreateBooking = async () => {
-    if (!selectedGuestId || !selectedRoomId || !checkInDate || !checkOutDate) return;
-
-    // Validate dates
-    const checkIn = new Date(checkInDate);
-    const checkOut = new Date(checkOutDate);
-    checkIn.setHours(0, 0, 0, 0);
-    checkOut.setHours(0, 0, 0, 0);
-
-    if (checkOut <= checkIn) {
-      setError('Check-out date must be after check-in date. Please select a check-out date that is at least 1 day after check-in.');
-      return;
-    }
-
-    // For online/agent bookings, folio number is required
-    if ((bookingSource === 'online' || bookingSource === 'agent') && !folioNumber.trim()) {
-      setError('Booking/Folio number is required for online and agent bookings');
-      return;
-    }
-
-    try {
-      setCreating(true);
-      await HotelAPIService.createBooking({
-        guest_id: selectedGuestId,
-        room_id: selectedRoomId,
-        check_in_date: new Date(checkInDate).toISOString(),
-        check_out_date: new Date(checkOutDate).toISOString(),
-        post_type: postType,
-        rate_code: rateCode,
-        source: bookingSource,
-        booking_number: (bookingSource === 'online' || bookingSource === 'agent') ? folioNumber.trim() : undefined,
-        payment_method: paymentMethod || undefined,
-        booking_remarks: bookingRemarks || undefined
-      });
-
-      setSnackbarMessage('Booking created successfully!');
-      setSnackbarOpen(true);
-
-      // Reset form and close dialog
-      resetBookingForm();
-      setCreateDialogOpen(false);
-
-      // Reload data
-      await loadData();
-
-    } catch (err: any) {
-      // Show the actual API error message if available
-      const errorMessage = err?.message || err?.error || 'Failed to create booking';
-      setError(errorMessage);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const resetBookingForm = () => {
-    setSelectedGuestId(null);
-    setSelectedRoomId('');
-    setCheckInDate('');
-    setCheckOutDate('');
-    setPostType('normal_stay');
-    setRateCode('RACK');
-    setBookingSource('walk_in');
-    setFolioNumber('');
-    setPaymentMethod('');
-    setBookingRemarks('');
-  };
-
-  const isFormValid = selectedGuestId && selectedRoomId && checkInDate && checkOutDate;
-
   // Check-in functions
   const handleCheckIn = async (bookingId: string) => {
     try {
@@ -659,10 +540,10 @@ const BookingsPage: React.FC = () => {
       confirmed: confirmedBookings,
       checkedIn: checkedInBookings,
       todayCheckIns,
-      availableRooms: availableRooms.length,
+      availableRooms: rooms.filter(r => r.available).length,
       totalGuests: guests.length,
     };
-  }, [bookings, availableRooms, guests]);
+  }, [bookings, rooms, guests]);
 
   if (loading) {
     return (
@@ -690,7 +571,7 @@ const BookingsPage: React.FC = () => {
             variant="contained"
             startIcon={<BookIcon />}
             onClick={() => setCreateDialogOpen(true)}
-            disabled={availableRooms.length === 0 || guests.length === 0}
+            disabled={rooms.length === 0 || guests.length === 0}
           >
             New Booking
           </Button>
@@ -1183,188 +1064,57 @@ const BookingsPage: React.FC = () => {
         </Box>
       )}
 
-      {/* Create Booking Dialog */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Create New Booking</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {/* Booking Source Toggle */}
-            <TextField
-              select
-              fullWidth
-              label="Channel"
-              value={bookingSource}
-              onChange={(e) => {
-                setBookingSource(e.target.value);
-                if (e.target.value === 'walk_in') {
-                  setFolioNumber(''); // Clear folio for walk-in
-                }
-              }}
-            >
-              <MenuItem value="walk_in">Walk-in</MenuItem>
-              <MenuItem value="phone">Phone Reservation</MenuItem>
-              <MenuItem value="direct">Direct Booking</MenuItem>
-              <MenuItem value="online">Online (OTA)</MenuItem>
-              <MenuItem value="website">Website</MenuItem>
-              <MenuItem value="mobile">Mobile App</MenuItem>
-              <MenuItem value="agent">Travel Agent</MenuItem>
-              <MenuItem value="corporate">Corporate</MenuItem>
-            </TextField>
-
-            {/* Folio/Booking Number - for online/OTA bookings */}
-            {(bookingSource === 'online' || bookingSource === 'agent') && (
-              <TextField
-                fullWidth
-                label="Booking/Folio Number"
-                value={folioNumber}
-                onChange={(e) => setFolioNumber(e.target.value)}
-                placeholder="Enter booking reference..."
-                required
-                helperText={bookingSource === 'online'
-                  ? "Enter the booking reference number from the online travel agent (e.g., Booking.com, Agoda)"
-                  : "Enter the travel agent booking reference"
-                }
-              />
-            )}
-
-            <Autocomplete
-              fullWidth
-              options={guests}
-              getOptionLabel={(option) => `${option.full_name} (${option.email})`}
-              value={guests.find(g => g.id === selectedGuestId) || null}
-              onChange={(event, newValue) => {
-                setSelectedGuestId(newValue?.id || null);
-              }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Select Guest"
-                  placeholder="Search guests..."
-                />
-              )}
-              isOptionEqualToValue={(option, value) => option.id === value.id}
-            />
-
-            <Box display="flex" gap={2}>
-              <TextField
-                fullWidth
-                label="Check-in Date"
-                type="date"
-                value={checkInDate}
-                onChange={(e) => setCheckInDate(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                required
-              />
-              <TextField
-                fullWidth
-                label="Check-out Date"
-                type="date"
-                value={checkOutDate}
-                onChange={(e) => setCheckOutDate(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{ min: checkInDate }}
-                required
-              />
-            </Box>
-
-            <Autocomplete
-              fullWidth
-              options={availableRooms}
-              loading={loadingAvailableRooms}
-              getOptionLabel={(option) => `Room ${option.room_number} - ${option.room_type} (${formatCurrency(Number(option.price_per_night))}/night)`}
-              value={availableRooms.find(r => String(r.id) === selectedRoomId) || null}
-              onChange={(event, newValue) => {
-                setSelectedRoomId(newValue ? String(newValue.id) : '');
-              }}
-              noOptionsText={
-                !checkInDate || !checkOutDate
-                  ? "Select dates first to see available rooms"
-                  : "No rooms available for selected dates"
-              }
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Select Room"
-                  placeholder={checkInDate && checkOutDate ? "Search available rooms..." : "Select dates first..."}
-                  helperText={checkInDate && checkOutDate ? `${availableRooms.length} room(s) available for selected dates` : ""}
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {loadingAvailableRooms ? <CircularProgress color="inherit" size={20} /> : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-              isOptionEqualToValue={(option, value) => option.id === value.id}
-              disabled={!checkInDate || !checkOutDate}
-            />
-
-            <Box display="flex" gap={2}>
-              <TextField
-                select
-                fullWidth
-                label="Post Type"
-                value={postType}
-                onChange={(e) => setPostType(e.target.value as 'normal_stay' | 'same_day')}
-              >
-                <MenuItem value="normal_stay">Normal Stay</MenuItem>
-                <MenuItem value="same_day">Same Day</MenuItem>
-              </TextField>
-
-              <TextField
-                select
-                fullWidth
-                label="Rate Code"
-                value={rateCode}
-                onChange={(e) => setRateCode(e.target.value)}
-              >
-                <MenuItem value="RACK">RACK (Standard Rate)</MenuItem>
-                <MenuItem value="OVR">OVR (Override Rate)</MenuItem>
-              </TextField>
-            </Box>
-
-            <TextField
-              select
-              fullWidth
-              label="Payment Method"
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-            >
-              <MenuItem value="">Not Specified</MenuItem>
-              <MenuItem value="cash">Cash</MenuItem>
-              <MenuItem value="credit_card">Credit Card</MenuItem>
-              <MenuItem value="debit_card">Debit Card</MenuItem>
-              <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
-              <MenuItem value="company_billing">Company Billing</MenuItem>
-              <MenuItem value="online_payment">Online Payment</MenuItem>
-              <MenuItem value="ewallet">E-Wallet</MenuItem>
-            </TextField>
-
-            <TextField
-              fullWidth
-              label="Notes / Remarks"
-              multiline
-              rows={2}
-              value={bookingRemarks}
-              onChange={(e) => setBookingRemarks(e.target.value)}
-              placeholder="Enter any notes or remarks for this booking..."
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleCreateBooking}
-            variant="contained"
-            disabled={creating || !isFormValid}
-          >
-            {creating ? 'Creating...' : 'Create Booking'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Create Booking Modal (Unified) */}
+      <UnifiedBookingModal
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        room={null}
+        rooms={rooms}
+        guests={guests}
+        onSuccess={(message) => {
+          setSnackbarMessage(message);
+          setSnackbarOpen(true);
+        }}
+        onError={(message) => {
+          setError(message);
+        }}
+        onRefreshData={loadData}
+        onBookingCreated={(booking, guest) => {
+          // Direct booking: open Enhanced Check-In modal
+          const selectedRoom = rooms.find(r => r.id === booking.room_id);
+          const bookingWithDetails: BookingWithDetails = {
+            id: booking.id,
+            booking_number: booking.folio_number || '',
+            folio_number: booking.folio_number,
+            guest_id: String(guest.id),
+            guest_name: guest.full_name,
+            guest_email: guest.email || '',
+            guest_type: guest.guest_type,
+            room_id: booking.room_id,
+            room_number: selectedRoom?.room_number || '',
+            room_type: selectedRoom?.room_type || booking.room_type || '',
+            room_type_code: '',
+            check_in_date: booking.check_in_date,
+            check_out_date: booking.check_out_date,
+            price_per_night: selectedRoom?.price_per_night || 0,
+            total_amount: booking.total_amount,
+            status: booking.status,
+            payment_status: 'unpaid',
+            payment_method: booking.payment_method,
+            source: 'walk_in',
+            remarks: '',
+            is_complimentary: false,
+            deposit_paid: false,
+            deposit_amount: 0,
+            room_card_deposit: 0,
+            created_at: booking.created_at,
+            is_posted: false,
+          };
+          setCheckinBooking(bookingWithDetails);
+          setCheckinGuest(guest);
+          setShowCheckinModal(true);
+        }}
+      />
 
       {/* Edit Booking Dialog (Admin Only) */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="md" fullWidth>
