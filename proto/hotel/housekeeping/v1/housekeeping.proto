@@ -68,8 +68,9 @@ message HousekeepingTask {
   google.protobuf.Timestamp completed_at = 13;
   string notes = 14;
   string inspection_notes = 15;
-  // Free-form JSON today (supplies consumed); Struct preserves the shape.
-  google.protobuf.Struct items_used = 16;
+  // Free-form JSON today (supplies consumed); Value preserves any JSON shape
+  // including the bare arrays Struct cannot represent.
+  google.protobuf.Value items_used = 16;
   google.protobuf.Timestamp created_at = 17;
   // "users/{user}".
   string created_by = 18;

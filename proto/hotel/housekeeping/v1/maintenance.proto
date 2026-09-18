@@ -71,8 +71,9 @@ message MaintenanceTicket {
   google.protobuf.Timestamp started_at = 18;
   google.protobuf.Timestamp resolved_at = 19;
   string resolution_notes = 20;
-  // Free-form JSON array today; Struct preserves the shape.
-  google.protobuf.Struct images = 21;
+  // Free-form JSON array today; Value preserves any JSON shape including the
+  // bare arrays Struct cannot represent.
+  google.protobuf.Value images = 21;
   google.protobuf.Timestamp created_at = 22;
   google.protobuf.Timestamp updated_at = 23;
 }

@@ -27,6 +27,9 @@ enum RoomStatus {
   // Write-only alias for ROOM_STATUS_AVAILABLE ("clean" in the REST API).
   // Never a stored value; the service layer maps it on input.
   ROOM_STATUS_CLEAN = 8;
+  // Stored value the REST update-status input rejects — only DB triggers /
+  // transitions produce it, so it is output-only in practice.
+  ROOM_STATUS_OUT_OF_ORDER = 9;
 }
 
 // Room resource. Merges the REST `Room` and `RoomWithRating` shapes: the
