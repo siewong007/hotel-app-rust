@@ -1,0 +1,123 @@
+name: grace-ride-once
+
+# Manual one-shot. Does not build or deploy the hotel app.
+# Remove this file after the Grace Ride image roll succeeds.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Roll Grace Ride app image
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          GRACE_GH_TOKEN: ${{ secrets.GRACE_GH_TOKEN }}
+          VPS_HOST: 162.19.81.122
+          VPS_PORT: "20049"
+          VPS_USER: root
+          VPS_HOST_KEY: "[162.19.81.122]:20049 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIxenH95jfg3hxfkumJpZJyV7phwCNDrXrAL0wUXnta9"
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_PRIVATE_KEY"
+          test -n "$GRACE_GH_TOKEN"
+          install -m 0600 /dev/null "$RUNNER_TEMP/vps-key"
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/vps-key"
+          install -m 0600 /dev/null "$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$VPS_HOST_KEY" > "$RUNNER_TEMP/known_hosts"
+          ssh-keygen -lf "$RUNNER_TEMP/known_hosts" | grep -Fq 'SHA256:HV6OszvuYmwmWRLEY7z7jm8GojWZJppJlDBHIhJVUxw'
+          SSH=(ssh -i "$RUNNER_TEMP/vps-key" -p "$VPS_PORT" -o BatchMode=yes -o ConnectTimeout=20
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts"
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20)
+          SCP=(scp -i "$RUNNER_TEMP/vps-key" -P "$VPS_PORT" -o BatchMode=yes -o ConnectTimeout=20
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts")
+
+          GH_TOKEN="$GRACE_GH_TOKEN" gh release download 20261109b \
+            -R siewong007/grace-ride-deploy \
+            -p 'grace-ride-20261109b.tar.gz' \
+            -D "$RUNNER_TEMP"
+          echo "35a76e4f7a5eac69ded5996a24f94aea172225a1ff971a454bfddba9d02325ad  $RUNNER_TEMP/grace-ride-20261109b.tar.gz" | sha256sum -c -
+
+          "${SCP[@]}" "$RUNNER_TEMP/grace-ride-20261109b.tar.gz" "$VPS_USER@$VPS_HOST:/tmp/grace-ride-20261109b.tar.gz"
+
+          "${SSH[@]}" "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          avail=$(df -B1 --output=avail / | tail -1)
+          test "$avail" -gt 800000000
+          test -f /opt/grace-ride/docker-compose.aic.yml
+          test -f /opt/grace-ride/secrets.env
+          grep -Fq 'https://graceride.saliminn.my' /opt/grace-ride/docker-compose.aic.yml
+          docker load -i /tmp/grace-ride-20261109b.tar.gz
+          rm -f /tmp/grace-ride-20261109b.tar.gz
+          docker image inspect grace-ride:20261109b >/dev/null
+          if grep -q '^IMAGE_TAG=' /opt/grace-ride/secrets.env; then
+            sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=20261109b/' /opt/grace-ride/secrets.env
+          else
+            printf '\nIMAGE_TAG=20261109b\n' >> /opt/grace-ride/secrets.env
+          fi
+          chmod 0600 /opt/grace-ride/secrets.env
+          grep -E '^IMAGE_TAG=' /opt/grace-ride/secrets.env
+          cd /opt/grace-ride
+          rollback() {
+            sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=20261109/' /opt/grace-ride/secrets.env
+            chmod 0600 /opt/grace-ride/secrets.env
+            docker compose --env-file /opt/grace-ride/secrets.env -f /opt/grace-ride/docker-compose.aic.yml up -d || true
+          }
+          if ! docker compose --env-file /opt/grace-ride/secrets.env -f /opt/grace-ride/docker-compose.aic.yml up -d; then
+            rollback
+            exit 1
+          fi
+          ok=0
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8090/api/health >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          if [[ "$ok" != 1 ]]; then
+            rollback
+            docker logs grace-ride 2>&1 | grep -v -e 'one-time' -e '/invite/' | tail -40 >&2 || true
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:8090/api/health
+          echo
+          html=$(curl -fsS -H 'Cache-Control: no-cache' http://127.0.0.1:8090/)
+          printf '%s\n' "$html" | grep -F 'index-Ej3exr_Y.js' >/dev/null
+          echo "origin serves index-Ej3exr_Y.js"
+          if ! docker ps -a --filter ancestor=grace-ride:20261109 -q | grep -q .; then
+            docker image rm grace-ride:20261109 >/dev/null || true
+          fi
+          docker ps --filter name=grace-ride --format '{{.Names}} {{.Image}} {{.Status}}'
+          REMOTE
+
+          asset_ok=0
+          for _ in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/grace-health.txt -w '%{http_code}' --max-time 20 https://graceride.saliminn.my/api/health || true)
+            echo "public health $code"
+            if [[ "$code" == 200 ]] && curl -fsS -H 'Cache-Control: no-cache' --max-time 20 https://graceride.saliminn.my/ | grep -F 'index-Ej3exr_Y.js' >/dev/null; then
+              cat /tmp/grace-health.txt
+              echo
+              echo "public html serves index-Ej3exr_Y.js"
+              asset_ok=1
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$asset_ok" != 1 ]]; then
+            echo "public site did not serve the new bundle" >&2
+            exit 1
+          fi
+          for pair in "https://saliminn.my/health hotel" "https://ekowayhardware.com/ shop" "https://payrollmy.com/login payroll"; do
+            set -- $pair
+            c=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$1" || true)
+            echo "$2 $c"
+            test "$c" = "200"
+          done
