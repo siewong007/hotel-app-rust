@@ -1,0 +1,259 @@
+name: grace-ride-once
+
+# Manual one-shot. Does not build or deploy the hotel app.
+# Remove this file after the Grace Ride ship succeeds.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Load image and start Grace Ride
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          GRACE_GH_TOKEN: ${{ secrets.GRACE_GH_TOKEN }}
+          VPS_HOST: 162.19.81.122
+          VPS_PORT: "20049"
+          VPS_USER: root
+          VPS_HOST_KEY: "[162.19.81.122]:20049 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIxenH95jfg3hxfkumJpZJyV7phwCNDrXrAL0wUXnta9"
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_PRIVATE_KEY"
+          test -n "$GRACE_GH_TOKEN"
+          install -m 0600 /dev/null "$RUNNER_TEMP/vps-key"
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/vps-key"
+          install -m 0600 /dev/null "$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$VPS_HOST_KEY" > "$RUNNER_TEMP/known_hosts"
+          ssh-keygen -lf "$RUNNER_TEMP/known_hosts" | grep -Fq 'SHA256:HV6OszvuYmwmWRLEY7z7jm8GojWZJppJlDBHIhJVUxw'
+          SSH=(ssh -i "$RUNNER_TEMP/vps-key" -p "$VPS_PORT" -o BatchMode=yes -o ConnectTimeout=20
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts"
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20)
+          SCP=(scp -i "$RUNNER_TEMP/vps-key" -P "$VPS_PORT" -o BatchMode=yes -o ConnectTimeout=20
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts")
+
+          GH_TOKEN="$GRACE_GH_TOKEN" gh release download 20261109 \
+            -R siewong007/grace-ride-deploy \
+            -p 'grace-ride-20261109.tar.gz' \
+            -D "$RUNNER_TEMP"
+          echo "51024d400e864f27124c6ec573aff7032dffdaf870a4c48a8f0c9ec79b64a507  $RUNNER_TEMP/grace-ride-20261109.tar.gz" | sha256sum -c -
+
+          install -d "$RUNNER_TEMP/grace"
+          cat > "$RUNNER_TEMP/grace/docker-compose.aic.yml" <<'YAML'
+          name: grace-ride
+
+          x-logging: &default-logging
+            driver: json-file
+            options:
+              max-size: "10m"
+              max-file: "3"
+
+          services:
+            db:
+              image: postgres:18-alpine
+              container_name: grace-ride-db
+              restart: unless-stopped
+              command:
+                - postgres
+                - -c
+                - max_connections=20
+                - -c
+                - shared_buffers=32MB
+                - -c
+                - work_mem=2MB
+                - -c
+                - maintenance_work_mem=16MB
+                - -c
+                - max_parallel_workers=1
+              environment:
+                POSTGRES_USER: grace
+                POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+                POSTGRES_DB: grace_ride
+              volumes:
+                - pg-data:/var/lib/postgresql
+              shm_size: 64mb
+              mem_limit: 160m
+              cpus: 0.25
+              pids_limit: 256
+              security_opt:
+                - no-new-privileges:true
+              stop_grace_period: 60s
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U grace -d grace_ride"]
+                interval: 10s
+                timeout: 5s
+                retries: 12
+                start_period: 20s
+              logging: *default-logging
+              networks:
+                - database
+
+            app:
+              image: "grace-ride:${IMAGE_TAG:?IMAGE_TAG is required}"
+              container_name: grace-ride
+              restart: unless-stopped
+              init: true
+              depends_on:
+                db:
+                  condition: service_healthy
+              ports:
+                - "127.0.0.1:8090:8080"
+              environment:
+                DATABASE_URL: "postgres://grace:${POSTGRES_PASSWORD}@db/grace_ride"
+                PUBLIC_URL: https://graceride.sponsor.saliminn.my
+                ADMIN_EMAIL: "${ADMIN_EMAIL:?ADMIN_EMAIL is required}"
+                DEV_MODE: "false"
+                TRUST_PROXY: "true"
+                LOG_FORMAT: json
+                BIND: "0.0.0.0:8080"
+                UPLOAD_DIR: /data/uploads
+                STATIC_DIR: /app/web
+                TZ: Asia/Kuala_Lumpur
+                MAX_LIVE_DRIVERS: "10"
+                CHAT_RETENTION_DAYS: "180"
+                AUDIT_RETENTION_DAYS: "730"
+                RUST_LOG: grace_ride=info,tower_http=warn
+              volumes:
+                - app-data:/data
+              read_only: true
+              tmpfs:
+                - /tmp
+              cap_drop:
+                - ALL
+              security_opt:
+                - no-new-privileges:true
+              mem_limit: 256m
+              cpus: 0.40
+              pids_limit: 512
+              stop_grace_period: 20s
+              logging: *default-logging
+              networks:
+                - database
+
+          networks:
+            database:
+
+          volumes:
+            pg-data:
+            app-data:
+          YAML
+
+          cat > "$RUNNER_TEMP/grace/graceride.Caddyfile" <<'CADDY'
+          graceride.sponsor.saliminn.my {
+          	tls internal
+          	encode zstd gzip
+          	header -Server
+          	header ?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+          	request_body {
+          		max_size 12MB
+          	}
+          	reverse_proxy 127.0.0.1:8090 {
+          		header_up X-Forwarded-For {client_ip}
+          	}
+          }
+          CADDY
+
+          "${SCP[@]}" \
+            "$RUNNER_TEMP/grace-ride-20261109.tar.gz" \
+            "$RUNNER_TEMP/grace/docker-compose.aic.yml" \
+            "$RUNNER_TEMP/grace/graceride.Caddyfile" \
+            "$VPS_USER@$VPS_HOST:/tmp/"
+
+          "${SSH[@]}" "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          avail=$(df -B1 --output=avail / | tail -1)
+          test "$avail" -gt 1500000000
+          if ss -lnt | awk '{print $4}' | grep -qx '127.0.0.1:8090'; then
+            if ! docker ps --format '{{.Names}}' | grep -qx grace-ride; then
+              echo "port 8090 is already in use" >&2
+              exit 1
+            fi
+          fi
+          install -d -m 0750 /opt/grace-ride
+          install -m 0644 /tmp/docker-compose.aic.yml /opt/grace-ride/docker-compose.aic.yml
+          install -m 0644 /tmp/graceride.Caddyfile /opt/grace-ride/graceride.Caddyfile
+          rm -f /tmp/docker-compose.aic.yml /tmp/graceride.Caddyfile
+          if [[ ! -f /opt/grace-ride/secrets.env ]]; then
+            pw=$(openssl rand -hex 32)
+            printf 'POSTGRES_PASSWORD=%s\nADMIN_EMAIL=%s\nIMAGE_TAG=%s\n' \
+              "$pw" "admin@pjstatecmc.org" "20261109" > /opt/grace-ride/secrets.env
+            chmod 0600 /opt/grace-ride/secrets.env
+          fi
+          docker load -i /tmp/grace-ride-20261109.tar.gz
+          rm -f /tmp/grace-ride-20261109.tar.gz
+          docker image inspect grace-ride:20261109 >/dev/null
+          cd /opt/grace-ride
+          docker compose --env-file /opt/grace-ride/secrets.env -f /opt/grace-ride/docker-compose.aic.yml up -d
+          ok=0
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8090/api/health >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          docker logs grace-ride > /tmp/grace-ride-boot.log 2>&1 || true
+          grep -F 'one-time link' /tmp/grace-ride-boot.log > /opt/grace-ride/setup-link.txt || true
+          chmod 0600 /opt/grace-ride/setup-link.txt
+          rm -f /tmp/grace-ride-boot.log
+          if [[ "$ok" != 1 ]]; then
+            docker compose -f /opt/grace-ride/docker-compose.aic.yml ps >&2 || true
+            docker logs grace-ride 2>&1 | grep -v -e 'one-time' -e '/invite/' | tail -50 >&2 || true
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:8090/api/health
+          echo
+          main_backup=$(mktemp /opt/grace-ride/.Caddyfile.XXXXXX)
+          cp -p /etc/caddy/Caddyfile "$main_backup"
+          site_backup=""
+          if [[ -f /etc/caddy/graceride.Caddyfile ]]; then
+            site_backup=$(mktemp /opt/grace-ride/.graceride.Caddyfile.XXXXXX)
+            cp -p /etc/caddy/graceride.Caddyfile "$site_backup"
+          fi
+          install -m 0644 /opt/grace-ride/graceride.Caddyfile /etc/caddy/graceride.Caddyfile
+          if ! grep -Fqx 'import /etc/caddy/graceride.Caddyfile' /etc/caddy/Caddyfile; then
+            printf '\n# Grace Ride (managed beside the other AIC sites)\nimport /etc/caddy/graceride.Caddyfile\n' >> /etc/caddy/Caddyfile
+          fi
+          if ! caddy validate --config /etc/caddy/Caddyfile; then
+            cp -p "$main_backup" /etc/caddy/Caddyfile
+            if [[ -n "$site_backup" ]]; then
+              cp -p "$site_backup" /etc/caddy/graceride.Caddyfile
+            else
+              rm -f /etc/caddy/graceride.Caddyfile
+            fi
+            exit 1
+          fi
+          if ! systemctl reload caddy; then
+            cp -p "$main_backup" /etc/caddy/Caddyfile
+            if [[ -n "$site_backup" ]]; then
+              cp -p "$site_backup" /etc/caddy/graceride.Caddyfile
+            else
+              rm -f /etc/caddy/graceride.Caddyfile
+            fi
+            systemctl reload caddy || true
+            exit 1
+          fi
+          rm -f "$main_backup"
+          [[ -z "$site_backup" ]] || rm -f "$site_backup"
+          echo "caddy reloaded"
+          REMOTE
+
+          for _ in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/grace-health.txt -w '%{http_code}' --max-time 20 https://graceride.sponsor.saliminn.my/api/health || true)
+            echo "public health $code"
+            if [[ "$code" == 200 ]]; then
+              cat /tmp/grace-health.txt
+              echo
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "public health did not return 200" >&2
+          exit 1
