@@ -173,8 +173,9 @@ impl BookingGroupRepository {
         Ok(())
     }
 
-    /// Recompute the group's totals, room count, payment status and status
-    /// from its non-voided members. Call after any member changes (create,
+    /// Recompute the group's totals, room count, stay dates (earliest
+    /// check-in, latest check-out), payment status and status from its
+    /// non-voided members (a fully voided group keeps its last dates). Call after any member changes (create,
     /// single-room cancel, payment) inside the same transaction.
     pub async fn refresh_totals_tx(
         tx: &mut DbTransaction<'_>,
@@ -206,6 +207,8 @@ impl BookingGroupRepository {
                 tax_amount = s.tax_amount,
                 tourism_tax_amount = s.tourism_tax_amount,
                 total_amount = s.total_amount,
+                check_in_date = COALESCE(s.check_in_date, g.check_in_date),
+                check_out_date = COALESCE(s.check_out_date, g.check_out_date),
                 payment_status = $2,
                 status = $3,
                 updated_at = CURRENT_TIMESTAMP
@@ -215,7 +218,9 @@ impl BookingGroupRepository {
                        COALESCE(SUM(discount_amount), 0) AS discount_amount,
                        COALESCE(SUM(tax_amount), 0) AS tax_amount,
                        COALESCE(SUM(tourism_tax_amount), 0) AS tourism_tax_amount,
-                       COALESCE(SUM(total_amount), 0) AS total_amount
+                       COALESCE(SUM(total_amount), 0) AS total_amount,
+                       MIN(check_in_date) AS check_in_date,
+                       MAX(check_out_date) AS check_out_date
                 FROM bookings WHERE booking_group_id = $1 AND status <> 'voided'
             ) s
             WHERE g.id = $1

@@ -2316,6 +2316,13 @@ pub async fn update_booking_handler(
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
 
+    // A room of a multi-room booking changed (dates, rate, status): keep the
+    // group's dates and totals in step with its rooms.
+    crate::modules::booking_groups::repository::BookingGroupRepository::refresh_for_booking_tx(
+        &mut tx, booking_id,
+    )
+    .await?;
+
     tx.commit().await.map_err(ApiError::from)?;
 
     // ------------------------------------------------------------------

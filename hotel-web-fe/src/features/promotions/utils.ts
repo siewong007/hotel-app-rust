@@ -1,4 +1,5 @@
 import { formatStatusLabel } from '../../utils/formatters';
+import { getCurrentCurrency } from '../../utils/currency';
 import { dateFormatter, formatNumber, type UseTranslationResult } from '../../i18n';
 import type {
   Promotion,
@@ -152,4 +153,14 @@ export function guestDisplayName(
  *  (e.g. a fresh issue response). */
 export function voucherCodeLabel(voucher: Voucher): string {
   return voucher.code_masked ?? voucher.code ?? `#${voucher.id}`;
+}
+
+/**
+ * Currency for the promotion editor: an existing promotion keeps its own, a
+ * new one starts in the hotel's currency (vouchers only apply to stays priced
+ * in the promotion's currency, so a hard-coded USD made them unusable).
+ */
+export function promotionCurrency(promotion?: Pick<Promotion, 'currency'> | null): string {
+  if (promotion?.currency) return promotion.currency;
+  return getCurrentCurrency().trim().toUpperCase();
 }

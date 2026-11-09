@@ -6937,11 +6937,11 @@ ALTER TABLE ONLY public.voucher_redemption_allocations
 
 
 --
--- Name: voucher_redemption_allocations voucher_redemption_allocations_redemption_id_stay_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: voucher_redemption_allocations voucher_redemption_allocations_redemption_booking_night_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.voucher_redemption_allocations
-    ADD CONSTRAINT voucher_redemption_allocations_redemption_id_stay_date_key UNIQUE (redemption_id, stay_date);
+    ADD CONSTRAINT voucher_redemption_allocations_redemption_booking_night_key UNIQUE (redemption_id, booking_id, stay_date);
 
 
 --

@@ -31,7 +31,7 @@ import {
 } from "../constants";
 import { useTargetingOptions } from "../hooks/usePromotionAdmin";
 import type { Promotion, PromotionInput } from "../types";
-import { discountValueLabel, slugifyPromotionName } from "../utils";
+import { discountValueLabel, promotionCurrency, slugifyPromotionName } from "../utils";
 import { useResetOnChange } from '../../../hooks/useResetOnChange';
 
 interface PromotionEditorDialogProps {
@@ -132,7 +132,9 @@ function initialEditorState(promotion?: Promotion | null): EditorState {
       input.max_discount_amount === undefined
         ? ""
         : String(input.max_discount_amount),
-    currency: input.currency,
+    // A new promotion is priced in the hotel's own currency: vouchers only
+    // apply to stays in the promotion's currency.
+    currency: promotionCurrency(promotion),
     claimStartsAt: toLocalDateTime(input.claim_starts_at),
     claimEndsAt: toLocalDateTime(input.claim_ends_at),
     stayStartsOn: input.stay_starts_on?.slice(0, 10) ?? "",
@@ -215,7 +217,7 @@ export function PromotionEditorDialog({
       discount_type: form.discountType,
       discount_value: discountValue,
       max_discount_amount: nullableNumber(form.maxDiscountAmount),
-      currency: form.currency.trim().toUpperCase() || "USD",
+      currency: form.currency.trim().toUpperCase() || promotionCurrency(null),
       claim_starts_at: toIsoDateTime(form.claimStartsAt),
       claim_ends_at: toIsoDateTime(form.claimEndsAt),
       stay_starts_on: form.stayStartsOn || null,

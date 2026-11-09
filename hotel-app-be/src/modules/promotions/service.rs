@@ -501,6 +501,30 @@ pub async fn get_admin_promotion(pool: &DbPool, promotion_id: i64) -> Result<Pro
     updated_promotion(pool, promotion_id).await
 }
 
+/// A promotion saved without a currency takes the hotel's own currency
+/// (`system_settings.currency`, MYR when unset), never a hard-coded USD:
+/// vouchers only apply to stays priced in the promotion's currency.
+async fn with_hotel_currency(pool: &DbPool, mut input: PromotionInput) -> PromotionInput {
+    if input
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(str::is_empty)
+    {
+        input.currency = Some(hotel_currency(pool).await);
+    }
+    input
+}
+
+async fn hotel_currency(pool: &DbPool) -> String {
+    crate::modules::settings::service::get_setting_value(pool, "currency")
+        .await
+        .ok()
+        .map(|value| value.trim().to_ascii_uppercase())
+        .filter(|value| value.len() == 3)
+        .unwrap_or_else(|| "MYR".to_string())
+}
+
 pub async fn create_admin_promotion(
     pool: &DbPool,
     actor_id: i64,
@@ -508,6 +532,7 @@ pub async fn create_admin_promotion(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) -> Result<Promotion, ApiError> {
+    let input = with_hotel_currency(pool, input).await;
     let draft = validation::validate_promotion_input(input)?;
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let promotion_id = PromotionRepository::insert_promotion(&mut tx, &draft, actor_id).await?;
@@ -543,6 +568,7 @@ pub async fn update_admin_promotion(
     user_agent: Option<String>,
 ) -> Result<Promotion, ApiError> {
     let expected_version = input.expected_version;
+    let input = with_hotel_currency(pool, input).await;
     let draft = validation::validate_promotion_input(input)?;
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let existing = PromotionRepository::find_by_id_tx(&mut tx, promotion_id)

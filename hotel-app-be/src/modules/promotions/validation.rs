@@ -280,7 +280,12 @@ pub fn validate_promotion_input(input: PromotionInput) -> Result<PromotionDraft,
             "Promotion date windows are invalid".to_string(),
         ));
     }
-    let currency = input.currency.unwrap_or_else(|| "USD".to_string());
+    // The service fills a missing currency with the hotel's; MYR is only the
+    // fallback for callers that skip it.
+    let currency = input
+        .currency
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "MYR".to_string());
     let currency = currency.trim().to_ascii_uppercase();
     if currency.len() != 3
         || !currency

@@ -543,11 +543,23 @@ impl GuestBookingRepository {
         check_out: NaiveDate,
         occupancy: i32,
     ) -> Result<RoomTypeInventory, ApiError> {
-        Self::list_inventory(pool, check_in, check_out, occupancy)
+        if let Some(found) = Self::list_inventory(pool, check_in, check_out, occupancy)
             .await?
             .into_iter()
             .find(|room_type| room_type.id == room_type_id)
-            .ok_or_else(|| ApiError::Conflict("This room type is no longer available".to_string()))
+        {
+            return Ok(found);
+        }
+        // Not listed: tell a room that is too small for the party apart from
+        // one that is sold out, so the guest knows to pick a bigger room.
+        let max_occupancy: Option<i32> = sqlx::query_scalar(
+            "SELECT max_occupancy FROM room_types WHERE id = $1 AND is_active = true",
+        )
+        .bind(room_type_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(ApiError::from)?;
+        Err(room_unavailable_error(max_occupancy, occupancy))
     }
 
     pub async fn eligible_voucher(
@@ -1120,5 +1132,45 @@ impl GuestBookingRepository {
         .await
         .map_err(ApiError::from)?;
         Ok(())
+    }
+}
+
+/// Why a room type is missing from the inventory for a stay: too small for
+/// the party (`max_occupancy < occupancy`) or simply no longer available.
+pub fn room_unavailable_error(max_occupancy: Option<i32>, occupancy: i32) -> ApiError {
+    match max_occupancy {
+        Some(max) if max < occupancy => ApiError::BadRequest(format!(
+            "This room is too small for {occupancy} guests: it fits at most {max}. \
+             Choose a larger room or add another room."
+        )),
+        _ => ApiError::Conflict("This room type is no longer available".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod room_unavailable_error_tests {
+    use super::*;
+
+    #[test]
+    fn too_small_room_says_so() {
+        match room_unavailable_error(Some(2), 4) {
+            ApiError::BadRequest(message) => {
+                assert!(message.contains("too small for 4 guests"), "{message}");
+                assert!(message.contains("at most 2"), "{message}");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sold_out_or_unknown_room_stays_unavailable() {
+        for (max, occupancy) in [(Some(4), 2), (Some(2), 2), (None, 3)] {
+            match room_unavailable_error(max, occupancy) {
+                ApiError::Conflict(message) => {
+                    assert_eq!(message, "This room type is no longer available")
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
     }
 }

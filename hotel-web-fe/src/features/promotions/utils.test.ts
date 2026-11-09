@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { getActiveLocale } from '../../i18n/localeStore';
 import { t, translateOr } from '../../i18n';
 import type { Promotion, Voucher } from './types';
@@ -6,6 +6,7 @@ import {
   formatCurrencyAmount,
   guestDisplayName,
   promotionClaimIssue,
+  promotionCurrency,
   relativeExpiryLabel,
   voucherDisplayStatus,
   voucherSourceLabel,
@@ -141,5 +142,27 @@ describe('guestDisplayName', () => {
 describe('formatCurrencyAmount', () => {
   it('formats with the given currency', () => {
     expect(formatCurrencyAmount(1234.5, 'USD')).toContain('1,234');
+  });
+});
+
+describe('promotionCurrency', () => {
+  afterEach(() => {
+    localStorage.removeItem('hotelCurrency');
+    localStorage.removeItem('hotelSettings');
+  });
+
+  it('starts a new promotion in the hotel currency, not USD', () => {
+    localStorage.setItem('hotelSettings', JSON.stringify({ currency: 'MYR' }));
+    expect(promotionCurrency(null)).toBe('MYR');
+    expect(promotionCurrency(undefined)).toBe('MYR');
+  });
+
+  it('defaults to MYR when the hotel has no saved settings', () => {
+    expect(promotionCurrency(null)).toBe('MYR');
+  });
+
+  it('keeps an existing promotion currency', () => {
+    localStorage.setItem('hotelSettings', JSON.stringify({ currency: 'MYR' }));
+    expect(promotionCurrency({ currency: 'SGD' })).toBe('SGD');
   });
 });
