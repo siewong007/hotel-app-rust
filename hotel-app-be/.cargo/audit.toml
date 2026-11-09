@@ -35,4 +35,15 @@ ignore = [
     # jsonwebtoken moves. The EC paths are unreachable: the app only uses HMAC
     # and RS256 JWTs, never ES256/ES384. Re-evaluate on every jsonwebtoken bump.
     "RUSTSEC-2026-0387",
+
+    # RUSTSEC-2026-0459 — libsqlite3-sys via C SQLite CVE-2026-119375.
+    # Fix is libsqlite3-sys >=0.39.0. The crate is pulled into Cargo.lock only
+    # via sqlx's optional `sqlite` backend (sqlx-sqlite), which this project
+    # never enables (PostgreSQL feature only). `cargo tree -i libsqlite3-sys
+    # --target all --all-features` prints "nothing to print", confirming it is
+    # absent from the compiled dependency graph, so the CVE is not reachable
+    # in any artifact we ship. cargo audit reads Cargo.lock rather than the
+    # build graph, which is why it fires. Re-evaluate if a SQLite backend is
+    # ever enabled or sqlx drops the lockfile edge.
+    "RUSTSEC-2026-0459",
 ]
