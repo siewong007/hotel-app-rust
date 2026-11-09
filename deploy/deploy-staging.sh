@@ -704,10 +704,6 @@ staging.saliminn.my {
         reverse_proxy 127.0.0.1:8083
     }
 }
-
-www.staging.saliminn.my {
-    redir https://staging.saliminn.my{uri} permanent
-}
 CADDY
 
   # Bake host-local basic-auth hash into the generated site file (never from git).
