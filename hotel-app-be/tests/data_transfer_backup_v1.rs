@@ -1830,8 +1830,8 @@ impl AuthFixture {
             .expect("auth test database must connect");
 
         Self::cleanup(&pool).await;
-        // Three actors: an admin (blanket `data_transfer:*` grants through the
-        // role), a `settings:manage` holder with no data-transfer permission —
+        // Three actors: a manager (blanket `data_transfer:*` grants through the
+        // role; `admin` lost them in patch 0031), a `settings:manage` holder with no data-transfer permission —
         // the assertion that the legacy gate no longer opens this surface —
         // and a login with no roles at all.
         Self::upsert_actor(&pool, ADMIN_ACTOR_ID, "dt_backup_admin", true).await;
@@ -1839,7 +1839,7 @@ impl AuthFixture {
         Self::upsert_actor(&pool, PLAIN_ACTOR_ID, "dt_backup_plain", false).await;
         sqlx::query(
             "INSERT INTO user_roles (user_id, role_id) \
-             SELECT $1, id FROM roles WHERE name = 'admin' \
+             SELECT $1, id FROM roles WHERE name = 'manager' \
              ON CONFLICT (user_id, role_id) DO NOTHING",
         )
         .bind(ADMIN_ACTOR_ID)
@@ -1859,7 +1859,7 @@ impl AuthFixture {
         .expect("permission grant must insert");
         core::rbac_cache::clear_all();
 
-        let admin_auth = Self::bearer(&pool, ADMIN_ACTOR_ID, "dt_backup_admin", "admin").await;
+        let admin_auth = Self::bearer(&pool, ADMIN_ACTOR_ID, "dt_backup_admin", "manager").await;
         let privileged_auth =
             Self::bearer(&pool, PRIVILEGED_ACTOR_ID, "dt_backup_privileged", "admin").await;
         let plain_auth = Self::bearer(&pool, PLAIN_ACTOR_ID, "dt_backup_plain", "staff").await;

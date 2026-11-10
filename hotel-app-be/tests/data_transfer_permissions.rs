@@ -124,15 +124,18 @@ impl Fixture {
         ] {
             Self::upsert_actor(&pool, id, username).await;
         }
+        // Data transfer belongs to `manager` since patch 0031; the `admin`
+        // role no longer holds any `data_transfer:*` permission. The
+        // fixture's "admin" actor is therefore a manager.
         sqlx::query(
             "INSERT INTO user_roles (user_id, role_id) \
-             SELECT $1, id FROM roles WHERE name = 'admin' \
+             SELECT $1, id FROM roles WHERE name = 'manager' \
              ON CONFLICT (user_id, role_id) DO NOTHING",
         )
         .bind(ADMIN_ID)
         .execute(&pool)
         .await
-        .expect("admin role grant must insert");
+        .expect("manager role grant must insert");
         // Granular grants resolve only through roles (`effective_roles` →
         // `role_permissions`); `user_permissions` is not consulted. Each
         // grantable worker gets its own empty fixture role the tests fill in.
@@ -173,7 +176,7 @@ impl Fixture {
 
         let mut sessions = HashMap::new();
         for (id, username, role) in [
-            (ADMIN_ID, "dt_perms_admin", "admin"),
+            (ADMIN_ID, "dt_perms_admin", "manager"),
             (PLAIN_ID, "dt_perms_plain", "staff"),
             (WORKER_ID, "dt_perms_worker", "staff"),
             (OTHER_ID, "dt_perms_other", "staff"),

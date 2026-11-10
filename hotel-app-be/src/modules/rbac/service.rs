@@ -819,6 +819,16 @@ pub(crate) async fn ensure_actor_can_manage_user(
     actor_user_id: i64,
     target_user_id: i64,
 ) -> Result<(), ApiError> {
+    // A super-admin account sits above every role, whatever it is assigned
+    // (the System Administrator account holds only `admin`), so the
+    // role-priority guard alone would let a manager edit, suspend or reset it.
+    if crate::core::middleware::is_super_admin(pool, target_user_id).await?
+        && !crate::core::middleware::is_super_admin(pool, actor_user_id).await?
+    {
+        return Err(ApiError::Forbidden(
+            "Only a super administrator can manage a super administrator account".to_string(),
+        ));
+    }
     let target_role_ids = RbacRepository::user_role_ids(pool, target_user_id).await?;
     ensure_actor_can_manage_roles(pool, actor_user_id, &target_role_ids).await
 }
