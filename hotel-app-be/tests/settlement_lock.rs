@@ -10,8 +10,10 @@
 use hotel_app_be::core::error::ApiError;
 use hotel_app_be::models::{RecordPaymentRequest, UpdatePaymentRequest};
 use hotel_app_be::modules::bookings::queries::{GET_BOOKING_BY_ID_QUERY, GET_BOOKINGS_BASE_QUERY};
-use hotel_app_be::modules::bookings::record_online_checkin_payment_tx;
 use hotel_app_be::modules::bookings::repository::BookingRepository;
+use hotel_app_be::modules::bookings::{
+    OnlineCheckinAutopost, record_online_checkin_payment_tx, split_online_checkin_autopost,
+};
 use hotel_app_be::modules::payments::service as payments;
 use rust_decimal::Decimal;
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
@@ -408,4 +410,151 @@ async fn desk_collects_upgrade_difference_after_channel_payout() {
     assert_eq!(audited, 2);
 
     cleanup(&pool, &[id]).await;
+}
+
+fn dec(v: &str) -> Decimal {
+    Decimal::from_str(v).unwrap()
+}
+
+#[test]
+fn checkin_autopost_holds_back_the_increase_since_booking() {
+    // Upgrade before check-in: channel booked 100, total now 130.
+    assert_eq!(
+        split_online_checkin_autopost(dec("130"), dec("130"), Some(dec("100"))),
+        Some(OnlineCheckinAutopost {
+            post: dec("100"),
+            held_back: dec("30")
+        })
+    );
+    // Tourism tax still rides with the channel amount, as before.
+    assert_eq!(
+        split_online_checkin_autopost(dec("140"), dec("130"), Some(dec("100"))),
+        Some(OnlineCheckinAutopost {
+            post: dec("110"),
+            held_back: dec("30")
+        })
+    );
+    // Unchanged or lowered total: the whole remainder, as before.
+    assert_eq!(
+        split_online_checkin_autopost(dec("100"), dec("100"), None),
+        Some(OnlineCheckinAutopost {
+            post: dec("100"),
+            held_back: dec("0")
+        })
+    );
+    assert_eq!(
+        split_online_checkin_autopost(dec("80"), dec("80"), Some(dec("150"))),
+        Some(OnlineCheckinAutopost {
+            post: dec("80"),
+            held_back: dec("0")
+        })
+    );
+    // Only the upgrade difference is still owed: nothing for the channel.
+    assert_eq!(
+        split_online_checkin_autopost(dec("30"), dec("130"), Some(dec("100"))),
+        None
+    );
+    assert_eq!(
+        split_online_checkin_autopost(dec("0"), dec("100"), None),
+        None
+    );
+}
+
+async fn autopost(pool: &PgPool, id: i64) -> Option<(String, Decimal, String)> {
+    let booking = BookingRepository::find_by_id(pool, id)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let recorded = record_online_checkin_payment_tx(&mut tx, &booking, ACTOR)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    if !recorded {
+        return None;
+    }
+    Some(
+        sqlx::query_as(
+            "SELECT payment_method, amount, COALESCE(notes, '') FROM payments \
+             WHERE booking_id = $1 AND payment_type = 'booking' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap(),
+    )
+}
+
+async fn set_total(pool: &PgPool, id: i64, total: &str) {
+    exec(
+        pool,
+        &format!("UPDATE bookings SET total_amount = {total}, subtotal = {total}, room_rate = {total} WHERE id = {id}"),
+    )
+    .await;
+}
+
+/// An OTA guest upgraded before check-in: the auto-post records only what
+/// the channel booked; the difference stays for the desk.
+#[tokio::test]
+async fn online_checkin_autopost_records_only_the_channel_amount() {
+    let Some((pool, _guard)) = setup().await else {
+        return;
+    };
+    let (created, edited, untouched, lowered) = (971_070, 971_071, 971_072, 971_073);
+    cleanup(&pool, &[created, edited, untouched, lowered]).await;
+    for id in [created, edited, untouched, lowered] {
+        seed_booking(&pool, id, "online", Some("Agoda"), Some("Agoda.com")).await;
+    }
+
+    // 1. "Booking created" snapshot 100, upgraded to 130 at the desk.
+    exec(&pool, &format!(
+        "INSERT INTO booking_history (booking_id, previous_status, new_status, changed_by, change_reason, metadata) \
+         VALUES ({created}, NULL, 'confirmed', {ACTOR}, 'Booking created', '{{\"total_amount\": \"100.00\"}}')"
+    )).await;
+    set_total(&pool, created, "130").await;
+    let (method, amount, notes) = autopost(&pool, created)
+        .await
+        .expect("channel amount posted");
+    assert_eq!(method, "Agoda.com");
+    assert_eq!(amount, dec("100"));
+    assert!(
+        notes.contains("30.00 added after booking left for the desk"),
+        "{notes}"
+    );
+    // The 30 stays owed and the desk collects it via the desk-remainder path.
+    assert_bad_request(
+        payments::record_payment(&pool, ACTOR, pay(created, "Cash", "booking", 31.0, "over")).await,
+        "remaining balance of 30",
+    );
+    payments::record_payment(&pool, ACTOR, pay(created, "Cash", "booking", 30.0, "cash"))
+        .await
+        .expect("desk collects the upgrade difference");
+    // Re-running the auto-post is a no-op: nothing is owed.
+    assert!(autopost(&pool, created).await.is_none());
+
+    // 2. No creation snapshot, but an edit recorded 100 -> 130.
+    exec(&pool, &format!(
+        "INSERT INTO booking_modifications (booking_id, modification_type, old_value, new_value, price_adjustment, modified_by) \
+         VALUES ({edited}, 'rate_change', '{{\"total_amount\": \"100.00\"}}', '{{\"total_amount\": \"130.00\"}}', 30, {ACTOR})"
+    )).await;
+    set_total(&pool, edited, "130").await;
+    assert_eq!(autopost(&pool, edited).await.unwrap().1, dec("100"));
+
+    // 3. No snapshot and no total-changing edit: whole remainder, as before.
+    exec(&pool, &format!(
+        "INSERT INTO booking_modifications (booking_id, modification_type, old_value, new_value, price_adjustment, modified_by) \
+         VALUES ({untouched}, 'general_update', '{{\"total_amount\": \"100.00\"}}', '{{\"total_amount\": \"100.00\"}}', 0, {ACTOR})"
+    )).await;
+    let (_, amount, notes) = autopost(&pool, untouched).await.unwrap();
+    assert_eq!(amount, dec("100"));
+    assert_eq!(notes, "Auto-recorded at check-in for online reservation");
+
+    // 4. Total lowered after booking: the (lower) remainder, as before.
+    exec(&pool, &format!(
+        "INSERT INTO booking_history (booking_id, previous_status, new_status, changed_by, change_reason, metadata) \
+         VALUES ({lowered}, NULL, 'confirmed', {ACTOR}, 'Booking created', '{{\"total_amount\": \"150.00\"}}')"
+    )).await;
+    assert_eq!(autopost(&pool, lowered).await.unwrap().1, dec("100"));
+
+    cleanup(&pool, &[created, edited, untouched, lowered]).await;
 }

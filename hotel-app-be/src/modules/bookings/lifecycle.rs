@@ -3596,8 +3596,10 @@ pub async fn record_checkin_payment_tx(
     Ok(())
 }
 
-/// Auto-post the outstanding balance as a completed payment when an online
-/// reservation is checked in.
+/// Auto-post the channel's prepaid amount as a completed payment when an
+/// online reservation is checked in. An increase of the room total since the
+/// booking was received (see `split_online_checkin_autopost`) is not the
+/// channel's money and stays outstanding for the desk-remainder path.
 ///
 /// Online bookings are prepaid (OTA/web), so on arrival we record the amount
 /// still owed as a `booking` payment so the folio reflects the collected money
@@ -3650,41 +3652,140 @@ pub async fn record_online_checkin_payment_tx(
             .clone()
             .unwrap_or_else(|| "online_banking".to_string())
     };
-    let notes = "Auto-recorded at check-in for online reservation";
+    let Some(amount) = online_checkin_autopost_amount_tx(tx, booking.id).await? else {
+        return Ok(false);
+    };
+    let notes = if amount.held_back > Decimal::ZERO {
+        format!(
+            "Auto-recorded at check-in for online reservation (channel amount; {} added after booking left for the desk)",
+            amount.held_back.round_dp(2)
+        )
+    } else {
+        "Auto-recorded at check-in for online reservation".to_string()
+    };
 
-    // The settled SUM (completed, non-refund, non-deposit, non-forfeited) and the `> 0` guard
-    // mirror `recompute_booking_payment_status_tx`, keeping the posted amount
-    // and the resulting status in agreement — the remainder covers the full
-    // billable total (room + tourism tax + extra bed), not just the room.
-    let insert_query = r#"
-        INSERT INTO payments (uuid, booking_id, amount, payment_method, payment_type, status, notes, created_by)
-        SELECT $1::uuid, b.id,
-               b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)
-                 - COALESCE((SELECT SUM(p.amount) FROM payments p
-                   WHERE p.booking_id = b.id
-                     AND p.status = 'completed'
-                     AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0),
-               $2, 'booking', 'completed', $3, $4
-        FROM bookings b
-        WHERE b.id = $5
-          AND b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)
-                - COALESCE((SELECT SUM(p.amount) FROM payments p
-                   WHERE p.booking_id = b.id
-                     AND p.status = 'completed'
-                     AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) > 0
-    "#;
-
-    let result = sqlx::query(insert_query)
-        .bind(crate::core::db::generate_uuid())
-        .bind(&payment_method)
-        .bind(notes)
-        .bind(user_id)
-        .bind(booking.id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let result = sqlx::query(
+        "INSERT INTO payments (uuid, booking_id, amount, payment_method, payment_type, status, notes, created_by) \
+         VALUES ($1::uuid, $2, $3, $4, 'booking', 'completed', $5, $6)",
+    )
+    .bind(crate::core::db::generate_uuid())
+    .bind(booking.id)
+    .bind(decimal_to_db(amount.post))
+    .bind(&payment_method)
+    .bind(&notes)
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(result.rows_affected() > 0)
+}
+
+/// What the check-in auto-post records for an online booking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OnlineCheckinAutopost {
+    /// Amount posted under the channel tender.
+    pub post: Decimal,
+    /// Increase in the room total since the booking was received, left
+    /// outstanding for the desk (e.g. an upgrade before check-in).
+    pub held_back: Decimal,
+}
+
+/// Pure split of the check-in auto-post.
+///
+/// `outstanding` is the billable remainder (room + tourism tax + extra bed
+/// minus settled payments) — what the auto-post used to record in full.
+/// `original_total` is the room total as the channel booked it. Any increase
+/// of `current_total` above it was made at the hotel after the booking was
+/// received (an upgrade, a re-rate), so the channel never paid it: it is held
+/// back from the auto-post and stays owed for the desk-remainder path. With no
+/// known original the current total stands in (the total never changed).
+pub fn split_online_checkin_autopost(
+    outstanding: Decimal,
+    current_total: Decimal,
+    original_total: Option<Decimal>,
+) -> Option<OnlineCheckinAutopost> {
+    let original = original_total.unwrap_or(current_total);
+    let increase = (current_total - original).max(Decimal::ZERO);
+    let held_back = increase.min(outstanding.max(Decimal::ZERO));
+    let post = outstanding - increase;
+    (post > Decimal::ZERO).then_some(OnlineCheckinAutopost { post, held_back })
+}
+
+/// The room total an online booking was received with: the `Booking created`
+/// history snapshot, else the pre-edit total of the first booking edit that
+/// changed it. `None` when neither exists, which means no recorded edit ever
+/// changed the total, so the current total is the received one.
+pub async fn online_booking_original_total_tx(
+    tx: &mut DbTransaction<'_>,
+    booking_id: i64,
+) -> Result<Option<Decimal>, ApiError> {
+    let created: Option<String> = sqlx::query_scalar(
+        "SELECT metadata->>'total_amount' FROM booking_history \
+         WHERE booking_id = $1 AND previous_status IS NULL AND change_reason = 'Booking created' \
+           AND metadata ? 'total_amount' \
+         ORDER BY created_at, id LIMIT 1",
+    )
+    .bind(booking_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?
+    .flatten();
+    if let Some(value) = created
+        .as_deref()
+        .and_then(|v| v.trim().parse::<Decimal>().ok())
+    {
+        return Ok(Some(value));
+    }
+    let first_edit: Option<String> = sqlx::query_scalar(
+        "SELECT old_value->>'total_amount' FROM booking_modifications \
+         WHERE booking_id = $1 \
+           AND (old_value->>'total_amount') IS NOT NULL \
+           AND (old_value->>'total_amount')::numeric IS DISTINCT FROM (new_value->>'total_amount')::numeric \
+         ORDER BY modified_at, id LIMIT 1",
+    )
+    .bind(booking_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?
+    .flatten();
+    Ok(first_edit.and_then(|v| v.trim().parse::<Decimal>().ok()))
+}
+
+/// Amount the check-in auto-post records for `booking_id`, `None` when
+/// nothing is owed by the channel.
+pub async fn online_checkin_autopost_amount_tx(
+    tx: &mut DbTransaction<'_>,
+    booking_id: i64,
+) -> Result<Option<OnlineCheckinAutopost>, ApiError> {
+    // The settled SUM (completed, non-refund, non-deposit, non-forfeited)
+    // mirrors `recompute_booking_payment_status_tx`, so the posted amount and
+    // the resulting status agree; the remainder covers room + tourism tax +
+    // extra bed.
+    let row: Option<(Decimal, Decimal)> = sqlx::query_as(
+        "SELECT b.total_amount, \
+                b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) \
+                  - COALESCE((SELECT SUM(p.amount) FROM payments p \
+                     WHERE p.booking_id = b.id AND p.status = 'completed' \
+                       AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) \
+         FROM bookings b WHERE b.id = $1",
+    )
+    .bind(booking_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    let Some((current_total, outstanding)) = row else {
+        return Ok(None);
+    };
+    if outstanding <= Decimal::ZERO {
+        return Ok(None);
+    }
+    let original = online_booking_original_total_tx(tx, booking_id).await?;
+    Ok(split_online_checkin_autopost(
+        outstanding,
+        current_total,
+        original,
+    ))
 }
 
 /// Set the room to `occupied` as part of check-in.

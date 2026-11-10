@@ -915,8 +915,10 @@ pub(crate) async fn checkin_booking_in_tx(
     }
 
     // Online reservations are prepaid: when staff didn't capture a payment at
-    // check-in, auto-post the outstanding balance so the folio reflects the
-    // online payment. The repo call no-ops when nothing is owed, so it never
+    // check-in, auto-post what the channel paid so the folio reflects the
+    // online payment. Any increase of the room total since the booking was
+    // received (an upgrade before arrival) is held back and stays owed for the
+    // desk. The repo call no-ops when nothing is owed, so it never
     // double-charges a booking that already has a payment.
     let auto_online_payment_recorded =
         if !explicit_payment_captured && is_online_source(booking.source.as_deref()) {
