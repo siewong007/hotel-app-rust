@@ -88,7 +88,10 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
         END AS created_by_name,
         COALESCE(bk_inv.invoice_number, bk_cli.invoice_number) AS invoice_number,
         -- Multi-room booking this room belongs to (NULL for single-room bookings).
-        bgrp.group_number AS group_number
+        bgrp.group_number AS group_number,
+        -- Channel payout already recorded (settlement lock: desk tenders may
+        -- then collect the remainder, e.g. an upgrade difference).
+        COALESCE(bk_payout.recorded, FALSE) AS channel_payout_recorded
     FROM bookings b
     INNER JOIN guests g ON b.guest_id = g.id
     INNER JOIN rooms r ON b.room_id = r.id
@@ -133,6 +136,23 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
         ORDER BY cl.created_at DESC
         LIMIT 1
     ) bk_cli ON TRUE
+    -- Mirrors `payments::settlement_lock::channel_payout_recorded`: a completed
+    -- room-charge payment under one of the channel's settlement tenders, with
+    -- the same case/punctuation/`.com`-insensitive matching. Only evaluated for
+    -- online bookings; meaningless (FALSE) elsewhere.
+    LEFT JOIN LATERAL (
+        SELECT TRUE AS recorded
+        FROM payments p
+        WHERE (bc.channel_type IN ('ota', 'website') OR b.source IN ('online', 'website'))
+          AND p.booking_id = b.id
+          AND p.status = 'completed'
+          AND COALESCE(p.payment_type, 'booking') = 'booking'
+          AND regexp_replace(regexp_replace(lower(p.payment_method), '[^a-z0-9]', '', 'g'), '^(.+)com$', '\1') IN (
+              SELECT regexp_replace(regexp_replace(lower(m), '[^a-z0-9]', '', 'g'), '^(.+)com$', '\1')
+              FROM unnest(COALESCE(NULLIF(bc.settlement_payment_methods, '{}'::text[]), ARRAY['Bank Transfer', 'PayPal']::text[])) AS m
+          )
+        LIMIT 1
+    ) bk_payout ON TRUE
 "#;
 
 // =============================================================================
@@ -187,7 +207,19 @@ pub const GET_BOOKING_BY_ID_QUERY: &str = r#"
         COALESCE(
             (SELECT inv.invoice_number FROM invoices inv WHERE inv.booking_id = b.id ORDER BY inv.created_at DESC LIMIT 1),
             (SELECT cl.invoice_number FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.invoice_number IS NOT NULL ORDER BY cl.created_at DESC LIMIT 1)
-        ) AS invoice_number
+        ) AS invoice_number,
+        -- Same as GET_BOOKINGS_BASE_QUERY's bk_payout lateral.
+        EXISTS(
+            SELECT 1 FROM payments p
+            WHERE (bc.channel_type IN ('ota', 'website') OR b.source IN ('online', 'website'))
+              AND p.booking_id = b.id
+          AND p.status = 'completed'
+          AND COALESCE(p.payment_type, 'booking') = 'booking'
+          AND regexp_replace(regexp_replace(lower(p.payment_method), '[^a-z0-9]', '', 'g'), '^(.+)com$', '\1') IN (
+              SELECT regexp_replace(regexp_replace(lower(m), '[^a-z0-9]', '', 'g'), '^(.+)com$', '\1')
+              FROM unnest(COALESCE(NULLIF(bc.settlement_payment_methods, '{}'::text[]), ARRAY['Bank Transfer', 'PayPal']::text[])) AS m
+          )
+        ) AS channel_payout_recorded
     FROM bookings b
     INNER JOIN guests g ON b.guest_id = g.id
     INNER JOIN rooms r ON b.room_id = r.id
@@ -223,6 +255,14 @@ mod tests {
             assert!(sql.contains("NULLIF(BTRIM(creator.full_name), '')"));
             assert!(sql.contains("AS created_by_name"));
             assert!(sql.contains("LEFT JOIN users creator ON creator.id = b.created_by"));
+        }
+    }
+
+    #[test]
+    fn booking_detail_payloads_flag_the_channel_payout() {
+        for sql in [GET_BOOKINGS_BASE_QUERY, GET_BOOKING_BY_ID_QUERY] {
+            assert!(sql.contains("AS channel_payout_recorded"));
+            assert!(sql.contains("bc.settlement_payment_methods, '{}'::text[]"));
         }
     }
 }

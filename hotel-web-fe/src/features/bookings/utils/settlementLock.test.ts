@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   getRoomMethodOptions,
   getSettlementLock,
+  hasChannelPayout,
+  initialRoomMethod,
+  isDeskRemainderOpen,
   isRoomMethodAllowed,
   presetRoomMethod,
 } from './settlementLock';
@@ -69,5 +72,47 @@ describe('settlement lock', () => {
   it('refuses an OTA channel with no configured tender', () => {
     const lock = getSettlementLock({ source: 'online', booking_channel_name: 'Airbnb', booking_channel_type: 'ota' });
     expect(lock).toEqual({ kind: 'unconfigured', platform: 'Airbnb' });
+  });
+
+  describe('desk remainder after the channel payout', () => {
+    const agoda = getSettlementLock({
+      source: 'online',
+      booking_channel_name: 'Agoda',
+      booking_channel_type: 'ota',
+      booking_channel_settlement_methods: ['Agoda.com'],
+    });
+    const channelNames = ['Booking.com', 'Agoda', 'Traveloka', 'Expedia', 'Direct Website'];
+    const paid = { channelPaid: true, channelNames };
+
+    it('keeps the channel tender only until the payout is recorded', () => {
+      expect(isDeskRemainderOpen(agoda, { channelPaid: false, channelNames })).toBe(false);
+      expect(getRoomMethodOptions(agoda, configured, { channelPaid: false, channelNames })).toEqual(['Agoda.com']);
+      expect(isRoomMethodAllowed(agoda, 'Cash', { channelPaid: false, channelNames })).toBe(false);
+    });
+
+    it('offers the channel tender plus desk tenders, never another channel', () => {
+      expect(isDeskRemainderOpen(agoda, paid)).toBe(true);
+      expect(getRoomMethodOptions(agoda, configured, paid)).toEqual(['Agoda.com', 'Cash', 'Visa Card', 'Bank Transfer', 'Paypal']);
+      expect(isRoomMethodAllowed(agoda, 'Cash', paid)).toBe(true);
+      expect(isRoomMethodAllowed(agoda, 'Booking.com', paid)).toBe(false);
+      expect(isRoomMethodAllowed(agoda, 'Expedia.com', paid)).toBe(false);
+      expect(isRoomMethodAllowed(agoda, '', paid)).toBe(false);
+    });
+
+    it('opens on a desk tender but keeps an explicit channel pick', () => {
+      expect(initialRoomMethod(agoda, configured, 'Agoda.com', paid)).toBe('Cash');
+      expect(initialRoomMethod(agoda, configured, 'Visa Card', paid)).toBe('Visa Card');
+      expect(initialRoomMethod(agoda, configured, 'Agoda.com', { channelPaid: false, channelNames })).toBe('Agoda.com');
+      expect(presetRoomMethod(agoda, configured, 'Agoda.com', paid)).toBe('Agoda.com');
+      expect(presetRoomMethod(agoda, configured, 'Booking.com', paid)).toBe('Cash');
+    });
+
+    it('detects the payout from the booking flag or completed payments', () => {
+      expect(hasChannelPayout(agoda, { channel_payout_recorded: true })).toBe(true);
+      expect(hasChannelPayout(agoda, {}, [{ payment_method: 'Agoda.Com', payment_type: 'booking', payment_status: 'completed' }])).toBe(true);
+      expect(hasChannelPayout(agoda, {}, [{ payment_method: 'Agoda.com', payment_type: 'booking', payment_status: 'void' }])).toBe(false);
+      expect(hasChannelPayout(agoda, {}, [{ payment_method: 'Cash', payment_type: 'booking', payment_status: 'completed' }])).toBe(false);
+      expect(hasChannelPayout(getSettlementLock({ source: 'walk_in' }), { channel_payout_recorded: true })).toBe(false);
+    });
   });
 });

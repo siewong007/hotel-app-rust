@@ -100,6 +100,7 @@ pub fn row_to_booking_with_details(row: &DbRow) -> BookingWithDetails {
             .try_get("booking_channel_settlement_methods")
             .ok()
             .flatten(),
+        channel_payout_recorded: row.try_get("channel_payout_recorded").ok(),
         ota_reference: row.try_get("ota_reference").ok(),
         remarks: row.try_get("remarks").ok(),
         special_requests: row.try_get("special_requests").ok(),

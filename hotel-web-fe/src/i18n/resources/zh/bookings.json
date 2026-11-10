@@ -661,6 +661,7 @@
   "settlementLock": {
     "settledVia": "已通过 {{platform}} 结算",
     "missingChannel": "此在线预订没有预订渠道。请先设置预订渠道（如 Booking.com、Agoda），再记录房费付款。",
-    "unconfigured": "预订渠道 {{platform}} 未配置结算付款方式，无法记录房费付款。"
+    "unconfigured": "预订渠道 {{platform}} 未配置结算付款方式，无法记录房费付款。",
+    "deskRemainder": "升级差价：请在前台收取（{{platform}} 已支付其部分）"
   }
 }

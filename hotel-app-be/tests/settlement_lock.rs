@@ -9,11 +9,12 @@
 
 use hotel_app_be::core::error::ApiError;
 use hotel_app_be::models::{RecordPaymentRequest, UpdatePaymentRequest};
+use hotel_app_be::modules::bookings::queries::{GET_BOOKING_BY_ID_QUERY, GET_BOOKINGS_BASE_QUERY};
 use hotel_app_be::modules::bookings::record_online_checkin_payment_tx;
 use hotel_app_be::modules::bookings::repository::BookingRepository;
 use hotel_app_be::modules::payments::service as payments;
 use rust_decimal::Decimal;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::str::FromStr;
 
 const ACTOR: i64 = 971_001;
@@ -324,4 +325,87 @@ async fn online_checkin_auto_post_uses_channel_method() {
     );
     drop(tx);
     cleanup(&pool, &[id, missing]).await;
+}
+
+async fn payout_flags(pool: &PgPool, id: i64) -> (bool, bool) {
+    let by_id: bool = sqlx::query(GET_BOOKING_BY_ID_QUERY)
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get("channel_payout_recorded");
+    let list_sql = format!("{GET_BOOKINGS_BASE_QUERY} WHERE b.id = $1");
+    let listed: bool = sqlx::query(sqlx::AssertSqlSafe(list_sql))
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get("channel_payout_recorded");
+    (by_id, listed)
+}
+
+/// A guest paid the OTA for one room type and upgraded at the front desk:
+/// after the channel payout is recorded, the desk collects the difference with
+/// its own tenders, capped at the outstanding balance.
+#[tokio::test]
+async fn desk_collects_upgrade_difference_after_channel_payout() {
+    let Some((pool, _guard)) = setup().await else {
+        return;
+    };
+    let id = 971_060;
+    cleanup(&pool, &[id]).await;
+    seed_booking(&pool, id, "online", Some("Agoda"), Some("Agoda.com")).await;
+
+    // Before the payout the lock is unchanged: no desk tender for the room.
+    assert_bad_request(
+        payments::record_payment(&pool, ACTOR, pay(id, "Cash", "booking", 20.0, "early")).await,
+        "settled via Agoda",
+    );
+    assert_eq!(payout_flags(&pool, id).await, (false, false));
+
+    // Agoda pays the original room in full.
+    payments::record_payment(&pool, ACTOR, pay(id, "Agoda.Com", "booking", 100.0, "ota"))
+        .await
+        .expect("channel payout");
+    assert_eq!(payout_flags(&pool, id).await, (true, true));
+
+    // Upgrade at the desk raises the total to 130.
+    exec(
+        &pool,
+        &format!("UPDATE bookings SET total_amount = 130, subtotal = 130, room_rate = 130 WHERE id = {id}"),
+    )
+    .await;
+
+    assert_bad_request(
+        payments::record_payment(&pool, ACTOR, pay(id, "Cash", "booking", 40.0, "over")).await,
+        "the desk can only collect the remaining balance of 30",
+    );
+    assert_bad_request(
+        payments::record_payment(&pool, ACTOR, pay(id, "Booking.com", "booking", 30.0, "bc")).await,
+        "not as Booking.com",
+    );
+    payments::record_payment(&pool, ACTOR, pay(id, "Cash", "booking", 10.0, "cash"))
+        .await
+        .expect("cash remainder allowed");
+    payments::record_payment(&pool, ACTOR, pay(id, "Visa Card", "booking", 20.0, "card"))
+        .await
+        .expect("card remainder allowed");
+    // Fully settled: nothing more at the desk.
+    assert_bad_request(
+        payments::record_payment(&pool, ACTOR, pay(id, "Cash", "booking", 1.0, "extra")).await,
+        "remaining balance of 0",
+    );
+
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE action = 'payment_recorded' \
+         AND (details->>'booking_id')::bigint = $1 AND details->>'settlement' = 'desk_remainder' \
+         AND details->>'channel' = 'Agoda'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 2);
+
+    cleanup(&pool, &[id]).await;
 }

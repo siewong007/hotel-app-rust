@@ -1179,3 +1179,53 @@ describe('CheckoutInvoiceModal deposit display + forfeit', () => {
     expect(within(dialog).queryByRole('radiogroup')).toBeNull();
   });
 });
+
+describe('CheckoutInvoiceModal OTA upgrade remainder', () => {
+  const agodaBooking: Partial<BookingWithDetails> = {
+    source: 'online',
+    booking_channel_name: 'Agoda',
+    booking_channel_type: 'ota',
+    booking_channel_settlement_methods: ['Agoda.com'],
+    payment_method: 'Agoda.com',
+  };
+  const roomMethodCombobox = (dialog: HTMLElement) =>
+    within(dialog).getByTestId('room-payment-method').parentElement!.querySelector('[role="combobox"]') as HTMLElement;
+
+  beforeEach(() => {
+    mocks.recordPayment.mockReset().mockResolvedValue({ id: 9 });
+    mocks.hasPermission.mockReset().mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('offers only the channel tender before the Agoda payout is recorded', async () => {
+    mocks.payments = [];
+    renderModal(false, agodaBooking);
+    const dialog = await paymentDialog();
+    await waitFor(() => expect((within(dialog).getByTestId('room-payment-method') as HTMLInputElement).value).toBe('Agoda.com'));
+    expect(roomMethodCombobox(dialog).getAttribute('aria-disabled')).toBe('true');
+    expect(within(dialog).queryByTestId('desk-remainder-hint')).toBeNull();
+  });
+
+  it('collects the upgrade difference with a desk tender after the Agoda payout', async () => {
+    mocks.payments = [
+      { id: 5, payment_status: 'completed', payment_type: 'booking', total_amount: 60, payment_method: 'Agoda.com' } as CheckoutPaymentRecord,
+    ];
+    renderModal(false, agodaBooking);
+    const dialog = await paymentDialog();
+    await waitFor(() => expect((within(dialog).getByTestId('room-payment-method') as HTMLInputElement).value).toBe('Cash'));
+    expect(within(dialog).getByTestId('desk-remainder-hint').textContent).toContain('Upgrade difference: collect at the desk');
+
+    fireEvent.mouseDown(roomMethodCombobox(dialog));
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent);
+    expect(options).toEqual(['Agoda.com', 'Cash', 'Bank Transfer']);
+    fireEvent.click(screen.getByRole('option', { name: 'Cash' }));
+
+    fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '40' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record Payment' }));
+    await waitFor(() => expect(mocks.recordPayment).toHaveBeenCalledTimes(1));
+    expect(mocks.recordPayment.mock.calls[0][0]).toMatchObject({ payment_method: 'Cash', amount: 40 });
+  });
+});

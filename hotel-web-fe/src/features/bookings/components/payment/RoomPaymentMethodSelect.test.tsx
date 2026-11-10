@@ -51,4 +51,34 @@ describe('RoomPaymentMethodSelect', () => {
     );
     expect(screen.getByText(/has no booking channel/)).toBeDefined();
   });
+
+  it('offers desk tenders and the upgrade hint once the channel payout is recorded', () => {
+    const onChange = vi.fn();
+    render(
+      <RoomPaymentMethodSelect
+        booking={{ source: 'online', booking_channel_name: 'Booking.com', booking_channel_type: 'ota', booking_channel_settlement_methods: ['Booking.com'], channel_payout_recorded: true }}
+        paymentMethods={methods}
+        value="Cash"
+        onChange={onChange}
+        label="Payment Method"
+      />,
+    );
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('combobox').getAttribute('aria-disabled')).toBeNull();
+    expect(screen.getByTestId('desk-remainder-hint').textContent).toContain('Upgrade difference: collect at the desk');
+  });
+
+  it('has no upgrade hint before the channel payout', () => {
+    render(
+      <RoomPaymentMethodSelect
+        booking={{ source: 'online', booking_channel_name: 'Booking.com', booking_channel_type: 'ota', booking_channel_settlement_methods: ['Booking.com'] }}
+        paymentMethods={methods}
+        value="Booking.com"
+        onChange={vi.fn()}
+        label="Payment Method"
+      />,
+    );
+    expect(screen.queryByTestId('desk-remainder-hint')).toBeNull();
+  });
 });
+

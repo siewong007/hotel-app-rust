@@ -32,8 +32,8 @@ import {
 import { getIdempotencyAttempt, type IdempotencyAttempt } from '../../../../../utils/idempotency';
 import { emitApiNotification } from '../../../../../utils/apiNotifications';
 import { getBookingBalance, getErrorMessage } from '../../../utils/bookingPageUtils';
-import RoomPaymentMethodSelect from '../../payment/RoomPaymentMethodSelect';
-import { getSettlementLock, isRoomMethodAllowed } from '../../../utils/settlementLock';
+import RoomPaymentMethodSelect, { getRoomMethodContext } from '../../payment/RoomPaymentMethodSelect';
+import { getSettlementLock, initialRoomMethod, isRoomMethodAllowed } from '../../../utils/settlementLock';
 
 export type PaymentDialogContext = 'manual' | 'checkout_required';
 
@@ -71,7 +71,14 @@ const PaymentDialog: React.FC<PaymentDialogProps> = ({ open, booking, context, o
       const totalAmount = toMoneyNumber(booking.total_amount);
       setCurrentBooking(booking);
       setAmount(context === 'checkout_required' ? balanceDue : (isPositiveMoney(balanceDue) ? balanceDue : totalAmount));
-      setMethod(booking.payment_method || 'Cash');
+      // With the channel payout recorded (e.g. an OTA guest upgrading at the
+      // desk) open on a desk tender for the remainder.
+      setMethod(initialRoomMethod(
+        getSettlementLock(booking),
+        paymentMethods,
+        booking.payment_method || 'Cash',
+        getRoomMethodContext(booking),
+      ));
       setNote(context === 'checkout_required' ? 'Required before checkout' : '');
     }
   }
@@ -166,8 +173,11 @@ const PaymentDialog: React.FC<PaymentDialogProps> = ({ open, booking, context, o
           severity: 'success',
           message: t('payment.acceptedBalance', { amount: formatCurrency(amount), method }),
         });
+        const lock = getSettlementLock(currentBooking);
         setCurrentBooking({
           ...currentBooking,
+          channel_payout_recorded: currentBooking.channel_payout_recorded
+            || (lock.kind === 'locked' && isRoomMethodAllowed(lock, method)),
           total_paid: addMoney(prevPaid, amount),
           balance_due: remainingBalance,
           payment_status: 'partial',
@@ -360,7 +370,7 @@ const PaymentDialog: React.FC<PaymentDialogProps> = ({ open, booking, context, o
           disabled={
             !isPositiveMoney(amount) ||
             updating ||
-            !isRoomMethodAllowed(getSettlementLock(currentBooking), method) ||
+            !isRoomMethodAllowed(getSettlementLock(currentBooking), method, getRoomMethodContext(currentBooking)) ||
             (context === 'checkout_required' && isLessMoney(amount, balance)) ||
             isGreaterMoney(amount, balance)
           }

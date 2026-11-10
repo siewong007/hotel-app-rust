@@ -15,6 +15,13 @@
 //! `booking_channels.settlement_payment_methods` (patch 0023). Matching is
 //! case- and punctuation-insensitive so legacy spellings (`Booking.Com`,
 //! `bank_transfer`, `Paypal`) still match.
+//!
+//! Desk remainder: once the channel's payout for the room charge is recorded
+//! (a completed `booking` payment under the channel tender), anything still
+//! owed — typically a front-desk upgrade or room change that raised the total
+//! above what the guest paid the OTA — is the hotel's to collect. The desk may
+//! then take that remainder with its own tenders (cash, card, QR, …), capped
+//! at the outstanding balance. Another booking channel's tender stays refused.
 
 use crate::core::error::ApiError;
 
@@ -128,7 +135,51 @@ impl SettlementLockRow {
     }
 }
 
+/// Which tender rule a room-charge payment was accepted under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoomChargeTender {
+    /// Booking is not settlement-locked (walk-in, phone, …).
+    Open,
+    /// The channel's own settlement tender.
+    Channel,
+    /// A desk tender collecting what is left after the channel payout. The
+    /// caller must cap it at the outstanding balance.
+    DeskRemainder { platform: String },
+}
+
 impl SettlementLock {
+    /// Validate a room-charge tender, opening desk tenders for the remainder
+    /// once the channel payout is recorded.
+    ///
+    /// `payout_recorded`: a completed `booking` payment under one of the
+    /// channel's tenders exists. `other_channel_tender`: `method` is the
+    /// tender (or name) of some other booking channel.
+    pub fn check_room_charge_after_payout(
+        &self,
+        method: &str,
+        payout_recorded: bool,
+        other_channel_tender: bool,
+    ) -> Result<RoomChargeTender, ApiError> {
+        match self {
+            SettlementLock::Unlocked => Ok(RoomChargeTender::Open),
+            SettlementLock::Locked { platform, .. } if payout_recorded && !self.allows(method) => {
+                if other_channel_tender || normalize_method(method).is_empty() {
+                    Err(ApiError::BadRequest(format!(
+                        "This booking is settled via {platform}: the remaining balance can be collected with a desk payment method, but not as {}.",
+                        method.trim()
+                    )))
+                } else {
+                    Ok(RoomChargeTender::DeskRemainder {
+                        platform: platform.clone(),
+                    })
+                }
+            }
+            _ => self
+                .check_room_charge(method)
+                .map(|()| RoomChargeTender::Channel),
+        }
+    }
+
     pub fn is_locked(&self) -> bool {
         !matches!(self, SettlementLock::Unlocked)
     }
@@ -225,6 +276,69 @@ where
         Some(lock) => lock.check_room_charge(method),
         None => Ok(()),
     }
+}
+
+/// Whether the channel payout for the room charge is already recorded: a
+/// completed `booking` payment under one of the lock's allowed tenders.
+pub async fn channel_payout_recorded(
+    conn: &mut sqlx::PgConnection,
+    booking_id: i64,
+    lock: &SettlementLock,
+) -> Result<bool, ApiError> {
+    if !matches!(lock, SettlementLock::Locked { .. }) {
+        return Ok(false);
+    }
+    let methods: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT payment_method FROM payments \
+         WHERE booking_id = $1 AND status = 'completed' \
+           AND COALESCE(payment_type, 'booking') = 'booking' \
+           AND payment_method IS NOT NULL",
+    )
+    .bind(booking_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::from)?;
+    Ok(methods.iter().any(|m| lock.allows(m)))
+}
+
+/// Whether `method` names an OTA channel or one of its settlement tenders.
+pub async fn is_channel_tender(
+    conn: &mut sqlx::PgConnection,
+    method: &str,
+) -> Result<bool, ApiError> {
+    let rows: Vec<(String, Option<Vec<String>>)> = sqlx::query_as(
+        "SELECT name, settlement_payment_methods FROM booking_channels WHERE channel_type = 'ota'",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::from)?;
+    Ok(rows.iter().any(|(name, methods)| {
+        methods_match(name, method) || methods.iter().flatten().any(|m| methods_match(m, method))
+    }))
+}
+
+/// Validate a payment about to be written on `booking_id`, allowing desk
+/// tenders for the remainder once the channel payout is recorded. Only
+/// `booking` rows are locked. A `DeskRemainder` result must be capped at the
+/// outstanding balance by the caller.
+pub async fn enforce_room_payment(
+    conn: &mut sqlx::PgConnection,
+    booking_id: i64,
+    payment_type: &str,
+    method: &str,
+) -> Result<RoomChargeTender, ApiError> {
+    if payment_type != "booking" {
+        return Ok(RoomChargeTender::Open);
+    }
+    let Some(lock) = load_lock(&mut *conn, booking_id).await? else {
+        return Ok(RoomChargeTender::Open);
+    };
+    if !matches!(lock, SettlementLock::Locked { .. }) || lock.allows(method) {
+        return lock.check_room_charge_after_payout(method, false, false);
+    }
+    let payout = channel_payout_recorded(&mut *conn, booking_id, &lock).await?;
+    let other_channel = payout && is_channel_tender(&mut *conn, method).await?;
+    lock.check_room_charge_after_payout(method, payout, other_channel)
 }
 
 #[cfg(test)]
@@ -350,6 +464,80 @@ mod tests {
                 .settlement_method_for(Some("Cash"))
                 .as_deref(),
             Some("Cash")
+        );
+    }
+
+    fn agoda_lock() -> SettlementLock {
+        row("online", Some("Agoda"), Some("ota"), Some(&["Agoda.com"])).decide()
+    }
+
+    #[test]
+    fn desk_tender_refused_until_channel_payout_is_recorded() {
+        let lock = agoda_lock();
+        let err = lock
+            .check_room_charge_after_payout("Cash", false, false)
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("settled via Agoda"), "{err:?}");
+        assert_eq!(
+            lock.check_room_charge_after_payout("Agoda.Com", false, false)
+                .unwrap(),
+            RoomChargeTender::Channel
+        );
+    }
+
+    #[test]
+    fn desk_tender_allowed_for_remainder_after_channel_payout() {
+        let lock = agoda_lock();
+        for desk in ["Cash", "Visa Card", "Qrpay", "Bank Transfer"] {
+            assert_eq!(
+                lock.check_room_charge_after_payout(desk, true, false)
+                    .unwrap(),
+                RoomChargeTender::DeskRemainder {
+                    platform: "Agoda".to_string()
+                },
+                "{desk}"
+            );
+        }
+        // The channel tender itself stays a channel payment.
+        assert_eq!(
+            lock.check_room_charge_after_payout("Agoda.com", true, false)
+                .unwrap(),
+            RoomChargeTender::Channel
+        );
+    }
+
+    #[test]
+    fn other_channel_tender_and_blank_stay_refused_after_payout() {
+        let lock = agoda_lock();
+        let err = lock
+            .check_room_charge_after_payout("Booking.com", true, true)
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("not as Booking.com"), "{err:?}");
+        assert!(
+            lock.check_room_charge_after_payout("  ", true, false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn payout_does_not_unlock_missing_or_unconfigured_channels() {
+        let missing = row("online", None, None, None).decide();
+        assert!(
+            missing
+                .check_room_charge_after_payout("Cash", true, false)
+                .is_err()
+        );
+        let unconfigured = row("online", Some("Airbnb"), Some("ota"), None).decide();
+        assert!(
+            unconfigured
+                .check_room_charge_after_payout("Cash", true, false)
+                .is_err()
+        );
+        assert_eq!(
+            SettlementLock::Unlocked
+                .check_room_charge_after_payout("Cash", false, false)
+                .unwrap(),
+            RoomChargeTender::Open
         );
     }
 }

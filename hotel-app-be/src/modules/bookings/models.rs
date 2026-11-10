@@ -405,6 +405,11 @@ pub struct BookingWithDetails {
     /// `payments::settlement_lock`). `None` for desk channels / no channel.
     #[serde(default)]
     pub booking_channel_settlement_methods: Option<Vec<String>>,
+    /// Whether the channel payout for the room charge is recorded (a completed
+    /// `booking` payment under the channel tender). The desk may then collect
+    /// any remainder with its own tenders, capped at `balance_due`.
+    #[serde(default)]
+    pub channel_payout_recorded: Option<bool>,
     pub ota_reference: Option<String>,
     pub remarks: Option<String>,
     pub special_requests: Option<String>,
@@ -577,6 +582,7 @@ impl<'r> sqlx::FromRow<'r, crate::core::db::DbRow> for BookingWithDetails {
                 .try_get("booking_channel_settlement_methods")
                 .ok()
                 .flatten(),
+            channel_payout_recorded: row.try_get("channel_payout_recorded").ok(),
             ota_reference: row.try_get("ota_reference").ok().flatten(),
             room_id: row.try_get("room_id")?,
             room_number: row.try_get("room_number")?,

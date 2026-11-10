@@ -404,14 +404,22 @@ pub async fn record_payment(
     // to pay in person instead of online would be stuck: the booking never
     // leaves `pending` and check-in now requires `confirmed`.
     // Settlement lock: an online booking's room charge may only be recorded
-    // under the tender its channel settles with (see settlement_lock).
-    super::settlement_lock::enforce_payment(
-        &mut *tx,
+    // under the tender its channel settles with (see settlement_lock). Once the
+    // channel payout is recorded, the desk may collect what is still owed (an
+    // upgrade / room-change difference) with its own tenders, capped below.
+    let room_tender = super::settlement_lock::enforce_room_payment(
+        &mut tx,
         request.booking_id,
         payment_type,
         &request.payment_method,
     )
     .await?;
+    let desk_remainder_platform = match &room_tender {
+        super::settlement_lock::RoomChargeTender::DeskRemainder { platform } => {
+            Some(platform.clone())
+        }
+        _ => None,
+    };
 
     let mut settles_balance_in_full = false;
 
@@ -435,6 +443,13 @@ pub async fn record_payment(
         };
         // Allow a sub-cent rounding tolerance to match the frontend guard.
         let tolerance = Decimal::new(5, 3); // 0.005
+        if let Some(platform) = desk_remainder_platform.as_deref()
+            && amount > balance_due + tolerance
+        {
+            return Err(ApiError::BadRequest(format!(
+                "This booking is settled via {platform}: the desk can only collect the remaining balance of {balance_due} (e.g. a room upgrade difference)."
+            )));
+        }
         if amount > balance_due + tolerance {
             return Err(ApiError::BadRequest(format!(
                 "Payment amount cannot exceed the outstanding balance of {balance_due}"
@@ -531,10 +546,19 @@ pub async fn record_payment(
             action: "payment_recorded",
             resource_type: "payment",
             resource_id: Some(payment_id),
-            details: Some(serde_json::json!({
-                "booking_id": booking_id,
-                "amount": request.amount,
-            })),
+            details: Some(match desk_remainder_platform.as_deref() {
+                Some(platform) => serde_json::json!({
+                    "booking_id": booking_id,
+                    "amount": request.amount,
+                    "payment_method": request.payment_method,
+                    "settlement": "desk_remainder",
+                    "channel": platform,
+                }),
+                None => serde_json::json!({
+                    "booking_id": booking_id,
+                    "amount": request.amount,
+                }),
+            }),
             ..Default::default()
         },
     )

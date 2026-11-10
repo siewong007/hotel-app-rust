@@ -49,13 +49,21 @@ import type { CheckoutPaymentRecord } from '../types';
 import CheckoutInvoicePrintView from './CheckoutInvoicePrintView';
 import GroupReceiptButton from './GroupReceiptButton';
 import DepositSection, { DEPOSIT_STATUS_CHIP } from './DepositSection';
-import { getSettlementLock, isSettlementLocked } from '../../bookings/utils/settlementLock';
+import {
+  getSettlementLock,
+  hasChannelPayout,
+  initialRoomMethod,
+  isRoomMethodAllowed,
+  isSettlementLocked,
+} from '../../bookings/utils/settlementLock';
+import RoomPaymentMethodSelect, { getRoomMethodContext } from '../../bookings/components/payment/RoomPaymentMethodSelect';
 import ReasonDialog from './ReasonDialog';
 import type { DepositForfeitInput, DepositRefundInput } from './DepositSection';
 import { formatHotelDate, formatHotelDateTime, formatLocalDate, parseLocalDate, addLocalDays, toHotelDateString } from '../../../utils/date';
 import { divideMoney, isGreaterMoney, isPositiveMoney, subtractMoney, toMoneyNumber } from '../../../utils/money';
 import { formatStatusLabel } from '../../../utils/formatters';
 import { getIdempotencyAttempt, type IdempotencyAttempt } from '../../../utils/idempotency';
+import { getHotelSettings } from '../../../utils/hotelSettings';
 import { useConfirm } from '../../../components/common/ConfirmProvider';
 import { useTranslation, statusLabel } from '../../../i18n';
 import CollapsibleSection, { type CollapsibleSectionProps } from '../../../components/common/CollapsibleSection';
@@ -242,7 +250,14 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
       const bookingPaymentMethod = booking.payment_method
         ? formatStatusLabel(booking.payment_method)
         : 'Cash';
-      setPaymentMethod(bookingPaymentMethod);
+      // Online bookings: the channel tender until its payout is recorded,
+      // then a desk tender for the remainder (e.g. an upgrade difference).
+      setPaymentMethod(initialRoomMethod(
+        getSettlementLock(booking),
+        getHotelSettings().payment_methods,
+        bookingPaymentMethod,
+        getRoomMethodContext(booking),
+      ));
       setPaymentReference('');
       setPaymentNotes('');
       setDepositWaived(false);
@@ -277,6 +292,22 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
     ? toMoneyNumber(ledger.balance_due)
     : subtractMoney(charges.grandTotal, paymentRowsTotal);
   const hasBalanceDue = isPositiveMoney(balanceDue);
+  // Room-charge tender rule (settlement lock) for the record-payment form.
+  const roomSettlementLock = getSettlementLock(booking);
+  const roomChannelPaid = hasChannelPayout(roomSettlementLock, booking, payments);
+  const roomMethodAllowed = isLedgerView
+    || isRoomMethodAllowed(roomSettlementLock, paymentMethod, getRoomMethodContext(booking, roomChannelPaid));
+  // The payout can surface only once the payments list loads: move the
+  // form off the channel tender then, once, onto a desk tender.
+  useEffect(() => {
+    if (!open || !booking || isLedgerView || !roomChannelPaid) return;
+    setPaymentMethod((current) => initialRoomMethod(
+      getSettlementLock(booking),
+      getHotelSettings().payment_methods,
+      current,
+      getRoomMethodContext(booking, true),
+    ));
+  }, [open, booking, isLedgerView, roomChannelPaid]);
   const isCompanyBilling = Boolean(booking?.company_id || booking?.company_name?.trim());
   const requiresFullPaymentBeforeCheckout = !isCompanyBilling && hasBalanceDue;
   const completedPayments = payments.filter(
@@ -1779,18 +1810,30 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                       />
                     </Grid>
                     <Grid size={{ xs: 12, sm: 4 }}>
-                      <FormControl fullWidth size="small">
-                        <InputLabel>{t('checkout.field.method')}</InputLabel>
-                        <Select
+                      {isLedgerView ? (
+                        <FormControl fullWidth size="small">
+                          <InputLabel>{t('checkout.field.method')}</InputLabel>
+                          <Select
+                            value={paymentMethod}
+                            label={t('checkout.field.method')}
+                            onChange={(e) => setPaymentMethod(e.target.value)}
+                          >
+                            {hotelSettings.payment_methods.map((method) => (
+                              <MenuItem key={method} value={method}>{method}</MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      ) : (
+                        <RoomPaymentMethodSelect
+                          booking={booking}
+                          paymentMethods={hotelSettings.payment_methods}
                           value={paymentMethod}
+                          onChange={setPaymentMethod}
                           label={t('checkout.field.method')}
-                          onChange={(e) => setPaymentMethod(e.target.value)}
-                        >
-                          {hotelSettings.payment_methods.map((method) => (
-                            <MenuItem key={method} value={method}>{method}</MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                          size="small"
+                          channelPaid={roomChannelPaid}
+                        />
+                      )}
                     </Grid>
                     <Grid size={{ xs: 12, sm: 4 }}>
                       <TextField
@@ -1828,7 +1871,7 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                         variant="contained"
                         size="small"
                         onClick={handleRecordPayment}
-                        disabled={recordingPayment || !isPositiveMoney(paymentAmount) || isGreaterMoney(paymentAmount, balanceDue)}
+                        disabled={recordingPayment || !isPositiveMoney(paymentAmount) || isGreaterMoney(paymentAmount, balanceDue) || !roomMethodAllowed}
                         startIcon={recordingPayment ? <CircularProgress size={14} /> : <PaymentIcon />}
                       >
                         {recordingPayment ? t('common:state.recording') : t('ledger.payment.record')}

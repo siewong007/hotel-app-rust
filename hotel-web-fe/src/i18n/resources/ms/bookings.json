@@ -661,6 +661,7 @@
   "settlementLock": {
     "settledVia": "Diselesaikan melalui {{platform}}",
     "missingChannel": "Tempahan dalam talian ini tiada saluran tempahan. Tetapkan saluran tempahan (cth. Booking.com, Agoda) sebelum merekod bayaran bilik.",
-    "unconfigured": "Saluran tempahan {{platform}} tiada kaedah pembayaran penyelesaian, jadi bayaran bilik tidak boleh direkod."
+    "unconfigured": "Saluran tempahan {{platform}} tiada kaedah pembayaran penyelesaian, jadi bayaran bilik tidak boleh direkod.",
+    "deskRemainder": "Perbezaan naik taraf: kutip di kaunter ({{platform}} telah membayar bahagiannya)"
   }
 }
