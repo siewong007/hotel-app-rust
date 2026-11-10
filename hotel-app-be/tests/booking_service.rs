@@ -1971,6 +1971,173 @@ mod postgres_creation_tests {
             .await
             .unwrap();
     }
+
+    /// Bookings and their payments follow the hotel's configured currency
+    /// (`system_settings.currency`), never a hard-coded USD column default
+    /// (patch 0030). Uses a non-default code so a stale 'USD'/'MYR' literal
+    /// cannot pass by accident; the original setting is restored afterwards.
+    #[tokio::test]
+    async fn postgres_creation_uses_configured_hotel_currency() {
+        let Some((pool, _serial_guard)) = setup_pg_pool().await else {
+            return;
+        };
+        let actor_id = 960_005;
+        let guest_id = 960_205;
+        let room_id = 960_305;
+
+        cleanup(&pool, room_id, guest_id, actor_id).await;
+        sqlx::query("INSERT INTO users (id, username, email, full_name, user_type, is_active, is_verified) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, 'Currency Actor', 'staff', true, true) ON CONFLICT DO NOTHING")
+            .bind(actor_id).bind(format!("pg_currency_actor_{actor_id}")).bind(format!("pg-currency-{actor_id}@example.com")).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO guests (id, first_name, last_name, nick_name) OVERRIDING SYSTEM VALUE VALUES ($1, 'Currency', 'Guest', 'Currency Guest') ON CONFLICT DO NOTHING")
+            .bind(guest_id).execute(&pool).await.unwrap();
+        // Own room type (identity id), so the shared CI database's room_types
+        // sequence is not left colliding with a fixed id.
+        let room_type_id: i64 = sqlx::query_scalar(
+            "INSERT INTO room_types (name, code, base_price) VALUES ('Currency Type', 'CUR960', 100.0) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO rooms (id, room_number, room_type_id, status, is_active) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, 'available', true)")
+            .bind(room_id).bind(format!("R{room_id}")).bind(room_type_id).execute(&pool).await.unwrap();
+
+        let original: Option<String> =
+            sqlx::query_scalar("SELECT value FROM system_settings WHERE key = 'currency'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        sqlx::query(
+            "INSERT INTO system_settings (key, value) VALUES ('currency', ' sgd ') \
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let configured = hotel_app_be::modules::settings::service::hotel_currency(&pool).await;
+        let db_configured: String = sqlx::query_scalar("SELECT public.hotel_currency()::text")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let input = BookingInput {
+            rate_plan_id: None,
+            commission_type_override: None,
+            commission_value_override: None,
+            commission_scope_override: None,
+            guest_id,
+            room_id,
+            check_in_date: "2027-07-01".to_string(),
+            check_out_date: "2027-07-03".to_string(),
+            post_type: None,
+            rate_code: None,
+            booking_remarks: None,
+            is_tourist: None,
+            tourism_tax_amount: None,
+            extra_bed_count: None,
+            extra_bed_charge: None,
+            late_checkout_penalty: None,
+            payment_method: Some("Cash".to_string()),
+            payment_status: None,
+            amount_paid: Some(50.0),
+            source: Some("walk_in".to_string()),
+            booking_channel_id: None,
+            ota_reference: None,
+            booking_number: Some("BK-CURRENCY-960".to_string()),
+            deposit_paid: None,
+            deposit_amount: None,
+            deposit_payment_method: None,
+            room_rate_override: None,
+            special_requests: None,
+            daily_rates: None,
+            cleaning_preference: None,
+            company_id: None,
+            company_name: None,
+        };
+        let created = create_booking_handler(State(pool.clone()), Extension(actor_id), Json(input))
+            .await
+            .map(|Json(b)| b);
+
+        // A payment written without a currency (desk top-up path) takes its
+        // booking's currency, even after the hotel setting changes.
+        let mut later_payment: Option<String> = None;
+        if let Ok(booking) = &created {
+            sqlx::query("UPDATE system_settings SET value = 'MYR' WHERE key = 'currency'")
+                .execute(&pool)
+                .await
+                .unwrap();
+            later_payment = sqlx::query_scalar(
+                "INSERT INTO payments (uuid, booking_id, amount, payment_method, payment_type, status) \
+                 VALUES (gen_random_uuid(), $1, 10, 'Cash', 'booking', 'completed') \
+                 RETURNING currency",
+            )
+            .bind(booking.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        }
+
+        let booking_currency: Option<String> = sqlx::query_scalar(
+            "SELECT currency FROM bookings WHERE booking_number = 'BK-CURRENCY-960'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+        let payment_currencies: Vec<Option<String>> = sqlx::query_scalar(
+            "SELECT p.currency FROM payments p JOIN bookings b ON b.id = p.booking_id \
+             WHERE b.room_id = $1 ORDER BY p.id",
+        )
+        .bind(room_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let usd_defaults: Vec<String> = sqlx::query_scalar(
+            "SELECT table_name::text FROM information_schema.columns \
+             WHERE table_schema = 'public' AND column_name = 'currency' \
+               AND column_default ILIKE '%USD%'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        match original {
+            Some(value) => {
+                sqlx::query("UPDATE system_settings SET value = $1 WHERE key = 'currency'")
+                    .bind(value)
+                    .execute(&pool)
+                    .await
+                    .unwrap()
+            }
+            None => sqlx::query("DELETE FROM system_settings WHERE key = 'currency'")
+                .execute(&pool)
+                .await
+                .unwrap(),
+        };
+        cleanup(&pool, room_id, guest_id, actor_id).await;
+        sqlx::query("DELETE FROM room_types WHERE id = $1")
+            .bind(room_type_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(configured, "SGD");
+        assert_eq!(db_configured, "SGD");
+        created.expect("staff booking should be created");
+        assert_eq!(booking_currency.as_deref(), Some("SGD"));
+        assert!(payment_currencies.len() >= 2, "{payment_currencies:?}");
+        assert!(
+            payment_currencies
+                .iter()
+                .all(|c| c.as_deref() == Some("SGD")),
+            "payments follow their booking's currency: {payment_currencies:?}"
+        );
+        assert_eq!(later_payment.as_deref(), Some("SGD"));
+        assert!(
+            usd_defaults.is_empty(),
+            "USD column defaults remain: {usd_defaults:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

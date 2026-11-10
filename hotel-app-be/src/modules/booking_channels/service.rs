@@ -780,12 +780,7 @@ pub async fn preview(
     )
     .await?;
 
-    let currency = crate::modules::settings::service::get_setting_value(pool, "currency")
-        .await
-        .ok()
-        .map(|v| v.trim().to_ascii_uppercase())
-        .filter(|v| v.len() == 3)
-        .unwrap_or_else(|| "MYR".to_string());
+    let currency = crate::modules::settings::service::hotel_currency(pool).await;
 
     let selling_subtotal = quote.selling_subtotal;
     Ok(ChannelPricePreview {
@@ -838,12 +833,7 @@ pub async fn matrix(
         .collect();
     let rules = repository::active_pricing_rules(pool, &channel_ids, date, date).await?;
 
-    let currency = crate::modules::settings::service::get_setting_value(pool, "currency")
-        .await
-        .ok()
-        .map(|v| v.trim().to_ascii_uppercase())
-        .filter(|v| v.len() == 3)
-        .unwrap_or_else(|| "MYR".to_string());
+    let currency = crate::modules::settings::service::hotel_currency(pool).await;
 
     let mut cells = Vec::with_capacity(channels.len() * room_types.len());
     for channel in &channels {

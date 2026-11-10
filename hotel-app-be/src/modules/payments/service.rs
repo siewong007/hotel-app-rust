@@ -1350,10 +1350,10 @@ pub async fn queue_checkout_receipt_email(
 // ===========================================================================
 
 /// Last-resort settlement currency. Only used when a booking's `currency` column
-/// is somehow absent/empty (Postgres allows NULL — the column is
-/// `varchar(3) DEFAULT 'USD'` with no NOT NULL constraint). The real currency is
-/// read from `booking.currency` (populated by the guest-portal `BOOKING_SELECT`).
-const DEFAULT_CURRENCY: &str = "USD";
+/// is somehow absent/empty (the column is nullable; new rows default to
+/// `public.hotel_currency()`). The real currency is read from
+/// `booking.currency` (populated by the guest-portal `BOOKING_SELECT`).
+const DEFAULT_CURRENCY: &str = crate::modules::settings::service::FALLBACK_CURRENCY;
 
 /// The booking's real settlement currency, falling back to [`DEFAULT_CURRENCY`]
 /// only when the column is NULL/empty. This threads `bookings.currency` through

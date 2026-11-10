@@ -150,12 +150,16 @@ describe('formatDateForDisplay / formatCurrency', () => {
     expect(formatted).toMatch(/2026/);
   });
 
-  it('formats a numeric amount as USD currency', () => {
-    expect(formatCurrency(1234.5)).toBe('$1,234.50');
+  it('formats a numeric amount in the hotel currency', () => {
+    expect(formatCurrency(1234.5)).toBe('RM 1,234.50');
   });
 
-  it('formats a string amount as USD currency', () => {
-    expect(formatCurrency('99.9')).toBe('$99.90');
+  it('formats a string amount in the hotel currency', () => {
+    expect(formatCurrency('99.9')).toBe('RM 99.90');
+  });
+
+  it('formats in an explicit currency when given', () => {
+    expect(formatCurrency(10, 'USD')).toBe('$10.00');
   });
 });
 
@@ -247,7 +251,7 @@ describe('enhanceBookingDetails', () => {
     const enhanced = enhanceBookingDetails(booking);
 
     expect(enhanced.number_of_nights).toBe(3);
-    expect(enhanced.formatted_total).toBe('$300.00');
+    expect(enhanced.formatted_total).toBe('RM 300.00');
     expect(enhanced.is_active).toBe(true);
     expect(enhanced.can_void).toBe(true);
     expect(enhanced.can_modify).toBe(false); // checked_in bookings cannot be modified

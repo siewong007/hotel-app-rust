@@ -13,7 +13,8 @@ import {
 } from '../types';
 import { multiplyMoney, sumMoney, toMoneyNumber } from './money';
 import { formatStatusLabel } from './formatters';
-import { dateFormatter, numberFormatter } from '../i18n/format';
+import { dateFormatter } from '../i18n/format';
+import { formatCurrency as formatHotelCurrency } from './currency';
 
 /**
  * Validate booking dates
@@ -150,12 +151,11 @@ export const formatDateForDisplay = (dateString: string): string => {
 };
 
 /**
- * Format currency for display
+ * Format currency for display, in the given code or the hotel's configured
+ * currency (never a hard-coded USD).
  */
-export const formatCurrency = (amount: number | string): string => {
-  const numAmount = toMoneyNumber(amount);
-  return numberFormatter({ style: 'currency', currency: 'USD' }).format(numAmount);
-};
+export const formatCurrency = (amount: number | string, currencyCode?: string): string =>
+  formatHotelCurrency(toMoneyNumber(amount), currencyCode);
 
 /**
  * Get booking status color

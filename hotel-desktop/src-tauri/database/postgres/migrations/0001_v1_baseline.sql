@@ -428,6 +428,62 @@ COMMENT ON FUNCTION public.prevent_audit_log_mutation() IS 'Trigger body that ma
 
 
 --
+-- Name: hotel_currency(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.hotel_currency() RETURNS character varying
+    LANGUAGE sql STABLE
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+    SELECT COALESCE(
+        (SELECT upper(btrim(s.value))
+           FROM public.system_settings s
+          WHERE s.key = 'currency'
+            AND btrim(s.value) ~ '^[A-Za-z]{3}$'
+          LIMIT 1),
+        'MYR'
+    )::character varying(3)
+$$;
+
+
+--
+-- Name: fill_booking_currency(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.fill_booking_currency() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+BEGIN
+    IF NEW.currency IS NULL OR btrim(NEW.currency) = '' THEN
+        NEW.currency := public.hotel_currency();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: fill_currency_from_booking(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.fill_currency_from_booking() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+BEGIN
+    IF NEW.currency IS NULL OR btrim(NEW.currency) = '' THEN
+        SELECT NULLIF(btrim(b.currency), '') INTO NEW.currency
+          FROM public.bookings b
+         WHERE b.id = NEW.booking_id;
+        NEW.currency := COALESCE(NEW.currency, public.hotel_currency());
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: gen_uuidv7(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1715,7 +1771,7 @@ CREATE TABLE public.bookings (
     discount_amount numeric(12,2) DEFAULT 0,
     discount_percentage numeric(5,2) DEFAULT 0.00,
     total_amount numeric(12,2) NOT NULL,
-    currency character varying(3) DEFAULT 'USD'::character varying,
+    currency character varying(3) DEFAULT public.hotel_currency(),
     rate_override_weekday numeric(10,2),
     rate_override_weekend numeric(10,2),
     daily_rates jsonb,
@@ -2465,7 +2521,7 @@ CREATE TABLE public.customer_ledgers (
     description text NOT NULL,
     expense_type character varying(100) NOT NULL,
     amount numeric(10,2) NOT NULL,
-    currency character varying(3) DEFAULT 'MYR'::character varying,
+    currency character varying(3) DEFAULT public.hotel_currency(),
     status character varying(50) DEFAULT 'pending'::character varying NOT NULL,
     paid_amount numeric(10,2) DEFAULT 0.00,
     payment_method character varying(50),
@@ -3370,7 +3426,7 @@ CREATE TABLE public.invoices (
     discount_amount numeric(12,2) DEFAULT 0,
     total_amount numeric(12,2) NOT NULL,
     paid_amount numeric(12,2) DEFAULT 0,
-    currency character varying(3) DEFAULT 'USD'::character varying,
+    currency character varying(3),
     line_items jsonb NOT NULL,
     status character varying(20) DEFAULT 'draft'::character varying,
     pdf_url text,
@@ -3553,7 +3609,7 @@ CREATE TABLE public.loyalty_programs (
     name character varying(100) NOT NULL,
     description text,
     points_per_dollar numeric(10,4) DEFAULT 1.0,
-    currency character varying(3) DEFAULT 'USD'::character varying,
+    currency character varying(3) DEFAULT public.hotel_currency(),
     is_active boolean DEFAULT true,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
@@ -4204,7 +4260,7 @@ CREATE TABLE public.payments (
     uuid uuid DEFAULT public.gen_uuidv7() NOT NULL,
     booking_id bigint NOT NULL,
     amount numeric(12,2) NOT NULL,
-    currency character varying(3) DEFAULT 'USD'::character varying,
+    currency character varying(3),
     payment_method character varying(50) NOT NULL,
     payment_type character varying(20) DEFAULT 'booking'::character varying,
     transaction_id character varying(255),
@@ -4480,7 +4536,7 @@ CREATE TABLE public.promotions (
     discount_type character varying(24) NOT NULL,
     discount_value numeric(12,2) NOT NULL,
     max_discount_amount numeric(12,2),
-    currency character varying(3) DEFAULT 'USD'::character varying NOT NULL,
+    currency character varying(3) DEFAULT public.hotel_currency() NOT NULL,
     claim_starts_at timestamp with time zone,
     claim_ends_at timestamp with time zone,
     stay_starts_on date,
@@ -8747,6 +8803,27 @@ CREATE TRIGGER trg_audit_logs_no_truncate BEFORE TRUNCATE ON public.audit_logs_d
 
 
 --
+-- Name: bookings trg_fill_booking_currency; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fill_booking_currency BEFORE INSERT ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.fill_booking_currency();
+
+
+--
+-- Name: payments trg_fill_payment_currency; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fill_payment_currency BEFORE INSERT ON public.payments FOR EACH ROW EXECUTE FUNCTION public.fill_currency_from_booking();
+
+
+--
+-- Name: invoices trg_fill_invoice_currency; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fill_invoice_currency BEFORE INSERT ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.fill_currency_from_booking();
+
+
+--
 -- Name: bookings trg_enforce_booking_tourism_tax; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -10904,7 +10981,7 @@ CREATE TABLE public.booking_groups (
     tax_amount numeric(12,2) DEFAULT 0 NOT NULL,
     tourism_tax_amount numeric(12,2) DEFAULT 0 NOT NULL,
     total_amount numeric(12,2) DEFAULT 0 NOT NULL,
-    currency character varying(3) DEFAULT 'MYR'::character varying NOT NULL,
+    currency character varying(3) DEFAULT public.hotel_currency() NOT NULL,
     voucher_id bigint REFERENCES public.vouchers(id) ON DELETE SET NULL,
     hold_expires_at timestamp with time zone,
     portal_request_id character varying(128),

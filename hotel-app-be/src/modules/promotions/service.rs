@@ -517,12 +517,7 @@ async fn with_hotel_currency(pool: &DbPool, mut input: PromotionInput) -> Promot
 }
 
 async fn hotel_currency(pool: &DbPool) -> String {
-    crate::modules::settings::service::get_setting_value(pool, "currency")
-        .await
-        .ok()
-        .map(|value| value.trim().to_ascii_uppercase())
-        .filter(|value| value.len() == 3)
-        .unwrap_or_else(|| "MYR".to_string())
+    crate::modules::settings::service::hotel_currency(pool).await
 }
 
 pub async fn create_admin_promotion(

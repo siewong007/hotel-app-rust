@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { formatCurrency, formatCurrencyCustom, getCurrencySymbol, getCurrencyInfo, setCurrentCurrency, toNumber, SUPPORTED_CURRENCIES } from './currency';
 
 // Mock hotel settings to return empty object so no-arg tests exercise
-// the DEFAULT_CURRENCY='USD' fallback path (correct for CI determinism).
+// the DEFAULT_CURRENCY='MYR' fallback path (correct for CI determinism).
 vi.mock('./hotelSettings', () => ({
   getHotelSettings: () => ({}),
 }));
@@ -19,19 +19,19 @@ describe('currency utilities', () => {
   });
 
   it('formats numeric values as currency strings', () => {
-    expect(formatCurrency(1234.50)).toBe('$1,234.50');
-    expect(formatCurrency(0)).toBe('$0.00');
-    expect(formatCurrency(99.99)).toBe('$99.99');
+    expect(formatCurrency(1234.50)).toBe('RM 1,234.50');
+    expect(formatCurrency(0)).toBe('RM 0.00');
+    expect(formatCurrency(99.99)).toBe('RM 99.99');
   });
 
   it('formats string values as currency strings', () => {
-    expect(formatCurrency('180.50')).toBe('$180.50');
-    expect(formatCurrency('0')).toBe('$0.00');
+    expect(formatCurrency('180.50')).toBe('RM 180.50');
+    expect(formatCurrency('0')).toBe('RM 0.00');
   });
 
   it('handles null and undefined gracefully', () => {
-    expect(formatCurrency(null)).toBe('$0.00');
-    expect(formatCurrency(undefined)).toBe('$0.00');
+    expect(formatCurrency(null)).toBe('RM 0.00');
+    expect(formatCurrency(undefined)).toBe('RM 0.00');
   });
 
   it('formats with specific currency codes', () => {
@@ -65,7 +65,7 @@ describe('currency utilities', () => {
 
   it('falls back to default currency for unknown codes', () => {
     const info = getCurrencyInfo('XYZ');
-    expect(info.code).toBe('USD');
+    expect(info.code).toBe('MYR');
   });
 
   it('sets currency preference in localStorage', () => {

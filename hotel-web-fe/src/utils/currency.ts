@@ -97,8 +97,9 @@ export const SUPPORTED_CURRENCIES: Record<string, CurrencyInfo> = {
   },
 };
 
-// Default currency
-const DEFAULT_CURRENCY = 'USD';
+// Fallback when the hotel has no configured currency (matches the backend's
+// `public.hotel_currency()` fallback).
+export const DEFAULT_CURRENCY = 'MYR';
 
 // Get currency from localStorage or hotel settings or default
 export const getCurrentCurrency = (): string => {

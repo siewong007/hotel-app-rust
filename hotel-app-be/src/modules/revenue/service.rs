@@ -216,12 +216,7 @@ async fn resolve_range(
 }
 
 async fn currency(pool: &DbPool) -> String {
-    crate::modules::settings::service::get_setting_value(pool, "currency")
-        .await
-        .ok()
-        .map(|value| value.trim().to_ascii_uppercase())
-        .filter(|value| value.len() == 3)
-        .unwrap_or_else(|| "USD".to_string())
+    crate::modules::settings::service::hotel_currency(pool).await
 }
 
 fn ratio_pct(part: Decimal, whole: i64) -> Decimal {

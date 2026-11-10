@@ -253,12 +253,52 @@ pub async fn process_auto_checkin_checkout(pool: &DbPool) -> Result<serde_json::
     }))
 }
 
+/// Currency used when `system_settings.currency` is unset or malformed. The
+/// database's `public.hotel_currency()` uses the same fallback.
+pub const FALLBACK_CURRENCY: &str = "MYR";
+
+/// A settings value as an ISO 4217 code: trimmed, upper-cased, three letters.
+pub fn normalize_currency(raw: &str) -> Option<String> {
+    let code = raw.trim().to_ascii_uppercase();
+    (code.len() == 3 && code.chars().all(|c| c.is_ascii_alphabetic())).then_some(code)
+}
+
+/// The hotel's configured currency (`system_settings.currency`), falling back
+/// to [`FALLBACK_CURRENCY`]. Every money column defaults to this, never USD.
+pub async fn hotel_currency(pool: &DbPool) -> String {
+    get_setting_value(pool, "currency")
+        .await
+        .ok()
+        .as_deref()
+        .and_then(normalize_currency)
+        .unwrap_or_else(|| FALLBACK_CURRENCY.to_string())
+}
+
 pub async fn get_setting_value(pool: &DbPool, key: &str) -> Result<String, ApiError> {
     let value = SettingsRepository::get_value(pool, key)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Setting '{}' not found", key)))?;
 
     Ok(value)
+}
+
+#[cfg(test)]
+mod currency_tests {
+    use super::{FALLBACK_CURRENCY, normalize_currency};
+
+    #[test]
+    fn falls_back_to_ringgit_not_usd() {
+        assert_eq!(FALLBACK_CURRENCY, "MYR");
+    }
+
+    #[test]
+    fn normalizes_configured_codes() {
+        assert_eq!(normalize_currency(" myr ").as_deref(), Some("MYR"));
+        assert_eq!(normalize_currency("SGD").as_deref(), Some("SGD"));
+        for bad in ["", "RM", "MYRR", "12$"] {
+            assert_eq!(normalize_currency(bad), None, "{bad}");
+        }
+    }
 }
 
 #[cfg(test)]

@@ -41,7 +41,7 @@ export const EMPTY_PROMOTION_INPUT: PromotionInput = {
   discount_type: 'percentage',
   discount_value: 10,
   max_discount_amount: null,
-  currency: 'USD',
+  currency: '', // empty = the hotel's configured currency (filled by the editor and the API)
   claim_starts_at: null,
   claim_ends_at: null,
   stay_starts_on: null,

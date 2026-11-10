@@ -16,7 +16,7 @@ export function formatPromotionDiscount(
     return t('promotions:discount.percentOff', { value: promotion.discount_value });
   }
 
-  return formatCurrencyAmount(promotion.discount_value, promotion.currency || 'USD');
+  return formatCurrencyAmount(promotion.discount_value, promotion.currency || getCurrentCurrency());
 }
 
 export function formatPromotionDate(value?: string | null): string | null {
@@ -132,7 +132,7 @@ export function formatCurrencyAmount(amount: number, currency: string): string {
   try {
     return formatNumber(amount, {
       style: 'currency',
-      currency: currency || 'USD',
+      currency: currency || getCurrentCurrency(),
       maximumFractionDigits: 2,
     });
   } catch {

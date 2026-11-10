@@ -206,7 +206,7 @@ fn promotion_from_row(row: &DbRow) -> Promotion {
         max_discount_amount: get_opt_decimal(row, "max_discount_amount").map(decimal_to_f64),
         currency: row
             .try_get("currency")
-            .unwrap_or_else(|_| "USD".to_string()),
+            .unwrap_or_else(|_| crate::modules::settings::service::FALLBACK_CURRENCY.to_string()),
         claim_starts_at,
         claim_ends_at,
         stay_starts_on: row
@@ -260,7 +260,7 @@ fn public_promotion_from_row(row: &DbRow) -> PublicPromotion {
         max_discount_amount: get_opt_decimal(row, "max_discount_amount").map(decimal_to_f64),
         currency: row
             .try_get("currency")
-            .unwrap_or_else(|_| "USD".to_string()),
+            .unwrap_or_else(|_| crate::modules::settings::service::FALLBACK_CURRENCY.to_string()),
         claim_starts_at: row
             .try_get::<Option<DateTime<Utc>>, _>("claim_starts_at")
             .ok()
@@ -1017,9 +1017,9 @@ impl PromotionRepository {
             discount_given: discount_rows
                 .iter()
                 .map(|row| VoucherSummaryDiscount {
-                    currency: row
-                        .try_get("currency")
-                        .unwrap_or_else(|_| "USD".to_string()),
+                    currency: row.try_get("currency").unwrap_or_else(|_| {
+                        crate::modules::settings::service::FALLBACK_CURRENCY.to_string()
+                    }),
                     amount: decimal_to_f64(get_decimal(row, "amount")),
                 })
                 .collect(),

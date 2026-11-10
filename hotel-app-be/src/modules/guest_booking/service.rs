@@ -106,12 +106,7 @@ fn replay_anonymous_access_token_expiry(
 }
 
 async fn currency(pool: &DbPool) -> String {
-    crate::modules::settings::service::get_setting_value(pool, "currency")
-        .await
-        .ok()
-        .map(|value| value.trim().to_ascii_uppercase())
-        .filter(|value| value.len() == 3)
-        .unwrap_or_else(|| "MYR".to_string())
+    crate::modules::settings::service::hotel_currency(pool).await
 }
 
 fn base_rate_for_date(room_type: &RoomTypeInventory, date: NaiveDate) -> Decimal {

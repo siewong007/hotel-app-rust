@@ -890,7 +890,7 @@ INSERT INTO system_settings (key, value, value_type, category, description, is_p
 ('check_in_time', '15:00', 'string', 'general', 'Standard check-in time', true),
 ('check_out_time', '11:00', 'string', 'general', 'Standard check-out time', true),
 ('night_shift_time', '23:00', 'string', 'operations', 'Scheduled night audit posting time', false),
-('currency', 'USD', 'string', 'general', 'Default currency code', true),
+('currency', 'MYR', 'string', 'general', 'Default currency code', true),
 -- The backend mail-locale chain already falls back to this key when a guest
 -- has no language_preference, but the row was never seeded — so the setting
 -- could not be stored (update rejects unknown keys) and no Settings picker
@@ -1000,7 +1000,7 @@ ON CONFLICT (name) DO NOTHING;
 -- carried over from the pre-PostgreSQL seed data.
 
 INSERT INTO loyalty_programs (name, description, points_per_dollar, currency, is_active)
-SELECT 'Stay Rewards', 'Default guest loyalty program', 1.0000, 'USD', true
+SELECT 'Stay Rewards', 'Default guest loyalty program', 1.0000, 'MYR', true
 WHERE NOT EXISTS (SELECT 1 FROM loyalty_programs);
 
 -- One statement per tier, lowest rank first: `LoyaltyRepository::list_rewards`
@@ -1521,7 +1521,7 @@ BEGIN
             'welcome-deluxe-10', 'Welcome Deluxe 10%',
             'A one-time welcome voucher for 10% off a Deluxe Room.',
             'Valid for one eligible Deluxe Room booking. One voucher per guest.',
-            'published', 'voucher', 'percentage', 10.00, 'USD', 1, 0, 1,
+            'published', 'voucher', 'percentage', 10.00, 'MYR', 1, 0, 1,
             false, true, admin_user_id, admin_user_id
         ) ON CONFLICT (slug) DO NOTHING;
 
@@ -1612,7 +1612,7 @@ SELECT
     'july-deluxe-20-loyalty', 'July Deluxe Room 20% Voucher',
     'Redeem 2,000 loyalty points for 20% off one eligible Deluxe Room booking.',
     'One voucher per guest. Claim and stay dates must be in July 2026. Valid only for Deluxe Rooms.',
-    'published', 'voucher', 'percentage', 20.00, 'USD',
+    'published', 'voucher', 'percentage', 20.00, 'MYR',
     '2026-07-01 00:00:00+00', '2026-07-31 23:59:59+00', '2026-07-01', '2026-07-31',
     1, 0, 1, false, true, u.id, u.id
 FROM users u

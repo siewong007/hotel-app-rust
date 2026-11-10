@@ -441,7 +441,7 @@ export function GuestPaymentPanel({
           <PayPalScriptProvider
             options={{
               clientId: config.paypal_client_id as string,
-              currency: currency || getCurrentCurrency() || 'USD',
+              currency: currency || getCurrentCurrency(),
               intent: 'capture',
             }}
           >
