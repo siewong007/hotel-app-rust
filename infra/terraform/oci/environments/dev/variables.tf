@@ -171,7 +171,7 @@ variable "ssh_public_keys" {
 variable "repository_url" {
   description = "Git repository cloned by cloud-init."
   type        = string
-  default     = "https://github.com/siewong007/hotel-app.git"
+  default     = "https://github.com/siewong007/hotel-app-rust.git"
 }
 
 variable "repository_ref" {

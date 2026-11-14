@@ -16,7 +16,7 @@ update on user confirmation.
     `{ installed, version }`
   - `restart_app` — relaunches the app (separate so the UI can confirm first)
 - `plugins.updater` in `src-tauri/tauri.conf.json`:
-  - endpoint: `https://github.com/siewong007/hotel-app/releases/latest/download/latest.json`
+  - endpoint: `https://github.com/siewong007/hotel-app-rust/releases/latest/download/latest.json`
   - `pubkey`: the minisign public key (public data, committed)
   - `windows.installMode: passive`
 - `bundle.createUpdaterArtifacts: true` — every `tauri build` that produces
@@ -121,7 +121,7 @@ See `docs/guides/desktop-packaging.md` for the provisioning checklist.
 # like v0.0.0-test never produces a release. Bump the version, then tag it.
 git tag vX.Y.Z && git push origin vX.Y.Z   # maintainer only; must match conf version
 gh run watch                                # three builds + release
-curl -sL https://github.com/siewong007/hotel-app/releases/latest/download/latest.json
+curl -sL https://github.com/siewong007/hotel-app-rust/releases/latest/download/latest.json
 ```
 
 The last command must return JSON with `platforms.darwin-aarch64`,

@@ -6,7 +6,7 @@ blank_issues_enabled: true
 
 contact_links:
   - name: Report a security vulnerability (private)
-    url: https://github.com/siewong007/hotel-app/security/advisories/new
+    url: https://github.com/siewong007/hotel-app-rust/security/advisories/new
     about: >-
       Auth or RBAC bypass, SQL injection, exposure of secrets/tokens/eKYC
       evidence, or unsafe upload handling. Stays private between you and the

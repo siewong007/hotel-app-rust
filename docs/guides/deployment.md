@@ -19,7 +19,7 @@ This guide covers deploying the hotel management system in various environments.
 ## Quick Start (Docker Compose)
 
 ```bash
-git clone https://github.com/siewong007/hotel-app.git
+git clone https://github.com/siewong007/hotel-app-rust.git
 cd hotel-app
 cp .env.example .env
 # Edit .env — at minimum set JWT_SECRET and POSTGRES_PASSWORD

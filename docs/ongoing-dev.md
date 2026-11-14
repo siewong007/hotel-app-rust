@@ -105,7 +105,7 @@ Standing policy (decisions with no other home):
   `required_status_checks` rule with 17 checks. Its bypass list is
   `RepositoryRole: always`, so repository admins can still push straight to
   master while everyone else must open a PR. Verified 2026-10-05 with
-  `gh api repos/siewong007/hotel-app/rules/branches/master`; check again
+  `gh api repos/siewong007/hotel-app-rust/rules/branches/master`; check again
   before assuming either way.
 - **Guest portal forgot-password and max-booking-window: won't do.** Neither
   feature is wanted, so do not re-propose them as gaps.

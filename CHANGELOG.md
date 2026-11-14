@@ -7,7 +7,7 @@ which are versioned and released together.
 Entries describe what shipped in each release, grouped by user impact. Internal
 refactors, dependency bumps and tooling changes are omitted unless they affect
 users, administrators, deployment or security. Published releases and downloads:
-[github.com/siewong007/hotel-app/releases](https://github.com/siewong007/hotel-app/releases).
+[github.com/siewong007/hotel-app-rust/releases](https://github.com/siewong007/hotel-app-rust/releases).
 
 ## Unreleased (since v0.3.0)
 
