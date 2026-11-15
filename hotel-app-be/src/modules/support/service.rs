@@ -71,7 +71,7 @@ fn conversation_number() -> String {
     format!(
         "SUP-{}-{}",
         Utc::now().format("%Y%m%d"),
-        &suffix[..8].to_ascii_uppercase()
+        suffix[..8].to_ascii_uppercase()
     )
 }
 

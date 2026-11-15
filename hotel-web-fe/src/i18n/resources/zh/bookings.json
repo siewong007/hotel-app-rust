@@ -233,6 +233,9 @@
     "phone": "电话号码",
     "phoneOptional": "选填",
     "paymentSection": "支付",
+    "deskChargesTitle": "前台费用",
+    "deskChargesDescription": "线上平台不收取本地旅游税或加床费。请在办理入住时直接向客人收取。",
+    "collectDeskCharges": "办理入住时收取前台费用",
     "settledOnlineNotice": "款项已在{{platform}}结清。全额（{{amount}}）将在入住时自动入账 — 请保持“已线上结清”不变。仅在改为前台收款时才切换到“立即支付”。",
     "makePaymentNow": "立即支付",
     "payLater": "稍后支付",
@@ -434,6 +437,7 @@
     "errors": {
       "paymentRetryAmount": "入住已完成。请输入有效的收款金额以重试入账。",
       "paymentFailed": "客人已入住，但款项未能入账。请重试。",
+      "deskChargesFailed": "客人已入住，但记录前台费用失败。您可以稍后在预订支付中补录。",
       "checkInFailed": "客人入住办理失败",
       "noPhoneNotice": "该客人未留电话号码 — 方便时请向客人索取联系方式。"
     },

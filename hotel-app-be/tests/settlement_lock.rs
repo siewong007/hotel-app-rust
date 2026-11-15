@@ -418,32 +418,33 @@ fn dec(v: &str) -> Decimal {
 
 #[test]
 fn checkin_autopost_holds_back_the_increase_since_booking() {
-    // Upgrade before check-in: channel booked 100, total now 130.
+    // Upgrade before check-in: channel booked 100, total now 130. Desk charges 0.
     assert_eq!(
-        split_online_checkin_autopost(dec("130"), dec("130"), Some(dec("100"))),
+        split_online_checkin_autopost(dec("130"), dec("130"), Some(dec("100")), dec("0")),
         Some(OnlineCheckinAutopost {
             post: dec("100"),
             held_back: dec("30")
         })
     );
-    // Tourism tax still rides with the channel amount, as before.
+    // Tourism tax (10) is a desk charge; channel amount is capped at 100,
+    // so post is 100 and held_back is 40 (30 upgrade + 10 tourism tax).
     assert_eq!(
-        split_online_checkin_autopost(dec("140"), dec("130"), Some(dec("100"))),
+        split_online_checkin_autopost(dec("140"), dec("130"), Some(dec("100")), dec("10")),
         Some(OnlineCheckinAutopost {
-            post: dec("110"),
-            held_back: dec("30")
+            post: dec("100"),
+            held_back: dec("40")
         })
     );
     // Unchanged or lowered total: the whole remainder, as before.
     assert_eq!(
-        split_online_checkin_autopost(dec("100"), dec("100"), None),
+        split_online_checkin_autopost(dec("100"), dec("100"), None, dec("0")),
         Some(OnlineCheckinAutopost {
             post: dec("100"),
             held_back: dec("0")
         })
     );
     assert_eq!(
-        split_online_checkin_autopost(dec("80"), dec("80"), Some(dec("150"))),
+        split_online_checkin_autopost(dec("80"), dec("80"), Some(dec("150")), dec("0")),
         Some(OnlineCheckinAutopost {
             post: dec("80"),
             held_back: dec("0")
@@ -451,11 +452,16 @@ fn checkin_autopost_holds_back_the_increase_since_booking() {
     );
     // Only the upgrade difference is still owed: nothing for the channel.
     assert_eq!(
-        split_online_checkin_autopost(dec("30"), dec("130"), Some(dec("100"))),
+        split_online_checkin_autopost(dec("30"), dec("130"), Some(dec("100")), dec("0")),
         None
     );
     assert_eq!(
-        split_online_checkin_autopost(dec("0"), dec("100"), None),
+        split_online_checkin_autopost(dec("0"), dec("100"), None, dec("0")),
+        None
+    );
+    // Only tourism tax is still owed (channel already paid): nothing for the channel.
+    assert_eq!(
+        split_online_checkin_autopost(dec("20"), dec("160"), Some(dec("160")), dec("20")),
         None
     );
 }

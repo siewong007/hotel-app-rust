@@ -61,7 +61,7 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { getHotelSettings } from '../../../utils/hotelSettings';
 import { useCheckInFormData } from '../hooks/useCheckInFormData';
 import { emitApiNotification } from '../../../utils/apiNotifications';
-import { divideMoney, isPositiveMoney, multiplyMoney, toMoneyNumber } from '../../../utils/money';
+import { addMoney, divideMoney, isPositiveMoney, multiplyMoney, toMoneyNumber } from '../../../utils/money';
 import { getBookingChannelInfo } from '../utils/bookingChannel';
 import { useTranslation } from '../../../i18n';
 import type { ValidationErrors, CompanyOption } from './checkIn/checkInTypes';
@@ -201,6 +201,9 @@ export default function EnhancedCheckInModal({
   const [paymentChoice, setPaymentChoice] = useState<'pay_now' | 'pay_later'>('pay_later');
   const [paymentType, setPaymentType] = useState('Cash');
   const [amountPaid, setAmountPaid] = useState(0);
+  const [collectDeskCharges, setCollectDeskCharges] = useState(true);
+  const [deskChargesAmount, setDeskChargesAmount] = useState(0);
+  const [deskChargesMethod, setDeskChargesMethod] = useState('Cash');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardName, setCardName] = useState('');
@@ -295,9 +298,20 @@ export default function EnhancedCheckInModal({
     setSpecialRequests(booking.special_requests || '');
 
     // Initialize payment and deposit from booking
+    const isOnline = (booking.source || '').trim().toLowerCase() === 'online';
     const totalAmt = toMoneyNumber(booking.total_amount);
+    const tourismTax = toMoneyNumber(booking.tourism_tax_amount);
+    const extraBed = toMoneyNumber(booking.extra_bed_charge);
+    const initialDeskCharges = addMoney(tourismTax, extraBed);
+
+    // For non-online bookings (walk-in, phone, direct), the full billable balance includes room, tourism tax, and extra bed:
+    const billableTotal = isOnline ? totalAmt : addMoney(totalAmt, initialDeskCharges);
     const settingsDeposit = getHotelSettings().deposit_amount;
-    setAmountPaid(totalAmt);
+    setAmountPaid(billableTotal);
+
+    setDeskChargesAmount(initialDeskCharges);
+    setCollectDeskCharges(isPositiveMoney(initialDeskCharges));
+    setDeskChargesMethod('Cash');
     if (booking.payment_status === 'paid') {
       setPaymentChoice('pay_now');
     } else {
@@ -669,6 +683,35 @@ export default function EnhancedCheckInModal({
         }
       }
 
+      // Record desk charges (tourism tax / extra bed) for online reservations if selected
+      if (isOnlineReservation && collectDeskCharges && isPositiveMoney(deskChargesAmount)) {
+        try {
+          const deskAttempt = getIdempotencyAttempt(null, JSON.stringify({
+            booking_id: typeof booking.id === 'string' ? parseInt(booking.id) : booking.id,
+            amount: toMoneyNumber(deskChargesAmount).toFixed(2),
+            payment_method: deskChargesMethod,
+            payment_type: 'booking',
+            notes: 'Desk charges (tourism tax / extra bed) collected at check-in',
+          }));
+          await InvoicesService.recordPayment({
+            booking_id: typeof booking.id === 'string' ? parseInt(booking.id) : booking.id,
+            amount: toMoneyNumber(deskChargesAmount),
+            payment_method: deskChargesMethod,
+            payment_type: 'booking',
+            notes: 'Desk charges (tourism tax / extra bed) collected at check-in',
+            idempotency_key: deskAttempt.key,
+          });
+        } catch (deskErr) {
+          console.error('Failed to record desk charges at check-in:', deskErr);
+          emitApiNotification({
+            message: t('enhancedCheckIn.errors.deskChargesFailed', {
+              defaultValue: 'Guest checked in, but recording desk charges failed. You can record it from the booking payments.',
+            }),
+            severity: 'warning',
+          });
+        }
+      }
+
       // Company-ledger creation is now handled server-side during checkout.
       // Frontend must not create company ledger entries here to avoid duplicate
       // postings or race conditions. Leave any admin-ledger creation to the
@@ -948,6 +991,12 @@ export default function EnhancedCheckInModal({
             isOnlineReservation={isOnlineReservation}
             onlinePlatformName={onlinePlatformName}
             paymentMethods={paymentMethods}
+            collectDeskCharges={collectDeskCharges}
+            setCollectDeskCharges={setCollectDeskCharges}
+            deskChargesAmount={deskChargesAmount}
+            setDeskChargesAmount={setDeskChargesAmount}
+            deskChargesMethod={deskChargesMethod}
+            setDeskChargesMethod={setDeskChargesMethod}
             cardExpiry={cardExpiry}
             cardName={cardName}
             cardNumber={cardNumber}

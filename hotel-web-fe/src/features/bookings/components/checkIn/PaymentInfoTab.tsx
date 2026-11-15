@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -22,7 +22,8 @@ import {
   ToggleButtonGroup,
 } from '@mui/material';
 import { Visibility as VisibilityIcon, VisibilityOff as VisibilityOffIcon, Add as AddIcon, Payment as PaymentIcon, MoneyOff as MoneyOffIcon, PersonAdd as PersonAddIcon, Business as BusinessIcon } from '@mui/icons-material';
-import { toMoneyNumber } from '../../../../utils/money';
+import { isPositiveMoney, toMoneyNumber } from '../../../../utils/money';
+import { getHotelSettings } from '../../../../utils/hotelSettings';
 import type { Booking, BookingUpdateRequest, BookingWithDetails, Guest } from '../../../../types';
 import type { CompanyOption, ValidationErrors } from './checkInTypes';
 import { useTranslation } from '../../../../i18n';
@@ -34,6 +35,12 @@ export interface PaymentInfoTabProps {
   isOnlineReservation: boolean;
   onlinePlatformName: string;
   paymentMethods: string[];
+  collectDeskCharges?: boolean;
+  setCollectDeskCharges?: React.Dispatch<React.SetStateAction<boolean>>;
+  deskChargesAmount?: number;
+  setDeskChargesAmount?: React.Dispatch<React.SetStateAction<number>>;
+  deskChargesMethod?: string;
+  setDeskChargesMethod?: React.Dispatch<React.SetStateAction<string>>;
   cardExpiry: string;
   cardName: string;
   cardNumber: string;
@@ -82,6 +89,12 @@ export function PaymentInfoTab({
   isOnlineReservation,
   onlinePlatformName,
   paymentMethods,
+  collectDeskCharges = true,
+  setCollectDeskCharges,
+  deskChargesAmount = 0,
+  setDeskChargesAmount,
+  deskChargesMethod = 'Cash',
+  setDeskChargesMethod,
   cardExpiry,
   cardName,
   cardNumber,
@@ -124,6 +137,13 @@ export function PaymentInfoTab({
   waiveReason,
 }: PaymentInfoTabProps) {
   const { t } = useTranslation('bookings');
+  const deskPaymentMethods = useMemo(() => {
+    const channelNames = (getHotelSettings().booking_channels ?? []).map((c) => c.name.toLowerCase());
+    const filtered = paymentMethods.filter(
+      (m) => !channelNames.some((c) => m.toLowerCase().includes(c) || c.includes(m.toLowerCase()))
+    );
+    return filtered.length > 0 ? filtered : ['Cash'];
+  }, [paymentMethods]);
   return (
       <Grid container spacing={2}>
         {/* Payment Section */}
@@ -432,6 +452,84 @@ export function PaymentInfoTab({
             <Alert severity="info">
               {t('checkIn.payLaterUnpaid')}
             </Alert>
+          </Grid>
+        )}
+
+        {isOnlineReservation && (isPositiveMoney(booking.tourism_tax_amount) || isPositiveMoney(booking.extra_bed_charge)) && (
+          <Grid size={12} sx={{ mt: 1 }}>
+            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'var(--hotel-surface-sunken)', borderColor: 'primary.light' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 600 }}>
+                  {t('checkIn.deskChargesTitle', { defaultValue: 'Front Desk Charges' })}
+                </Typography>
+                <Switch
+                  checked={Boolean(collectDeskCharges)}
+                  onChange={(e) => setCollectDeskCharges?.(e.target.checked)}
+                  color="primary"
+                  slotProps={{ input: { 'aria-label': t('checkIn.collectDeskCharges', { defaultValue: 'Collect front desk charges at check-in' }) } }}
+                />
+              </Box>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
+                {t('checkIn.deskChargesDescription', {
+                  defaultValue: 'Online channels do not collect local tourism tax or extra bed charges. Collect directly from the guest at check-in.',
+                })}
+              </Typography>
+
+              <Box sx={{ display: 'flex', gap: 1.5, mb: 1.5, flexWrap: 'wrap' }}>
+                {isPositiveMoney(booking.tourism_tax_amount) && (
+                  <Chip
+                    size="small"
+                    label={`${t('enhancedCheckIn.tourismTax', { defaultValue: 'Tourism Tax' })}: ${formatCurrency(toMoneyNumber(booking.tourism_tax_amount))}`}
+                    color="info"
+                    variant="outlined"
+                  />
+                )}
+                {isPositiveMoney(booking.extra_bed_charge) && (
+                  <Chip
+                    size="small"
+                    label={`${t('enhancedCheckIn.extraBed', { count: booking.extra_bed_count || 1, defaultValue: 'Extra Bed' })}: ${formatCurrency(toMoneyNumber(booking.extra_bed_charge))}`}
+                    color="info"
+                    variant="outlined"
+                  />
+                )}
+              </Box>
+
+              {collectDeskCharges && (
+                <Grid container spacing={2} sx={{ mt: 0.5 }}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>{t('checkIn.paymentMethod', { defaultValue: 'Payment Method' })}</InputLabel>
+                      <Select
+                        value={deskChargesMethod || 'Cash'}
+                        label={t('checkIn.paymentMethod', { defaultValue: 'Payment Method' })}
+                        onChange={(e) => setDeskChargesMethod?.(e.target.value)}
+                        inputProps={{ 'aria-label': t('checkIn.paymentMethod', { defaultValue: 'Payment Method' }) }}
+                      >
+                        {deskPaymentMethods.map((m) => (
+                          <MenuItem key={m} value={m}>{m}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label={t('checkIn.amountPaid', { defaultValue: 'Amount' })}
+                      type="number"
+                      value={deskChargesAmount ?? 0}
+                      onChange={(e) => setDeskChargesAmount?.(toMoneyNumber(e.target.value))}
+                      slotProps={{
+                        input: {
+                          startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>,
+                          inputProps: { min: 0, step: 0.01 },
+                        }
+                      }}
+                    />
+                  </Grid>
+                </Grid>
+              )}
+            </Paper>
           </Grid>
         )}
 

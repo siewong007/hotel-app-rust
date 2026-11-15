@@ -234,6 +234,9 @@
     "phone": "Phone Number",
     "phoneOptional": "Optional",
     "paymentSection": "Payment",
+    "deskChargesTitle": "Front Desk Charges",
+    "deskChargesDescription": "Online channels do not collect local tourism tax or extra bed charges. Collect directly from the guest at check-in.",
+    "collectDeskCharges": "Collect front desk charges at check-in",
     "settledOnlineNotice": "Payment was settled on {{platform}}. The full amount ({{amount}}) is recorded automatically on check-in — keep this on “Settled Online”. Switch to “Make Payment Now” only if you are collecting at the desk instead.",
     "makePaymentNow": "Make Payment Now",
     "payLater": "Pay Later",
@@ -435,6 +438,7 @@
     "errors": {
       "paymentRetryAmount": "Check-in is complete. Enter a valid payment amount to retry recording it.",
       "paymentFailed": "Guest is checked in, but payment could not be recorded. Please retry.",
+      "deskChargesFailed": "Guest is checked in, but recording front desk charges failed. You can record it from the booking payments.",
       "checkInFailed": "Failed to check in guest",
       "noPhoneNotice": "No phone number on file for this guest — please ask for a contact number when convenient."
     },

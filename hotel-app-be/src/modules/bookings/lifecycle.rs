@@ -3700,15 +3700,23 @@ pub struct OnlineCheckinAutopost {
 /// received (an upgrade, a re-rate), so the channel never paid it: it is held
 /// back from the auto-post and stays owed for the desk-remainder path. With no
 /// known original the current total stands in (the total never changed).
+/// `desk_charges` (tourism tax + extra bed) are front-desk charges that online
+/// channels never settle, so they are held back for the desk.
 pub fn split_online_checkin_autopost(
     outstanding: Decimal,
     current_total: Decimal,
     original_total: Option<Decimal>,
+    desk_charges: Decimal,
 ) -> Option<OnlineCheckinAutopost> {
+    let desk_charges = desk_charges.max(Decimal::ZERO);
     let original = original_total.unwrap_or(current_total);
-    let increase = (current_total - original).max(Decimal::ZERO);
-    let held_back = increase.min(outstanding.max(Decimal::ZERO));
-    let post = outstanding - increase;
+    let channel_obligation = original.min(current_total).max(Decimal::ZERO);
+    let billable_total = current_total + desk_charges;
+    let already_paid = (billable_total - outstanding).max(Decimal::ZERO);
+    let channel_unpaid = (channel_obligation - already_paid).max(Decimal::ZERO);
+    let room_outstanding = (outstanding - desk_charges).max(Decimal::ZERO);
+    let post = channel_unpaid.min(room_outstanding);
+    let held_back = outstanding - post;
     (post > Decimal::ZERO).then_some(OnlineCheckinAutopost { post, held_back })
 }
 
@@ -3761,20 +3769,22 @@ pub async fn online_checkin_autopost_amount_tx(
     // The settled SUM (completed, non-refund, non-deposit, non-forfeited)
     // mirrors `recompute_booking_payment_status_tx`, so the posted amount and
     // the resulting status agree; the remainder covers room + tourism tax +
-    // extra bed.
-    let row: Option<(Decimal, Decimal)> = sqlx::query_as(
+    // extra bed. Desk charges (tourism tax + extra bed) are held back for the
+    // desk.
+    let row: Option<(Decimal, Decimal, Decimal)> = sqlx::query_as(
         "SELECT b.total_amount, \
+                COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) AS desk_charges, \
                 b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) \
                   - COALESCE((SELECT SUM(p.amount) FROM payments p \
                      WHERE p.booking_id = b.id AND p.status = 'completed' \
-                       AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) \
+                       AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) AS outstanding \
          FROM bookings b WHERE b.id = $1",
     )
     .bind(booking_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
-    let Some((current_total, outstanding)) = row else {
+    let Some((current_total, desk_charges, outstanding)) = row else {
         return Ok(None);
     };
     if outstanding <= Decimal::ZERO {
@@ -3785,6 +3795,7 @@ pub async fn online_checkin_autopost_amount_tx(
         outstanding,
         current_total,
         original,
+        desk_charges,
     ))
 }
 

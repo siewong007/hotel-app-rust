@@ -232,6 +232,9 @@
     "phone": "電話號碼",
     "phoneOptional": "選填",
     "paymentSection": "付款",
+    "deskChargesTitle": "前台費用",
+    "deskChargesDescription": "線上平台不收取本地旅遊稅或加床費。請在辦理入住時直接向客人收取。",
+    "collectDeskCharges": "辦理入住時收取前台費用",
     "settledOnlineNotice": "款項已在{{platform}}結清。全額（{{amount}}）會在入住時自動記錄 — 請保持「線上已結清」。只有在櫃檯改為收款時才切換到「立即付款」。",
     "makePaymentNow": "立即付款",
     "payLater": "稍後付款",
@@ -433,6 +436,7 @@
     "errors": {
       "paymentRetryAmount": "入住已完成。請輸入有效的付款金額以重試記錄。",
       "paymentFailed": "賓客已入住，但付款無法記錄。請重試。",
+      "deskChargesFailed": "賓客已入住，但記錄前台費用失敗。您可以稍後在預訂付款中補錄。",
       "checkInFailed": "賓客入住失敗",
       "noPhoneNotice": "此賓客沒有電話號碼紀錄 — 請在方便時索取聯絡電話。"
     },

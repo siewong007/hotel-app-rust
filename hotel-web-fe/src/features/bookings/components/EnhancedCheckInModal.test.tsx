@@ -195,11 +195,11 @@ describe('EnhancedCheckInModal legal name collection', () => {
     vi.restoreAllMocks();
   });
 
-  const renderWith = async (overrides: Partial<Guest>) => {
+  const renderWith = async (overrides: Partial<Guest>, bookingOverrides?: Partial<Booking>) => {
     render(
       <EnhancedCheckInModal
         open
-        booking={booking}
+        booking={{ ...booking, ...bookingOverrides } as Booking}
         guest={{ ...guest, ...overrides } as Guest}
         onClose={mocks.onClose}
         onCheckInSuccess={mocks.onCheckInSuccess}
@@ -277,5 +277,72 @@ describe('EnhancedCheckInModal legal name collection', () => {
     expect(request.guest_update.first_name).toBe('Aisha');
     expect(request.guest_update.last_name).toBe('Rahman');
     expect('nick_name' in request.guest_update).toBe(false);
+  });
+
+  describe('desk charges and tourism tax collection', () => {
+    it('records tourism tax for online tourist bookings at check-in', async () => {
+      const dialog = await renderWith(
+        {
+          first_name: 'Ramdhany',
+          last_name: 'Iryanto',
+          tourism_type: 'foreign',
+        },
+        {
+          source: 'online',
+          is_tourist: true,
+          total_amount: 160,
+          tourism_tax_amount: 20,
+        },
+      );
+
+      // Switch to Payment tab
+      fireEvent.click(within(dialog).getByRole('tab', { name: /Payment/i }));
+
+      // Desk charges section is visible with tourism tax info
+      await waitFor(() =>
+        expect(within(dialog).getByText(/Front Desk Charges/i)).toBeDefined(),
+      );
+      expect(within(dialog).getByText(/Tourism Tax: RM20.00/i)).toBeDefined();
+
+      // Submit check-in
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Check In' }));
+
+      await waitFor(() => expect(mocks.checkInGuest).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mocks.recordPayment).toHaveBeenCalledTimes(1));
+
+      expect(mocks.recordPayment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          booking_id: 42,
+          amount: 20,
+          payment_method: 'Cash',
+          payment_type: 'booking',
+        }),
+      );
+    });
+
+    it('initializes amountPaid to include tourism tax for walk-in bookings', async () => {
+      const dialog = await renderWith(
+        {
+          first_name: 'John',
+          last_name: 'Smith',
+          tourism_type: 'foreign',
+        },
+        {
+          source: 'walk_in',
+          is_tourist: true,
+          total_amount: 100,
+          tourism_tax_amount: 10,
+        },
+      );
+
+      // Switch to Payment tab
+      fireEvent.click(within(dialog).getByRole('tab', { name: /Payment/i }));
+
+      // Amount paid should default to 110 (100 room + 10 tourism tax)
+      await waitFor(() => {
+        const amountInput = within(dialog).getByLabelText(/Amount Paid/i) as HTMLInputElement;
+        expect(amountInput.value).toBe('110');
+      });
+    });
   });
 });

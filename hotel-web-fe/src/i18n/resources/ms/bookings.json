@@ -233,6 +233,9 @@
     "phone": "Nombor Telefon",
     "phoneOptional": "Pilihan",
     "paymentSection": "Pembayaran",
+    "deskChargesTitle": "Caj Kaunter Hadapan",
+    "deskChargesDescription": "Saluran dalam talian tidak mengutip cukai pelancongan tempatan atau caj katil tambahan. Kutip terus daripada tetamu semasa daftar masuk.",
+    "collectDeskCharges": "Kutip caj kaunter semasa daftar masuk",
     "settledOnlineNotice": "Pembayaran telah diselesaikan di {{platform}}. Jumlah penuh ({{amount}}) direkodkan secara automatik semasa daftar masuk — kekalkan pilihan “Diselesaikan Dalam Talian”. Tukar kepada “Bayar Sekarang” hanya jika anda mengutip bayaran di kaunter.",
     "makePaymentNow": "Bayar Sekarang",
     "payLater": "Bayar Kemudian",
@@ -434,6 +437,7 @@
     "errors": {
       "paymentRetryAmount": "Daftar masuk selesai. Masukkan jumlah pembayaran yang sah untuk cuba merekodkannya semula.",
       "paymentFailed": "Tetamu telah mendaftar masuk, tetapi pembayaran tidak dapat direkodkan. Sila cuba lagi.",
+      "deskChargesFailed": "Tetamu telah mendaftar masuk, tetapi rekod caj kaunter hadapan gagal. Anda boleh merekodkannya dari senarai pembayaran.",
       "checkInFailed": "Gagal mendaftarkan tetamu masuk",
       "noPhoneNotice": "Tiada nombor telefon dalam rekod tetamu ini — sila minta nombor hubungan apabila sesuai."
     },
