@@ -38,10 +38,12 @@ import {
   Warning as WarningIcon,
 
   CalendarToday as CalendarIcon,
+  Close as CloseIcon,
   Refresh as RefreshIcon,
   Payment as PaymentIcon,
   MoneyOff as MoneyOffIcon,
   Login as LoginIcon,
+  Search as SearchIcon,
 } from '@mui/icons-material';
 import { BookingsService, GuestsService, RoomsService } from '../../../api';
 
@@ -93,11 +95,15 @@ interface TodayActivity {
   check_ins: number;
   check_outs: number;
   arrivals: Array<{
+    booking_id: string;
+    status: string;
     room_number: string;
     guest_name: string;
     time: string;
   }>;
   departures: Array<{
+    booking_id: string;
+    status: string;
     room_number: string;
     guest_name: string;
     time: string;
@@ -145,6 +151,8 @@ const ReceptionistDashboard: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
   const [newReservationsRefresh, setNewReservationsRefresh] = useState(0);
+  const [gridStatusFilter, setGridStatusFilter] = useState<'all' | 'available' | 'occupied' | 'reserved' | 'cleaning' | 'maintenance'>('all');
+  const [gridSearch, setGridSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomStatus | null>(null);
@@ -345,11 +353,15 @@ const ReceptionistDashboard: React.FC = () => {
         check_ins: todayCheckIns.length,
         check_outs: todayCheckOuts.length,
         arrivals: todayCheckIns.slice(0, 5).map((b) => ({
+          booking_id: String(b.id),
+          status: b.status,
           room_number: roomNumberById.get(String(b.room_id)) || t('dashboard:frontDesk.notAvailable'),
           guest_name: b.guest_name,
           time: b.check_in_date,
         })),
         departures: todayCheckOuts.slice(0, 5).map((b) => ({
+          booking_id: String(b.id),
+          status: b.status,
           room_number: roomNumberById.get(String(b.room_id)) || t('dashboard:frontDesk.notAvailable'),
           guest_name: b.guest_name,
           time: b.check_out_date,
@@ -595,6 +607,26 @@ const ReceptionistDashboard: React.FC = () => {
   const maintenanceRooms = roomStatusCounts.maintenance || 0;
   const occupancyRate = rooms.length > 0 ? ((occupiedRooms / rooms.length) * 100).toFixed(1) : '0';
 
+  const normalizedGridSearch = gridSearch.trim().toLowerCase();
+  const filteredOverviewRooms = rooms.filter((room) => {
+    if (gridStatusFilter !== 'all') {
+      if (gridStatusFilter === 'cleaning') {
+        if (!['cleaning', 'dirty', 'reserved_dirty'].includes(room.status)) return false;
+      } else if (gridStatusFilter === 'reserved') {
+        if (!['reserved', 'reserved_dirty'].includes(room.status)) return false;
+      } else if (room.status !== gridStatusFilter) {
+        return false;
+      }
+    }
+    if (normalizedGridSearch) {
+      const matchesRoom = room.room_number.toLowerCase().includes(normalizedGridSearch);
+      const matchesType = (room.room_type || '').toLowerCase().includes(normalizedGridSearch);
+      const matchesGuest = (room.current_guest || '').toLowerCase().includes(normalizedGridSearch);
+      if (!matchesRoom && !matchesType && !matchesGuest) return false;
+    }
+    return true;
+  });
+
   // Online reservations are settled on the booking platform; the backend
   // auto-records a payment for the outstanding balance when `source === 'online'`.
   const ciIsOnlineReservation = (checkinBooking?.source || '').trim().toLowerCase() === 'online';
@@ -622,66 +654,99 @@ const ReceptionistDashboard: React.FC = () => {
       {/* Summary Stats */}
       <Grid container spacing={{ xs: 1.25, sm: 2 }} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'var(--hotel-success-bg)', border: '1px solid var(--hotel-success-border)', color: 'var(--hotel-success)', boxShadow: 1 }}>
-            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center"
-                }}>
-                <Box>
-                  <Typography variant="h4" component="div" sx={{ fontWeight: 600 }}>
-                    {availableRooms}
-                  </Typography>
-                  <Typography variant="caption" sx={{ fontSize: '0.75rem', opacity: 0.9 }}>{t('dashboard:frontDesk.cards.availableRooms')}</Typography>
+          <Box
+            component={Link}
+            to="/room-management?status=available"
+            sx={{
+              display: 'block',
+              textDecoration: 'none',
+              color: 'inherit',
+              '&:hover .MuiCard-root': { transform: 'translateY(-2px)', boxShadow: 3 },
+            }}
+          >
+            <Card sx={{ bgcolor: 'var(--hotel-success-bg)', border: '1px solid var(--hotel-success-border)', color: 'var(--hotel-success)', boxShadow: 1, transition: 'transform 150ms ease, box-shadow 150ms ease' }}>
+              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}>
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 600 }}>
+                      {availableRooms}
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontSize: '0.75rem', opacity: 0.9 }}>{t('dashboard:frontDesk.cards.availableRooms')}</Typography>
+                  </Box>
+                  <AvailableIcon sx={{ fontSize: 32, opacity: 0.5 }} />
                 </Box>
-                <AvailableIcon sx={{ fontSize: 32, opacity: 0.5 }} />
-              </Box>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Box>
         </Grid>
 
         <Grid size={{ xs: 6, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'var(--hotel-warning-bg)', border: '1px solid var(--hotel-warning-border)', color: 'var(--hotel-warning)', boxShadow: 1 }}>
-            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center"
-                }}>
-                <Box>
-                  <Typography variant="h4" component="div" sx={{ fontWeight: 600 }}>
-                    {occupiedRooms}
-                  </Typography>
-                  <Typography variant="caption" sx={{ fontSize: '0.75rem', opacity: 0.9 }}>{t('dashboard:frontDesk.cards.occupiedRooms')}</Typography>
+          <Box
+            component={Link}
+            to="/room-management?status=occupied"
+            sx={{
+              display: 'block',
+              textDecoration: 'none',
+              color: 'inherit',
+              '&:hover .MuiCard-root': { transform: 'translateY(-2px)', boxShadow: 3 },
+            }}
+          >
+            <Card sx={{ bgcolor: 'var(--hotel-warning-bg)', border: '1px solid var(--hotel-warning-border)', color: 'var(--hotel-warning)', boxShadow: 1, transition: 'transform 150ms ease, box-shadow 150ms ease' }}>
+              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}>
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 600 }}>
+                      {occupiedRooms}
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontSize: '0.75rem', opacity: 0.9 }}>{t('dashboard:frontDesk.cards.occupiedRooms')}</Typography>
+                  </Box>
+                  <OccupiedIcon sx={{ fontSize: 32, opacity: 0.5 }} />
                 </Box>
-                <OccupiedIcon sx={{ fontSize: 32, opacity: 0.5 }} />
-              </Box>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Box>
         </Grid>
 
         <Grid size={{ xs: 6, sm: 6, md: 3 }}>
-          <Card sx={{ bgcolor: 'var(--hotel-info-bg)', border: '1px solid var(--hotel-info-border)', color: 'var(--hotel-info)', boxShadow: 1 }}>
-            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center"
-                }}>
-                <Box>
-                  <Typography variant="h4" component="div" sx={{ fontWeight: 600 }}>
-                    {reservedRooms}
-                  </Typography>
-                  <Typography variant="caption" sx={{ fontSize: '0.75rem', opacity: 0.9 }}>{t('dashboard:frontDesk.cards.reservedRooms')}</Typography>
+          <Box
+            component={Link}
+            to="/room-management?status=reserved"
+            sx={{
+              display: 'block',
+              textDecoration: 'none',
+              color: 'inherit',
+              '&:hover .MuiCard-root': { transform: 'translateY(-2px)', boxShadow: 3 },
+            }}
+          >
+            <Card sx={{ bgcolor: 'var(--hotel-info-bg)', border: '1px solid var(--hotel-info-border)', color: 'var(--hotel-info)', boxShadow: 1, transition: 'transform 150ms ease, box-shadow 150ms ease' }}>
+              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}>
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 600 }}>
+                      {reservedRooms}
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontSize: '0.75rem', opacity: 0.9 }}>{t('dashboard:frontDesk.cards.reservedRooms')}</Typography>
+                  </Box>
+                  <CalendarIcon sx={{ fontSize: 32, opacity: 0.5 }} />
                 </Box>
-                <CalendarIcon sx={{ fontSize: 32, opacity: 0.5 }} />
-              </Box>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Box>
         </Grid>
 
         <Grid size={{ xs: 6, sm: 6, md: 3 }}>
@@ -708,18 +773,32 @@ const ReceptionistDashboard: React.FC = () => {
       {/* Today's Activity */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, md: 4 }}>
-          <Card sx={{ boxShadow: 1 }}>
+          <Card sx={{ boxShadow: 1, height: '100%' }}>
             <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
               <Box
                 sx={{
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 1,
                   mb: 1
                 }}>
-                <CheckInIcon sx={{ mr: 1, color: 'success.main', fontSize: 20 }} />
-                <Typography variant="subtitle2" component="h2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                  {t('dashboard:frontDesk.activity.checkIns')}
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                  <CheckInIcon sx={{ mr: 1, color: 'success.main', fontSize: 20 }} />
+                  <Typography variant="subtitle2" component="h2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                    {t('dashboard:frontDesk.activity.checkIns')}
+                  </Typography>
+                </Box>
+                {todayActivity.check_ins > 0 && (
+                  <Typography
+                    variant="caption"
+                    component={Link}
+                    to="/bookings?view=arriving"
+                    sx={{ color: 'primary.main', fontWeight: 700, textDecoration: 'none', flexShrink: 0, '&:hover': { textDecoration: 'underline' } }}
+                  >
+                    {t('dashboard:frontDesk.viewAll')}
+                  </Typography>
+                )}
               </Box>
               <Typography variant="h5" component="div" sx={{ fontWeight: 600, color: 'success.main', mb: 1 }}>
                 {todayActivity.check_ins}
@@ -727,15 +806,46 @@ const ReceptionistDashboard: React.FC = () => {
               {todayActivity.arrivals.length > 0 ? (
                 <Box>
                   {(isPhone ? todayActivity.arrivals.slice(0, 5) : todayActivity.arrivals).map((arrival, index, list) => (
-                    <Box key={index} sx={{ py: 1, borderBottom: index < list.length - 1 ? '1px solid var(--hotel-border-subtle)' : 'none' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {t('dashboard:frontDesk.roomPrefix', { number: arrival.room_number })}
-                      </Typography>
-                      <Typography variant="caption" sx={{
-                        color: "text.secondary"
-                      }}>
-                        {arrival.guest_name}
-                      </Typography>
+                    <Box
+                      key={arrival.booking_id || index}
+                      sx={{
+                        py: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 1,
+                        borderBottom: index < list.length - 1 ? '1px solid var(--hotel-border-subtle)' : 'none',
+                      }}
+                    >
+                      <Box
+                        component={Link}
+                        to={`/bookings/${arrival.booking_id}`}
+                        sx={{
+                          flex: 1,
+                          minWidth: 0,
+                          textDecoration: 'none',
+                          color: 'inherit',
+                          '&:hover .arrival-room': { color: 'primary.main' },
+                        }}
+                      >
+                        <Typography variant="body2" className="arrival-room" sx={{ fontWeight: 600, transition: 'color 120ms ease' }}>
+                          {t('dashboard:frontDesk.roomPrefix', { number: arrival.room_number })}
+                        </Typography>
+                        <Typography variant="caption" noWrap sx={{ display: 'block', color: "text.secondary" }}>
+                          {arrival.guest_name}
+                        </Typography>
+                      </Box>
+                      {['confirmed', 'pending'].includes(arrival.status) && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="success"
+                          onClick={() => void handleCheckInFromRoom(arrival.booking_id)}
+                          sx={{ flexShrink: 0, textTransform: 'none', fontWeight: 700, py: 0.25, px: 1.25 }}
+                        >
+                          {t('dashboard:frontDesk.quickCheckIn')}
+                        </Button>
+                      )}
                     </Box>
                   ))}
                   {isPhone && todayActivity.arrivals.length > 5 && (
@@ -761,18 +871,32 @@ const ReceptionistDashboard: React.FC = () => {
         </Grid>
 
         <Grid size={{ xs: 12, md: 4 }}>
-          <Card sx={{ boxShadow: 1 }}>
+          <Card sx={{ boxShadow: 1, height: '100%' }}>
             <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
               <Box
                 sx={{
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 1,
                   mb: 1
                 }}>
-                <CheckOutIcon sx={{ mr: 1, color: 'info.main', fontSize: 20 }} />
-                <Typography variant="subtitle2" component="h2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                  {t('dashboard:frontDesk.activity.checkOuts')}
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                  <CheckOutIcon sx={{ mr: 1, color: 'info.main', fontSize: 20 }} />
+                  <Typography variant="subtitle2" component="h2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                    {t('dashboard:frontDesk.activity.checkOuts')}
+                  </Typography>
+                </Box>
+                {todayActivity.check_outs > 0 && (
+                  <Typography
+                    variant="caption"
+                    component={Link}
+                    to="/bookings?view=departing"
+                    sx={{ color: 'primary.main', fontWeight: 700, textDecoration: 'none', flexShrink: 0, '&:hover': { textDecoration: 'underline' } }}
+                  >
+                    {t('dashboard:frontDesk.viewAll')}
+                  </Typography>
+                )}
               </Box>
               <Typography variant="h5" component="div" sx={{ fontWeight: 600, color: 'info.main', mb: 1 }}>
                 {todayActivity.check_outs}
@@ -780,13 +904,23 @@ const ReceptionistDashboard: React.FC = () => {
               {todayActivity.departures.length > 0 ? (
                 <Box>
                   {(isPhone ? todayActivity.departures.slice(0, 5) : todayActivity.departures).map((departure, index, list) => (
-                    <Box key={index} sx={{ py: 1, borderBottom: index < list.length - 1 ? '1px solid var(--hotel-border-subtle)' : 'none' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    <Box
+                      key={departure.booking_id || index}
+                      component={Link}
+                      to={`/bookings/${departure.booking_id}`}
+                      sx={{
+                        display: 'block',
+                        py: 1,
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        borderBottom: index < list.length - 1 ? '1px solid var(--hotel-border-subtle)' : 'none',
+                        '&:hover .departure-room': { color: 'primary.main' },
+                      }}
+                    >
+                      <Typography variant="body2" className="departure-room" sx={{ fontWeight: 600, transition: 'color 120ms ease' }}>
                         {t('dashboard:frontDesk.roomPrefix', { number: departure.room_number })}
                       </Typography>
-                      <Typography variant="caption" sx={{
-                        color: "text.secondary"
-                      }}>
+                      <Typography variant="caption" noWrap sx={{ display: 'block', color: "text.secondary" }}>
                         {departure.guest_name}
                       </Typography>
                     </Box>
@@ -814,7 +948,7 @@ const ReceptionistDashboard: React.FC = () => {
         </Grid>
 
         <Grid size={{ xs: 12, md: 4 }}>
-          <Card sx={{ boxShadow: 1 }}>
+          <Card sx={{ boxShadow: 1, height: '100%' }}>
             <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
               <Box
                 sx={{
@@ -828,7 +962,20 @@ const ReceptionistDashboard: React.FC = () => {
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Box>
+                <Box
+                  component={Link}
+                  to="/room-management?status=maintenance"
+                  sx={{
+                    display: 'block',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    borderRadius: 1.5,
+                    p: 1,
+                    mx: -1,
+                    transition: 'background-color 120ms ease',
+                    '&:hover': { bgcolor: 'action.hover' },
+                  }}
+                >
                   <Typography
                     variant="caption"
                     sx={{
@@ -853,29 +1000,137 @@ const ReceptionistDashboard: React.FC = () => {
           <Box
             sx={{
               display: "flex",
-              alignItems: "center",
-              mb: 3
+              alignItems: { xs: 'stretch', sm: 'center' },
+              justifyContent: 'space-between',
+              flexDirection: { xs: 'column', sm: 'row' },
+              gap: 1.5,
+              mb: 2.5
             }}>
-            <HotelIcon sx={{ mr: 1, color: 'primary.main', fontSize: 28 }} />
-            <Typography variant="h6" component="h2" sx={{ fontWeight: 600 }}>
-              {t('dashboard:frontDesk.statusOverview')}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <HotelIcon sx={{ mr: 1, color: 'primary.main', fontSize: 28 }} />
+                <Typography variant="h6" component="h2" sx={{ fontWeight: 600 }}>
+                  {t('dashboard:frontDesk.statusOverview')}
+                </Typography>
+              </Box>
+              {filteredOverviewRooms.length !== rooms.length && (
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                  {t('dashboard:frontDesk.showingFilteredRooms', { shown: filteredOverviewRooms.length, total: rooms.length })}
+                </Typography>
+              )}
+            </Box>
+            <TextField
+              size="small"
+              value={gridSearch}
+              onChange={(e) => setGridSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && gridSearch) {
+                  e.preventDefault();
+                  setGridSearch('');
+                }
+              }}
+              placeholder={t('dashboard:frontDesk.filterRoomsPlaceholder')}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                  endAdornment: gridSearch ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        aria-label={t('dashboard:frontDesk.clearRoomFilterAria')}
+                        onClick={() => setGridSearch('')}
+                        sx={{ p: 0.25 }}
+                      >
+                        <CloseIcon sx={{ fontSize: 14 }} />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : undefined,
+                },
+                htmlInput: { 'aria-label': t('dashboard:frontDesk.filterRoomsPlaceholder') },
+              }}
+              sx={{ width: { xs: '100%', sm: 230 } }}
+            />
           </Box>
 
-          {/* Legend */}
-          <Box sx={{ mb: { xs: 2, sm: 3 }, display: 'flex', flexWrap: 'wrap', gap: { xs: 1, sm: 2 } }}>
-            <Chip icon={<AvailableIcon />} label={statusLabel(t, 'room', 'available')} size="small" sx={{ bgcolor: 'var(--hotel-success-bg)', color: 'var(--hotel-success)', border: '1px solid var(--hotel-success-border)' }} />
-            <Chip icon={<OccupiedIcon />} label={statusLabel(t, 'room', 'occupied')} size="small" sx={{ bgcolor: 'var(--hotel-warning-bg)', color: 'var(--hotel-warning)', border: '1px solid var(--hotel-warning-border)' }} />
-            <Chip icon={<CalendarIcon />} label={statusLabel(t, 'room', 'reserved')} size="small" sx={{ bgcolor: 'var(--hotel-info-bg)', color: 'var(--hotel-info)', border: '1px solid var(--hotel-info-border)' }} />
-            <Chip icon={<CleaningIcon />} label={t('dashboard:frontDesk.legend.cleaningAuto')} size="small" sx={{ bgcolor: 'var(--hotel-info-bg)', color: 'var(--hotel-info)', border: '1px solid var(--hotel-info-border)' }} />
-            <Chip icon={<MaintenanceIcon />} label={statusLabel(t, 'room', 'maintenance')} size="small" sx={{ bgcolor: 'var(--hotel-neutral-bg)', color: 'var(--hotel-neutral)', border: '1px solid var(--hotel-neutral-border)' }} />
+          {/* Interactive Legend */}
+          <Box sx={{ mb: { xs: 2, sm: 3 }, display: 'flex', flexWrap: 'wrap', gap: { xs: 1, sm: 1.5 } }}>
+            {([
+              {
+                key: 'available' as const,
+                icon: <AvailableIcon />,
+                label: statusLabel(t, 'room', 'available'),
+                fg: 'var(--hotel-success)',
+                bg: 'var(--hotel-success-bg)',
+                border: 'var(--hotel-success-border)',
+              },
+              {
+                key: 'occupied' as const,
+                icon: <OccupiedIcon />,
+                label: statusLabel(t, 'room', 'occupied'),
+                fg: 'var(--hotel-warning)',
+                bg: 'var(--hotel-warning-bg)',
+                border: 'var(--hotel-warning-border)',
+              },
+              {
+                key: 'reserved' as const,
+                icon: <CalendarIcon />,
+                label: statusLabel(t, 'room', 'reserved'),
+                fg: 'var(--hotel-info)',
+                bg: 'var(--hotel-info-bg)',
+                border: 'var(--hotel-info-border)',
+              },
+              {
+                key: 'cleaning' as const,
+                icon: <CleaningIcon />,
+                label: t('dashboard:frontDesk.legend.cleaningAuto'),
+                fg: 'var(--hotel-info)',
+                bg: 'var(--hotel-info-bg)',
+                border: 'var(--hotel-info-border)',
+              },
+              {
+                key: 'maintenance' as const,
+                icon: <MaintenanceIcon />,
+                label: statusLabel(t, 'room', 'maintenance'),
+                fg: 'var(--hotel-neutral)',
+                bg: 'var(--hotel-neutral-bg)',
+                border: 'var(--hotel-neutral-border)',
+              },
+            ]).map((item) => {
+              const selected = gridStatusFilter === item.key;
+              return (
+                <Chip
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  size="small"
+                  aria-pressed={selected}
+                  onClick={() => setGridStatusFilter((cur) => (cur === item.key ? 'all' : item.key))}
+                  sx={{
+                    bgcolor: item.bg,
+                    color: item.fg,
+                    border: selected ? `2px solid ${item.fg}` : `1px solid ${item.border}`,
+                    fontWeight: selected ? 800 : 600,
+                    cursor: 'pointer',
+                    opacity: gridStatusFilter !== 'all' && !selected ? 0.65 : 1,
+                    transition: 'opacity 120ms ease, border-color 120ms ease',
+                    '&:hover, &:focus, &.Mui-focusVisible': {
+                      bgcolor: item.bg,
+                    },
+                  }}
+                />
+              );
+            })}
           </Box>
 
           {/* Rooms: status-grouped sections on phone, tile grid on desktop */}
           {isPhone ? (
             <Box>
               {PHONE_ROOM_SECTIONS.map(({ status, needsAttention }) => {
-                const sectionRooms = rooms.filter((room) => room.status === status);
+                const sectionRooms = filteredOverviewRooms.filter((room) => room.status === status);
                 if (sectionRooms.length === 0) return null;
                 return (
                   <CollapsibleSection
@@ -904,7 +1159,7 @@ const ReceptionistDashboard: React.FC = () => {
             </Box>
           ) : (
           <Grid container spacing={{ xs: 1, sm: 2 }}>
-            {rooms.map((room) => (
+            {filteredOverviewRooms.map((room) => (
               <Grid key={room.id} size={{ xs: 4, sm: 4, md: 3, lg: 2 }}>
                 <Tooltip
                   title={

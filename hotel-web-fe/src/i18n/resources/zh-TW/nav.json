@@ -194,7 +194,20 @@
       "rooms": "客房",
       "pages": "頁面",
       "help": "說明"
-    }
+    },
+    "arrivalsHint": "篩選今日抵達預訂",
+    "departuresHint": "篩選今日退房預訂",
+    "collectPaymentHint": "查看逾期或未結餘額的預訂",
+    "availableRooms": "空置客房",
+    "availableRoomsHint": "將房態面板篩選為可售客房",
+    "dirtyRooms": "待清潔客房",
+    "dirtyRoomsHint": "將房態面板篩選為需清潔的客房",
+    "switchLightMode": "切換至淺色模式",
+    "switchDarkMode": "切換至深色模式",
+    "themeHint": "切換員工工作區外觀",
+    "footerNavigate": "導覽",
+    "footerSelect": "開啟",
+    "footerScope": "切換範圍"
   },
   "mobile": {
     "primary": "主導覽",

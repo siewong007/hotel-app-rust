@@ -400,7 +400,8 @@
       "searchPlaceholder": "Search ledger #, description, or invoice no...",
       "viewInvoice": "View invoice",
       "voidEntry": "Void entry",
-      "refFallback": "entry {{id}}"
+      "refFallback": "entry {{id}}",
+      "clearSearchAria": "Clear entry search"
     },
     "entryAndRateUpdated": "Ledger entry and booking rate updated successfully!",
     "entryUpdated": "Ledger entry updated successfully!",
@@ -553,7 +554,9 @@
       "selectedEntries": "Selected Entries",
       "titleEntry": "Payment - {{company}}",
       "totalAmount": "Total Amount",
-      "totalBalanceDue": "Total Balance Due"
+      "totalBalanceDue": "Total Balance Due",
+      "quickFull": "Full ({{amount}})",
+      "quickHalf": "50% ({{amount}})"
     },
     "paymentMethod": {
       "bank_transfer": "Bank Transfer",

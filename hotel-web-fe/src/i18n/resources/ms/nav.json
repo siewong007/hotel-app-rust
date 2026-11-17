@@ -194,7 +194,20 @@
       "rooms": "Bilik",
       "pages": "Halaman",
       "help": "Bantuan"
-    }
+    },
+    "arrivalsHint": "Tapis tempahan yang tiba hari ini",
+    "departuresHint": "Tapis tempahan yang daftar keluar hari ini",
+    "collectPaymentHint": "Lihat tempahan dengan baki tertunggak atau belum dibayar",
+    "availableRooms": "Bilik kosong",
+    "availableRoomsHint": "Tapis papan bilik kepada bilik tersedia",
+    "dirtyRooms": "Bilik kotor",
+    "dirtyRoomsHint": "Tapis papan bilik kepada bilik yang perlu dibersihkan",
+    "switchLightMode": "Tukar ke mod cerah",
+    "switchDarkMode": "Tukar ke mod gelap",
+    "themeHint": "Tukar paparan ruang kerja kakitangan",
+    "footerNavigate": "Navigasi",
+    "footerSelect": "Buka",
+    "footerScope": "Tukar skop"
   },
   "mobile": {
     "primary": "Navigasi utama",

@@ -159,8 +159,8 @@
     "attrNoDaily": "无需清洁",
     "allFloors": "全部楼层",
     "floorN": "{{floor}} 楼",
-    "roomSearchPlaceholder": "房号",
-    "roomSearchAria": "按房号搜索",
+    "roomSearchPlaceholder": "房号或住客…",
+    "roomSearchAria": "按房号、房型、住客或账单号搜索",
     "prioritySortTitle": "按需处理优先排序（待清洁、维修、已预订在前）",
     "prioritySort": "优先处理",
     "filtersTitle": "客房筛选",
@@ -168,7 +168,10 @@
     "sectionAttributes": "属性",
     "sectionFloor": "楼层",
     "sectionSort": "排序",
-    "sectionGroupBy": "分组"
+    "sectionGroupBy": "分组",
+    "clearSearchAria": "清除客房搜索",
+    "resetFilters": "重置",
+    "statFilterAria": "按{{status}}筛选（{{count}}）"
   },
   "filters": {
     "all": "全部",

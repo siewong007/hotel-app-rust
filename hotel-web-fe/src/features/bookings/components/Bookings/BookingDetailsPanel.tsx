@@ -184,6 +184,90 @@ const BookingDetailsPanel: React.FC<BookingDetailsPanelProps> = ({
     },
   ];
 
+  const actionsContent = (
+    <>
+      <Typography variant="overline" sx={{ color: 'text.secondary', fontWeight: 900 }}>{t('details.actions')}</Typography>
+      {isPhone ? (
+        // Phone: the first available lifecycle action gets the full-width
+        // contained CTA, Payment + Edit stay outlined, and the rest
+        // (Workflow, Invoice, Release, Void, Reactivate — same gates as
+        // desktop) collapse into an ActionsMenu bottom sheet.
+        <Stack spacing={1} sx={{ mt: 1 }}>
+          {showCheckIn ? (
+            earlyCheckIn ? (
+              <Tooltip title={t('details.earlyCheckInTooltip', { time: getHotelSettings().check_in_time || '15:00' })} arrow>
+                <Button fullWidth variant="contained" color="success" startIcon={<EarlyCheckInIcon />} onClick={() => onCheckIn(booking)}>{t('details.earlyCheckIn')}</Button>
+              </Tooltip>
+            ) : (
+              <Button fullWidth variant="contained" color="success" startIcon={<LoginIcon />} onClick={() => onCheckIn(booking)}>{t('details.checkInAction')}</Button>
+            )
+          ) : showCheckOut ? (
+            <Button fullWidth variant="contained" color="warning" startIcon={<CheckOutIcon />} onClick={() => onCheckOut(booking)}>{t('details.checkOutAction')}</Button>
+          ) : null}
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            {showPayment && (
+              <Button variant="outlined" color="success" startIcon={<PaymentIcon />} sx={{ flex: 1 }} onClick={() => onPayment(booking)}>{t('details.payment')}</Button>
+            )}
+            {isAdmin && (
+              <Button variant="outlined" startIcon={<EditIcon />} sx={{ flex: 1 }} onClick={() => onEdit(booking)}>{t('details.edit')}</Button>
+            )}
+            <ActionsMenu
+              trigger={
+                <Button variant="outlined" startIcon={<MoreVertIcon />} sx={{ flex: showPayment || isAdmin ? undefined : 1 }}>
+                  {t('details.more')}
+                </Button>
+              }
+              actions={menuActions}
+            />
+          </Stack>
+        </Stack>
+      ) : (
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{
+            flexWrap: "wrap",
+            mt: 1
+          }}>
+          {showCheckIn && (
+            earlyCheckIn ? (
+              <Tooltip title={t('details.earlyCheckInTooltip', { time: getHotelSettings().check_in_time || '15:00' })} arrow>
+                <Button variant="contained" color="success" startIcon={<EarlyCheckInIcon />} onClick={() => onCheckIn(booking)}>{t('details.earlyCheckIn')}</Button>
+              </Tooltip>
+            ) : (
+              <Button variant="contained" color="success" startIcon={<LoginIcon />} onClick={() => onCheckIn(booking)}>{t('details.checkInAction')}</Button>
+            )
+          )}
+          {showCheckOut && (
+            <Button variant="contained" color="warning" startIcon={<CheckOutIcon />} onClick={() => onCheckOut(booking)}>{t('details.checkOutAction')}</Button>
+          )}
+          {/* Standalone payment entry is only for pre-arrival bookings
+              (confirmed/pending) that have no invoice yet. Once checked in,
+              out, or completed, payments are recorded inside the invoice
+              (checkout preview / receipt). Locked once fully settled. */}
+          {showPayment && (
+            <Button variant="outlined" color="success" startIcon={<PaymentIcon />} onClick={() => onPayment(booking)}>{t('details.payment')}</Button>
+          )}
+          <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => onWorkflow(booking)}>{t('details.workflow')}</Button>
+          {isAdmin && <Button variant="outlined" startIcon={<EditIcon />} onClick={() => onEdit(booking)}>{t('details.edit')}</Button>}
+          {showInvoice && (
+            <Button variant="outlined" startIcon={<ReceiptIcon />} onClick={() => onInvoice(booking)}>{t('details.invoice')}</Button>
+          )}
+          {showRelease && (
+            <Button variant="outlined" color="warning" startIcon={<VoidIcon />} onClick={() => onRelease(booking)}>{t('details.releaseRoom')}</Button>
+          )}
+          {showVoid && (
+            <Button variant="outlined" color="error" startIcon={<VoidIcon />} onClick={() => onVoid(booking)}>{t('details.void')}</Button>
+          )}
+          {showReactivate && (
+            <Button variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={() => onReactivate(booking)}>{t('details.reactivate')}</Button>
+          )}
+        </Stack>
+      )}
+    </>
+  );
+
   return (
     <Card
       elevation={0}
@@ -446,86 +530,7 @@ const BookingDetailsPanel: React.FC<BookingDetailsPanelProps> = ({
           {quickEdit}
 
           <Box sx={{ p: 2.5 }}>
-            <Typography variant="overline" sx={{ color: 'text.secondary', fontWeight: 900 }}>{t('details.actions')}</Typography>
-            {isPhone ? (
-              // Phone: the first available lifecycle action gets the full-width
-              // contained CTA, Payment + Edit stay outlined, and the rest
-              // (Workflow, Invoice, Release, Void, Reactivate — same gates as
-              // desktop) collapse into an ActionsMenu bottom sheet.
-              <Stack spacing={1} sx={{ mt: 1 }}>
-                {showCheckIn ? (
-                  earlyCheckIn ? (
-                    <Tooltip title={t('details.earlyCheckInTooltip', { time: getHotelSettings().check_in_time || '15:00' })} arrow>
-                      <Button fullWidth variant="contained" color="success" startIcon={<EarlyCheckInIcon />} onClick={() => onCheckIn(booking)}>{t('details.earlyCheckIn')}</Button>
-                    </Tooltip>
-                  ) : (
-                    <Button fullWidth variant="contained" color="success" startIcon={<LoginIcon />} onClick={() => onCheckIn(booking)}>{t('details.checkInAction')}</Button>
-                  )
-                ) : showCheckOut ? (
-                  <Button fullWidth variant="contained" color="warning" startIcon={<CheckOutIcon />} onClick={() => onCheckOut(booking)}>{t('details.checkOutAction')}</Button>
-                ) : null}
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  {showPayment && (
-                    <Button variant="outlined" color="success" startIcon={<PaymentIcon />} sx={{ flex: 1 }} onClick={() => onPayment(booking)}>{t('details.payment')}</Button>
-                  )}
-                  {isAdmin && (
-                    <Button variant="outlined" startIcon={<EditIcon />} sx={{ flex: 1 }} onClick={() => onEdit(booking)}>{t('details.edit')}</Button>
-                  )}
-                  <ActionsMenu
-                    trigger={
-                      <Button variant="outlined" startIcon={<MoreVertIcon />} sx={{ flex: showPayment || isAdmin ? undefined : 1 }}>
-                        {t('details.more')}
-                      </Button>
-                    }
-                    actions={menuActions}
-                  />
-                </Stack>
-              </Stack>
-            ) : (
-            <Stack
-              direction="row"
-              spacing={1}
-              useFlexGap
-              sx={{
-                flexWrap: "wrap",
-                mt: 1
-              }}>
-              {canCheckIn(booking) && (
-                isEarlyCheckIn(booking, getHotelSettings().check_in_time) ? (
-                  <Tooltip title={t('details.earlyCheckInTooltip', { time: getHotelSettings().check_in_time || '15:00' })} arrow>
-                    <Button variant="contained" color="success" startIcon={<EarlyCheckInIcon />} onClick={() => onCheckIn(booking)}>{t('details.earlyCheckIn')}</Button>
-                  </Tooltip>
-                ) : (
-                  <Button variant="contained" color="success" startIcon={<LoginIcon />} onClick={() => onCheckIn(booking)}>{t('details.checkInAction')}</Button>
-                )
-              )}
-              {canCheckOut(booking) && (
-                <Button variant="contained" color="warning" startIcon={<CheckOutIcon />} onClick={() => onCheckOut(booking)}>{t('details.checkOutAction')}</Button>
-              )}
-              {/* Standalone payment entry is only for pre-arrival bookings
-                  (confirmed/pending) that have no invoice yet. Once checked in,
-                  out, or completed, payments are recorded inside the invoice
-                  (checkout preview / receipt). Locked once fully settled. */}
-              {showPayment && (
-                <Button variant="outlined" color="success" startIcon={<PaymentIcon />} onClick={() => onPayment(booking)}>{t('details.payment')}</Button>
-              )}
-              <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => onWorkflow(booking)}>{t('details.workflow')}</Button>
-              {isAdmin && <Button variant="outlined" startIcon={<EditIcon />} onClick={() => onEdit(booking)}>{t('details.edit')}</Button>}
-              {['checked_out', 'completed'].includes(booking.status) && (
-                <Button variant="outlined" startIcon={<ReceiptIcon />} onClick={() => onInvoice(booking)}>{t('details.invoice')}</Button>
-              )}
-              {canRelease(booking) && (
-                <Button variant="outlined" color="warning" startIcon={<VoidIcon />} onClick={() => onRelease(booking)}>{t('details.releaseRoom')}</Button>
-              )}
-              {canVoid(booking) && (
-                <Button variant="outlined" color="error" startIcon={<VoidIcon />} onClick={() => onVoid(booking)}>{t('details.void')}</Button>
-              )}
-              {showReactivate && (
-                <Button variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={() => onReactivate(booking)}>{t('details.reactivate')}</Button>
-              )}
-            </Stack>
-            )}
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 2.5 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
               <Box>
                 <Typography variant="caption" sx={{
                   color: "text.secondary"
@@ -540,7 +545,19 @@ const BookingDetailsPanel: React.FC<BookingDetailsPanelProps> = ({
               </Box>
             </Box>
           </Box>
+
+          {!scrollWithinParent && (
+            <Box sx={{ p: 2.5, pt: 0 }}>
+              {actionsContent}
+            </Box>
+          )}
         </Box>
+
+        {scrollWithinParent && (
+          <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
+            {actionsContent}
+          </Box>
+        )}
       </>
     </Card>
   );

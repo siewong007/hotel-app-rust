@@ -153,4 +153,22 @@ describe('BookingDetailDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(onError).toHaveBeenCalled());
   });
+
+  it('pins the action footer outside the scrollable body and supports +1N stay extension with dirty reset', () => {
+    renderDrawer({ isAdmin: true });
+
+    const scroller = screen.getByTestId('booking-details-scroll');
+    const workflowBtn = screen.getByRole('button', { name: 'Workflow' });
+    expect(scroller.contains(workflowBtn)).toBe(false);
+
+    expect(screen.queryByText('Unsaved')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Extend check-out by 1 night' }));
+
+    expect(screen.getByText('Unsaved')).toBeTruthy();
+    expect((screen.getByLabelText('Scheduled Check-Out Date') as HTMLInputElement).value).toBe('2026-09-13');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(screen.queryByText('Unsaved')).toBeNull();
+    expect((screen.getByLabelText('Scheduled Check-Out Date') as HTMLInputElement).value).toBe('2026-09-12');
+  });
 });

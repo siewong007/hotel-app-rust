@@ -194,7 +194,20 @@
       "rooms": "Rooms",
       "pages": "Pages",
       "help": "Help"
-    }
+    },
+    "arrivalsHint": "Filter bookings arriving today",
+    "departuresHint": "Filter bookings checking out today",
+    "collectPaymentHint": "View bookings with overdue or unpaid balances",
+    "availableRooms": "Vacant rooms",
+    "availableRoomsHint": "Filter room board to available rooms",
+    "dirtyRooms": "Dirty rooms",
+    "dirtyRoomsHint": "Filter room board to rooms needing cleaning",
+    "switchLightMode": "Switch to light mode",
+    "switchDarkMode": "Switch to dark mode",
+    "themeHint": "Toggle staff workspace appearance",
+    "footerNavigate": "Navigate",
+    "footerSelect": "Open",
+    "footerScope": "Cycle scope"
   },
   "mobile": {
     "primary": "Primary navigation",

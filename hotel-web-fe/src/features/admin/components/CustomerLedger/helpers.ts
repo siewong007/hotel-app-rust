@@ -51,9 +51,13 @@ export const asMoney = (value: number | string | null | undefined): number => {
   return toMoneyNumber(value);
 };
 
-// Initials for company avatars (e.g. "Farley Sibu" -> "FS")
+// Initials for company avatars (e.g. "Farley Sibu" -> "FS", "Globex (Malaysia) Sdn Bhd" -> "GM")
 export const companyInitials = (name: string): string => {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .map(part => part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    .filter(Boolean);
   if (parts.length === 0) return '?';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();

@@ -177,8 +177,22 @@ export function useRoomManagementFilters({
       if (floorFilter !== 'all' && room.floor !== floorFilter) {
         continue;
       }
-      if (search && !room.room_number.toLowerCase().includes(search)) {
-        continue;
+      if (search) {
+        const haystack = [
+          room.room_number,
+          room.room_type,
+          info.booking?.guest_name,
+          info.booking?.folio_number,
+          info.booking?.booking_number,
+          info.booking?.company_name,
+          info.reservedBooking?.guest_name,
+          info.reservedBooking?.folio_number,
+          info.reservedBooking?.booking_number,
+          info.reservedBooking?.company_name,
+        ];
+        if (!haystack.some((value) => value && value.toLowerCase().includes(search))) {
+          continue;
+        }
       }
 
       filtered.push(room);

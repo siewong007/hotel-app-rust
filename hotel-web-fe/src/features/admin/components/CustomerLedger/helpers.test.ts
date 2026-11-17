@@ -73,6 +73,10 @@ describe('companyInitials', () => {
   it('collapses irregular whitespace between words', () => {
     expect(companyInitials('  Farley   Sibu  ')).toBe('FS');
   });
+
+  it('strips leading punctuation such as parentheses around country qualifiers', () => {
+    expect(companyInitials('Globex (Malaysia) Sdn Bhd')).toBe('GM');
+  });
 });
 
 describe('isLedgerVoided', () => {

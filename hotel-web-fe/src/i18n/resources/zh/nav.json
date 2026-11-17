@@ -194,7 +194,20 @@
       "rooms": "客房",
       "pages": "页面",
       "help": "帮助"
-    }
+    },
+    "arrivalsHint": "筛选今日抵店预订",
+    "departuresHint": "筛选今日退房预订",
+    "collectPaymentHint": "查看逾期或未结余额的预订",
+    "availableRooms": "空置客房",
+    "availableRoomsHint": "将房态面板筛选为可用客房",
+    "dirtyRooms": "待清洁客房",
+    "dirtyRoomsHint": "将房态面板筛选为需清洁的客房",
+    "switchLightMode": "切换至浅色模式",
+    "switchDarkMode": "切换至深色模式",
+    "themeHint": "切换员工工作区外观",
+    "footerNavigate": "导航",
+    "footerSelect": "打开",
+    "footerScope": "切换范围"
   },
   "mobile": {
     "primary": "主导航",

@@ -55,7 +55,12 @@
       "next": "下一個：",
       "start": "開始：",
       "end": "結束："
-    }
+    },
+    "viewAll": "查看全部",
+    "quickCheckIn": "辦理入住",
+    "filterRoomsPlaceholder": "篩選房號或賓客…",
+    "clearRoomFilterAria": "清除客房篩選",
+    "showingFilteredRooms": "顯示 {{shown}} / 共 {{total}} 間客房"
   },
   "reports": {
     "title": "報表與分析",

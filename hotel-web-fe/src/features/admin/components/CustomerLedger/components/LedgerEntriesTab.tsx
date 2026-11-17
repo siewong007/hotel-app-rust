@@ -16,13 +16,17 @@ import {
   Button,
   Chip,
   IconButton,
+  InputAdornment,
   Stack,
   LinearProgress,
+  Tooltip,
 } from '@mui/material';
 import {
+  Close as CloseIcon,
   Edit as EditIcon,
   Payment as PaymentIcon,
   Print as PrintIcon,
+  Search as SearchIcon,
   Block as VoidIcon,
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
@@ -186,11 +190,11 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
       {/* Toolbar: search + status segment */}
       <Box
         sx={{
-          px: 2.5,
-          py: 1.25,
+          px: 1.5,
+          py: 1,
           display: 'flex',
           alignItems: 'center',
-          gap: 1,
+          gap: 0.75,
           flexWrap: 'wrap',
           bgcolor: 'action.hover',
           borderBottom: '1px solid',
@@ -202,7 +206,40 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
           placeholder={t('ledger.entries.searchPlaceholder')}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          sx={{ width: 240, bgcolor: 'background.paper' }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && search) {
+              e.preventDefault();
+              onSearchChange('');
+            }
+          }}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                </InputAdornment>
+              ),
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    aria-label={t('ledger.entries.clearSearchAria')}
+                    onClick={() => onSearchChange('')}
+                    sx={{ p: 0.25 }}
+                  >
+                    <CloseIcon sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+              sx: { fontSize: 12 },
+            },
+          }}
+          sx={{
+            width: { xs: '100%', sm: 290 },
+            flex: { sm: '1 1 275px' },
+            maxWidth: { sm: 340 },
+            bgcolor: 'background.paper',
+          }}
         />
         {isPhone ? (
           // Phone: the 7 status filters become one horizontally scrollable
@@ -236,8 +273,9 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                   bgcolor: statusFilter === s.key ? 'text.primary' : 'background.paper',
                   color: statusFilter === s.key ? 'background.paper' : 'text.secondary',
                   borderColor: 'divider',
-                  '&:hover': {
+                  '&:hover, &:focus, &.Mui-focusVisible': {
                     bgcolor: statusFilter === s.key ? 'text.primary' : 'action.hover',
+                    color: statusFilter === s.key ? 'background.paper' : 'text.primary',
                   },
                 }}
               />
@@ -247,6 +285,7 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
           <Box
             sx={{
               display: 'inline-flex',
+              flexWrap: 'wrap',
               bgcolor: 'background.paper',
               border: '1px solid',
               borderColor: 'divider',
@@ -261,15 +300,16 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                 onClick={() => onStatusFilterChange(s.key as EntryStatusFilter)}
                 sx={{
                   minWidth: 0,
-                  px: 1,
+                  px: 0.7,
                   py: 0.25,
-                  fontSize: 11.5,
+                  fontSize: 11,
                   fontWeight: 600,
                   color: statusFilter === s.key ? 'background.paper' : 'text.secondary',
                   bgcolor: statusFilter === s.key ? 'text.primary' : 'transparent',
                   borderRadius: 0.75,
-                  '&:hover': {
+                  '&:hover, &:focus, &.Mui-focusVisible': {
                     bgcolor: statusFilter === s.key ? 'text.primary' : 'action.hover',
+                    color: statusFilter === s.key ? 'background.paper' : 'text.primary',
                   },
                 }}
               >
@@ -315,29 +355,36 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
         </Box>
       ) : (
         <TableContainer sx={{ overflowX: 'auto' }}>
-          <Table size="small" stickyHeader sx={{ minWidth: 980 }}>
+          <Table
+            size="small"
+            stickyHeader
+            sx={{
+              minWidth: 620,
+              '& .MuiTableCell-root': { px: 0.75 },
+            }}
+          >
             <TableHead>
               <TableRow
                 sx={{
                   '& .MuiTableCell-root': {
-                    fontSize: 10.5,
+                    fontSize: 10,
                     fontWeight: 700,
                     color: 'text.secondary',
-                    letterSpacing: 0.6,
+                    letterSpacing: 0.5,
                     textTransform: 'uppercase',
                     bgcolor: 'action.hover',
-                    py: 1.25,
+                    py: 1,
                   },
                 }}
               >
-                <TableCell sx={{ pl: 2.5, width: '30%' }}>{t('common:field.description')}</TableCell>
+                <TableCell sx={{ pl: 1.5, width: '21%' }}>{t('common:field.description')}</TableCell>
                 <TableCell>{t('ledger.field.stayLedgerDate')}</TableCell>
                 <TableCell>{t('ledger.field.invoiceNumber')}</TableCell>
-                <TableCell>{t('common:field.status')}</TableCell>
-                <TableCell align="right">{t('common:field.amount')}</TableCell>
-                <TableCell align="right">{t('ledger.col.paid')}</TableCell>
-                <TableCell align="right">{t('ledger.col.balance')}</TableCell>
-                <TableCell sx={{ width: 110 }} />
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>{t('common:field.status')}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t('common:field.amount')}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t('ledger.col.paid')}</TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{t('ledger.col.balance')}</TableCell>
+                <TableCell sx={{ width: 92, pr: 1 }} />
               </TableRow>
             </TableHead>
             <TableBody>
@@ -355,19 +402,19 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                     key={entry.id}
                     hover
                     sx={{
-                      '&:hover .ledger-row-actions': { opacity: 1 },
+                      '&:hover .ledger-row-actions, &:focus-within .ledger-row-actions': { opacity: 1 },
                       opacity: voided ? 0.6 : 1,
                     }}
                   >
-                    <TableCell sx={{ pl: 2.5, py: 1.25 }}>
+                    <TableCell sx={{ pl: 1.5, py: 1 }}>
                       <Typography
-                        sx={{ fontWeight: 600, fontSize: 13, lineHeight: 1.3 }}
+                        sx={{ fontWeight: 600, fontSize: 12.5, lineHeight: 1.3 }}
                       >
                         {entry.description}
                       </Typography>
                       <Typography
                         sx={{
-                          fontSize: 11,
+                          fontSize: 10.5,
                           color: 'text.secondary',
                           mt: 0.25,
                           fontFamily: '"JetBrains Mono", ui-monospace, monospace',
@@ -379,13 +426,13 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                         {receiptNumber ? ` / Receipt ${receiptNumber}` : ''}
                       </Typography>
                     </TableCell>
-                    <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: 11.5, whiteSpace: 'nowrap' }}>
                       {formatDateForDisplay(entry.posting_date || entry.created_at)}
                     </TableCell>
-                    <TableCell sx={{ color: entry.invoice_number ? 'text.primary' : 'text.disabled', fontSize: 12 }}>
+                    <TableCell sx={{ color: entry.invoice_number ? 'text.primary' : 'text.disabled', fontSize: 11.5 }}>
                       {entry.invoice_number || t('ledger.notInvoiced')}
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
                       <LedgerStatusBadge status={uiStatus} />
                     </TableCell>
                     <TableCell
@@ -394,7 +441,8 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                         fontFamily: '"JetBrains Mono", ui-monospace, monospace',
                         fontVariantNumeric: 'tabular-nums',
                         fontWeight: 700,
-                        fontSize: 13,
+                        fontSize: 12,
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       {formatCurrency(amount)}
@@ -405,7 +453,8 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                         fontFamily: '"JetBrains Mono", ui-monospace, monospace',
                         fontVariantNumeric: 'tabular-nums',
                         fontWeight: 700,
-                        fontSize: 13,
+                        fontSize: 12,
+                        whiteSpace: 'nowrap',
                         color: isPositiveMoney(paid) ? 'success.main' : 'text.secondary',
                       }}
                     >
@@ -417,13 +466,14 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                         fontFamily: '"JetBrains Mono", ui-monospace, monospace',
                         fontVariantNumeric: 'tabular-nums',
                         fontWeight: 700,
-                        fontSize: 13,
+                        fontSize: 12,
+                        whiteSpace: 'nowrap',
                         color: isPositiveMoney(balance) ? 'error.main' : 'success.main',
                       }}
                     >
                       {formatCurrency(balance)}
                     </TableCell>
-                    <TableCell sx={{ pr: 2 }}>
+                    <TableCell sx={{ pr: 1, whiteSpace: 'nowrap' }}>
                       <Box
                         className="ledger-row-actions"
                         sx={{
@@ -431,50 +481,64 @@ const LedgerEntriesTab: React.FC<LedgerEntriesTabProps> = ({
                           gap: 0.25,
                           opacity: { xs: 1, md: 0 },
                           transition: 'opacity 120ms',
+                          '& .MuiIconButton-root': { p: 0.375 },
                         }}
                       >
                         {canRecordPayment(entry) && (
-                          <IconButton
-                            size="small"
-                            title={t('ledger.payment.record')}
-                            onClick={() => onRecordPayment(entry)}
-                          >
-                            <PaymentIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
+                          <Tooltip title={t('ledger.payment.record')} arrow>
+                            <IconButton
+                              size="small"
+                              color="success"
+                              aria-label={t('ledger.payment.record')}
+                              onClick={() => onRecordPayment(entry)}
+                            >
+                              <PaymentIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
                         )}
                         {canViewInvoice(entry) && (
-                          <IconButton
-                            size="small"
-                            title={t('ledger.entries.viewInvoice')}
-                            onClick={() => onViewInvoice(entry)}
-                            disabled={loadingInvoice}
-                          >
-                            <OpenInNewIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
+                          <Tooltip title={t('ledger.entries.viewInvoice')} arrow>
+                            <span>
+                              <IconButton
+                                size="small"
+                                aria-label={t('ledger.entries.viewInvoice')}
+                                onClick={() => onViewInvoice(entry)}
+                                disabled={loadingInvoice}
+                              >
+                                <OpenInNewIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
                         )}
-                        <IconButton
-                          size="small"
-                          title={t('ledger.entries.editEntry')}
-                          onClick={() => onEdit(entry)}
-                        >
-                          <EditIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          title={t('ledger.entries.printReceipt')}
-                          onClick={() => onPrintReceipt(entry)}
-                        >
-                          <PrintIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                        {canVoid(entry) && (
+                        <Tooltip title={t('ledger.entries.editEntry')} arrow>
                           <IconButton
                             size="small"
-                            title={t('ledger.entries.voidEntry')}
-                            color="error"
-                            onClick={() => onVoid(entry)}
+                            aria-label={t('ledger.entries.editEntry')}
+                            onClick={() => onEdit(entry)}
                           >
-                            <VoidIcon sx={{ fontSize: 16 }} />
+                            <EditIcon sx={{ fontSize: 16 }} />
                           </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('ledger.entries.printReceipt')} arrow>
+                          <IconButton
+                            size="small"
+                            aria-label={t('ledger.entries.printReceipt')}
+                            onClick={() => onPrintReceipt(entry)}
+                          >
+                            <PrintIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Tooltip>
+                        {canVoid(entry) && (
+                          <Tooltip title={t('ledger.entries.voidEntry')} arrow>
+                            <IconButton
+                              size="small"
+                              aria-label={t('ledger.entries.voidEntry')}
+                              color="error"
+                              onClick={() => onVoid(entry)}
+                            >
+                              <VoidIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
                         )}
                       </Box>
                     </TableCell>

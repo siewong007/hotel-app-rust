@@ -43,8 +43,10 @@
       "upcoming": "Upcoming",
       "balance": "Overdue Balance",
       "normal_balance": "Normal",
-      "company_balance": "Company"
-    }
+      "company_balance": "Company",
+      "departing": "Departing"
+    },
+    "clearSearchAria": "Clear search"
   },
   "summary": {
     "arrivals": "Arrivals / Check-in",
@@ -96,7 +98,11 @@
       "member": "Member"
     },
     "groupChip": "Group {{number}}",
-    "groupTooltip": "Part of multi-room booking {{number}}. Search the group number to list every room."
+    "groupTooltip": "Part of multi-room booking {{number}}. Search the group number to list every room.",
+    "quickCheckInAria": "Check in {{guest}}",
+    "quickCheckOutAria": "Check out {{guest}}",
+    "quickPaymentAria": "Accept payment for {{guest}}",
+    "quickInvoiceAria": "View invoice for {{guest}}"
   },
   "details": {
     "closeAria": "Close details",
@@ -210,7 +216,13 @@
           "title": "Reactivate every room in {{number}}?"
         }
       }
-    }
+    },
+    "unsaved": "Unsaved",
+    "plusOneNight": "+1N",
+    "minusOneNight": "-1N",
+    "extendOneNightAria": "Extend check-out by 1 night",
+    "shortenOneNightAria": "Shorten check-out by 1 night",
+    "invalidDateOrder": "Check-out must be after check-in"
   },
   "labels": {
     "guest": "Guest:",
@@ -289,7 +301,9 @@
     "acceptedBalance": "Payment of {{amount}} accepted via {{method}}. Balance still outstanding.",
     "failed": "Failed to accept payment",
     "accept": "Accept Payment",
-    "processing": "Processing..."
+    "processing": "Processing...",
+    "quickFull": "Full ({{amount}})",
+    "quickHalf": "50% ({{amount}})"
   },
   "edit": {
     "title": "Edit Booking #{{id}}",

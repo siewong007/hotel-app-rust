@@ -74,14 +74,14 @@ const CardPillButton: React.FC<{
       onClick();
     }}
     sx={{
-      flex: 1,
+      flex: '1 1 auto',
       fontSize: '0.62rem',
       fontWeight: 700,
       textTransform: 'none',
       whiteSpace: 'nowrap',
       minWidth: 0,
       py: 0.35,
-      px: 0.5,
+      px: 0.65,
       borderRadius: 999,
       ...(tone === 'dark'
         ? {

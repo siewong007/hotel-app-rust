@@ -57,7 +57,12 @@
       "next": "下次：",
       "start": "开始：",
       "end": "结束："
-    }
+    },
+    "viewAll": "查看全部",
+    "quickCheckIn": "办理入住",
+    "filterRoomsPlaceholder": "筛选房号或客人…",
+    "clearRoomFilterAria": "清除客房筛选",
+    "showingFilteredRooms": "显示 {{shown}} / 共 {{total}} 间客房"
   },
   "reports": {
     "title": "报表与分析",

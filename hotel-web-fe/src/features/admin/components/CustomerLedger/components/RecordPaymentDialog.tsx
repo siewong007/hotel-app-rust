@@ -25,6 +25,7 @@ import {
   Divider,
   CircularProgress,
   Paper,
+  Stack,
   FormControlLabel,
   Checkbox,
 } from '@mui/material';
@@ -222,6 +223,9 @@ const EntryModeBody: React.FC<EntryModeProps> = (props) => {
     currencySymbol, formatCurrency, getLedgerBalanceDue,
   } = props;
   const { t, tOr } = useTranslation('finance');
+  const balanceDue = paymentLedger ? getLedgerBalanceDue(paymentLedger) : 0;
+  const halfBalance = toMoneyNumber((balanceDue / 2).toFixed(2));
+  const showQuickHalf = isPositiveMoney(halfBalance) && halfBalance < balanceDue;
   return (
     <>
       <Tabs value={paymentTab} onChange={(_e, v) => setPaymentTab(v)} sx={{ mb: 2 }}>
@@ -238,6 +242,45 @@ const EntryModeBody: React.FC<EntryModeProps> = (props) => {
               <strong>{t('ledger.payment.balanceDue')}:</strong> {formatCurrency(toMoneyNumber(paymentLedger?.balance_due))}
             </Typography>
           </Alert>
+
+          {paymentLedger && isPositiveMoney(balanceDue) && (
+            <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', mb: 2 }}>
+              <Chip
+                size="small"
+                variant="outlined"
+                aria-pressed={paymentFormData.payment_amount === balanceDue}
+                label={t('ledger.payment.quickFull', { amount: formatCurrency(balanceDue) })}
+                onClick={() => setPaymentFormData({ ...paymentFormData, payment_amount: balanceDue })}
+                sx={{
+                  fontWeight: 700,
+                  bgcolor: paymentFormData.payment_amount === balanceDue ? 'var(--hotel-primary-subtle)' : 'background.paper',
+                  color: paymentFormData.payment_amount === balanceDue ? 'var(--hotel-primary-text)' : 'text.primary',
+                  borderColor: paymentFormData.payment_amount === balanceDue ? 'var(--hotel-primary)' : 'divider',
+                  '&:hover, &:focus, &.Mui-focusVisible': {
+                    bgcolor: paymentFormData.payment_amount === balanceDue ? 'var(--hotel-primary-subtle)' : 'action.hover',
+                  },
+                }}
+              />
+              {showQuickHalf && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  aria-pressed={paymentFormData.payment_amount === halfBalance}
+                  label={t('ledger.payment.quickHalf', { amount: formatCurrency(halfBalance) })}
+                  onClick={() => setPaymentFormData({ ...paymentFormData, payment_amount: halfBalance })}
+                  sx={{
+                    fontWeight: 700,
+                    bgcolor: paymentFormData.payment_amount === halfBalance ? 'var(--hotel-primary-subtle)' : 'background.paper',
+                    color: paymentFormData.payment_amount === halfBalance ? 'var(--hotel-primary-text)' : 'text.primary',
+                    borderColor: paymentFormData.payment_amount === halfBalance ? 'var(--hotel-primary)' : 'divider',
+                    '&:hover, &:focus, &.Mui-focusVisible': {
+                      bgcolor: paymentFormData.payment_amount === halfBalance ? 'var(--hotel-primary-subtle)' : 'action.hover',
+                    },
+                  }}
+                />
+              )}
+            </Stack>
+          )}
 
           <PaymentFields
             amount={String(paymentFormData.payment_amount ?? '')}

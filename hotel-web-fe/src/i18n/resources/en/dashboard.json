@@ -57,7 +57,12 @@
       "next": "Next:",
       "start": "Start:",
       "end": "End:"
-    }
+    },
+    "viewAll": "View all",
+    "quickCheckIn": "Check in",
+    "filterRoomsPlaceholder": "Filter room # or guest…",
+    "clearRoomFilterAria": "Clear room filter",
+    "showingFilteredRooms": "Showing {{shown}} of {{total}} rooms"
   },
   "reports": {
     "title": "Reports & Analytics",

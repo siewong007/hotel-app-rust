@@ -43,8 +43,10 @@
       "upcoming": "Akan Datang",
       "balance": "Baki Tertunggak",
       "normal_balance": "Biasa",
-      "company_balance": "Syarikat"
-    }
+      "company_balance": "Syarikat",
+      "departing": "Berlepas"
+    },
+    "clearSearchAria": "Kosongkan carian"
   },
   "summary": {
     "arrivals": "Ketibaan / Daftar Masuk",
@@ -95,7 +97,11 @@
       "member": "Ahli"
     },
     "groupChip": "Kumpulan {{number}}",
-    "groupTooltip": "Sebahagian daripada tempahan berbilang bilik {{number}}. Cari nombor kumpulan untuk menyenaraikan setiap bilik."
+    "groupTooltip": "Sebahagian daripada tempahan berbilang bilik {{number}}. Cari nombor kumpulan untuk menyenaraikan setiap bilik.",
+    "quickCheckInAria": "Daftar masuk {{guest}}",
+    "quickCheckOutAria": "Daftar keluar {{guest}}",
+    "quickPaymentAria": "Terima pembayaran untuk {{guest}}",
+    "quickInvoiceAria": "Lihat invois untuk {{guest}}"
   },
   "details": {
     "closeAria": "Tutup butiran",
@@ -209,7 +215,13 @@
           "title": "Aktifkan semula setiap bilik dalam {{number}}?"
         }
       }
-    }
+    },
+    "unsaved": "Belum disimpan",
+    "plusOneNight": "+1 mlm",
+    "minusOneNight": "-1 mlm",
+    "extendOneNightAria": "Lanjutkan daftar keluar 1 malam",
+    "shortenOneNightAria": "Pendekkan daftar keluar 1 malam",
+    "invalidDateOrder": "Daftar keluar mesti selepas daftar masuk"
   },
   "labels": {
     "guest": "Tetamu:",
@@ -288,7 +300,9 @@
     "acceptedBalance": "Pembayaran {{amount}} diterima melalui {{method}}. Baki masih tertunggak.",
     "failed": "Gagal menerima pembayaran",
     "accept": "Terima Pembayaran",
-    "processing": "Memproses..."
+    "processing": "Memproses...",
+    "quickFull": "Penuh ({{amount}})",
+    "quickHalf": "50% ({{amount}})"
   },
   "edit": {
     "title": "Sunting Tempahan #{{id}}",

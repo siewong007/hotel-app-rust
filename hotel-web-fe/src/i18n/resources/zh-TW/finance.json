@@ -395,7 +395,8 @@
       "searchPlaceholder": "搜尋帳冊 #、說明或發票號…",
       "viewInvoice": "查看發票",
       "voidEntry": "作廢分錄",
-      "refFallback": "分錄 {{id}}"
+      "refFallback": "分錄 {{id}}",
+      "clearSearchAria": "清除分錄搜尋"
     },
     "entryAndRateUpdated": "帳冊分錄與預訂房價更新成功！",
     "entryUpdated": "帳冊分錄更新成功！",
@@ -544,7 +545,9 @@
       "selectedEntries": "已選分錄",
       "titleEntry": "付款 - {{company}}",
       "totalAmount": "總金額",
-      "totalBalanceDue": "應付餘額總計"
+      "totalBalanceDue": "應付餘額總計",
+      "quickFull": "全額 ({{amount}})",
+      "quickHalf": "50% ({{amount}})"
     },
     "paymentMethod": {
       "bank_transfer": "銀行轉帳",

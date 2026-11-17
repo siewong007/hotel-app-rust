@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from '../../../../router';
+import { useNavigate, useSearchParams } from '../../../../router';
 import {
   Box,
   Typography,
@@ -57,7 +57,7 @@ import UpdateCheckoutDateDialog from '../UpdateCheckoutDateDialog';
 import RoomStatusUpdateDialog from '../../../housekeeping/components/RoomStatusUpdateDialog';
 import { ApiNotificationSeverity, emitApiNotification } from '../../../../utils/apiNotifications';
 import { RoomAction, MenuLayout, RoomMenuAnchor } from './types';
-import { getLocalizedStatusLabel, getLocalizedStatusShortLabel } from '../../config';
+import { getLocalizedStatusLabel, getLocalizedStatusShortLabel, type RoomStatusType } from '../../config';
 import RoomNotesDialog from './components/RoomNotesDialog';
 import RoomDetailsDialog from './components/RoomDetailsDialog';
 import RoomHistoryDialog from './components/RoomHistoryDialog';
@@ -100,9 +100,19 @@ const getOverdueDays = (checkOutDate: string, todayIso: string) => {
 // kept optional here since the fallback that reads them is effectively dead code today.
 type BookingCreatedPayload = Booking & { room_number?: string };
 
+const VALID_ROOM_STATUS_FILTERS: ReadonlyArray<RoomStatusType | 'all'> = [
+  'all',
+  'available',
+  'occupied',
+  'reserved',
+  'dirty',
+  'maintenance',
+];
+
 const RoomManagementPage: React.FC = () => {
   const { t } = useTranslation('rooms');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const theme = useTheme();
   const { format: formatCurrency, symbol: currencySymbol } = useCurrency();
   // Unified booking modal state — declared before useRoomData because it gates
@@ -185,6 +195,23 @@ const RoomManagementPage: React.FC = () => {
     filteredRooms,
     filterOptions,
   } = useRoomManagementFilters({ rooms, roomBookings, reservedBookings });
+
+  const routedStatus = searchParams.get('status') || '';
+  const routedSearch = searchParams.get('search') || '';
+  const [prevRoutedStatus, setPrevRoutedStatus] = useState('');
+  if (routedStatus !== prevRoutedStatus) {
+    setPrevRoutedStatus(routedStatus);
+    if ((VALID_ROOM_STATUS_FILTERS as readonly string[]).includes(routedStatus)) {
+      setRoomStatusFilter(routedStatus as RoomStatusType | 'all');
+    }
+  }
+  const [prevRoutedSearch, setPrevRoutedSearch] = useState('');
+  if (routedSearch !== prevRoutedSearch) {
+    setPrevRoutedSearch(routedSearch);
+    if (routedSearch) {
+      setRoomSearch(routedSearch);
+    }
+  }
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<BookingWithDetails | null>(null);

@@ -161,8 +161,8 @@
     "attrNoDaily": "Tiada pembersihan",
     "allFloors": "Semua tingkat",
     "floorN": "Tingkat {{floor}}",
-    "roomSearchPlaceholder": "No. bilik",
-    "roomSearchAria": "Cari mengikut nombor bilik",
+    "roomSearchPlaceholder": "Bilik # atau tetamu…",
+    "roomSearchAria": "Cari mengikut nombor bilik, jenis bilik, tetamu atau folio",
     "prioritySortTitle": "Susun bilik mengikut perhatian diperlukan (kotor, penyelenggaraan, ditempah dahulu)",
     "prioritySort": "Perhatian dahulu",
     "filtersTitle": "Tapis bilik",
@@ -170,7 +170,10 @@
     "sectionAttributes": "Atribut",
     "sectionFloor": "Tingkat",
     "sectionSort": "Isih",
-    "sectionGroupBy": "Kumpul mengikut"
+    "sectionGroupBy": "Kumpul mengikut",
+    "clearSearchAria": "Kosongkan carian bilik",
+    "resetFilters": "Tetap semula",
+    "statFilterAria": "Tapis mengikut {{status}} ({{count}})"
   },
   "filters": {
     "all": "Semua",

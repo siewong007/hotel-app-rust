@@ -43,8 +43,10 @@
       "upcoming": "即將到來",
       "balance": "逾期餘額",
       "normal_balance": "一般",
-      "company_balance": "公司"
-    }
+      "company_balance": "公司",
+      "departing": "退房"
+    },
+    "clearSearchAria": "清除搜尋"
   },
   "summary": {
     "arrivals": "抵達 / 入住",
@@ -94,7 +96,11 @@
       "member": "會員"
     },
     "groupChip": "團體 {{number}}",
-    "groupTooltip": "屬於多房間預訂 {{number}}。搜尋團體編號可列出所有客房。"
+    "groupTooltip": "屬於多房間預訂 {{number}}。搜尋團體編號可列出所有客房。",
+    "quickCheckInAria": "辦理入住 — {{guest}}",
+    "quickCheckOutAria": "辦理退房 — {{guest}}",
+    "quickPaymentAria": "收取付款 — {{guest}}",
+    "quickInvoiceAria": "檢視發票 — {{guest}}"
   },
   "details": {
     "closeAria": "關閉詳情",
@@ -208,7 +214,13 @@
           "title": "恢復 {{number}} 中的所有客房？"
         }
       }
-    }
+    },
+    "unsaved": "未儲存",
+    "plusOneNight": "+1晚",
+    "minusOneNight": "-1晚",
+    "extendOneNightAria": "延住 1 晚",
+    "shortenOneNightAria": "縮短 1 晚",
+    "invalidDateOrder": "退房日期必須晚於入住日期"
   },
   "labels": {
     "guest": "賓客：",
@@ -287,7 +299,9 @@
     "acceptedBalance": "已接受 {{method}} 付款 {{amount}}。仍有未結餘額。",
     "failed": "接受付款失敗",
     "accept": "接受付款",
-    "processing": "處理中…"
+    "processing": "處理中…",
+    "quickFull": "全額 ({{amount}})",
+    "quickHalf": "50% ({{amount}})"
   },
   "edit": {
     "title": "編輯預訂 #{{id}}",

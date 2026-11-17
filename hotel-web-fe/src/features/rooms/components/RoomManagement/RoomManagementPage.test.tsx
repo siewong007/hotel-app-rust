@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   updateRoomStatus: vi.fn(),
   reload: vi.fn(),
   setRoomSearch: vi.fn(),
+  setRoomStatusFilter: vi.fn(),
   rooms: [] as import('../../../../types').Room[],
   roomBookings: new Map<string, import('../../../../types').BookingWithDetails>(),
   reservedBookings: new Map<string, import('../../../../types').BookingWithDetails>(),
@@ -39,6 +40,7 @@ vi.mock('@mui/material', async (importOriginal) => {
 
 vi.mock('../../../../router', () => ({
   useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
@@ -100,7 +102,7 @@ vi.mock('../../hooks', () => ({
   }),
   useRoomManagementFilters: () => ({
     roomStatusFilter: 'all',
-    setRoomStatusFilter: vi.fn(),
+    setRoomStatusFilter: mocks.setRoomStatusFilter,
     attrFilters: { smoking: false, daily: false, nodaily: false },
     toggleAttrFilter: vi.fn(),
     floorFilter: 'all',
@@ -534,9 +536,19 @@ describe('RoomManagementPage — status-change workflows', () => {
     mocks.rooms = [occupiedRoom];
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText('Room #'), { target: { value: '301' } });
+    fireEvent.change(screen.getByPlaceholderText('Room # or guest…'), { target: { value: '301' } });
 
     expect(mocks.setRoomSearch).toHaveBeenCalledWith('301');
+  });
+
+  it('clicking a header quick-stat tile toggles the status filter', () => {
+    mocks.rooms = [occupiedRoom];
+    mocks.setRoomStatusFilter.mockReset();
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by Available (0)' }));
+
+    expect(mocks.setRoomStatusFilter).toHaveBeenCalledWith('available');
   });
 });
 

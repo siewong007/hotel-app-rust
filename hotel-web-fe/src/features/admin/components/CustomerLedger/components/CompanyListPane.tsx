@@ -170,8 +170,9 @@ const CompanyListPane: React.FC<CompanyListPaneProps> = ({
                 height: 24,
                 bgcolor: filter === f.key ? 'text.primary' : 'background.paper',
                 color: filter === f.key ? 'background.paper' : 'text.secondary',
-                '&:hover': {
+                '&:hover, &:focus, &.Mui-focusVisible': {
                   bgcolor: filter === f.key ? 'text.primary' : 'action.hover',
+                  color: filter === f.key ? 'background.paper' : 'text.primary',
                 },
               }}
             />

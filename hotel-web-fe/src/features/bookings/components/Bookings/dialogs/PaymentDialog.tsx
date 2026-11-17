@@ -193,6 +193,8 @@ const PaymentDialog: React.FC<PaymentDialogProps> = ({ open, booking, context, o
   };
 
   const balance = getBookingBalance(currentBooking);
+  const halfBalance = toMoneyNumber((balance / 2).toFixed(2));
+  const showQuickHalf = isPositiveMoney(halfBalance) && isLessMoney(halfBalance, balance);
 
   return (
     <Dialog
@@ -315,28 +317,69 @@ const PaymentDialog: React.FC<PaymentDialogProps> = ({ open, booking, context, o
             </Box>
 
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-              <TextField
-                fullWidth
-                type="number"
-                label={t('payment.amountLabel')}
-                value={amount || ''}
-                onChange={(e) => setAmount(toMoneyNumber(e.target.value))}
-                error={
-                  (context === 'checkout_required' && isLessMoney(amount, balance)) ||
-                  isGreaterMoney(amount, balance)
-                }
-                helperText={
-                  isGreaterMoney(amount, balance)
-                    ? t('payment.amountExceedsHelper', { balance: formatCurrency(balance) })
-                    : context === 'checkout_required'
-                      ? t('payment.fullBalanceRequired', { balance: formatCurrency(balance) })
-                      : t('payment.outstandingBalance', { balance: formatCurrency(balance) })
-                }
-                required
-                slotProps={{
-                  input: { startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment> },
-                  htmlInput: { min: 0, max: balance, step: 0.01 }
-                }} />
+              <Box>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label={t('payment.amountLabel')}
+                  value={amount || ''}
+                  onChange={(e) => setAmount(toMoneyNumber(e.target.value))}
+                  error={
+                    (context === 'checkout_required' && isLessMoney(amount, balance)) ||
+                    isGreaterMoney(amount, balance)
+                  }
+                  helperText={
+                    isGreaterMoney(amount, balance)
+                      ? t('payment.amountExceedsHelper', { balance: formatCurrency(balance) })
+                      : context === 'checkout_required'
+                        ? t('payment.fullBalanceRequired', { balance: formatCurrency(balance) })
+                        : t('payment.outstandingBalance', { balance: formatCurrency(balance) })
+                  }
+                  required
+                  slotProps={{
+                    input: { startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment> },
+                    htmlInput: { min: 0, max: balance, step: 0.01 }
+                  }}
+                />
+                {context === 'manual' && isPositiveMoney(balance) && (
+                  <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', mt: 1 }}>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      aria-pressed={amount === balance}
+                      label={t('payment.quickFull', { amount: formatCurrency(balance) })}
+                      onClick={() => setAmount(balance)}
+                      sx={{
+                        fontWeight: 700,
+                        bgcolor: amount === balance ? 'var(--hotel-primary-subtle)' : 'background.paper',
+                        color: amount === balance ? 'var(--hotel-primary-text)' : 'text.primary',
+                        borderColor: amount === balance ? 'var(--hotel-primary)' : 'divider',
+                        '&:hover, &:focus, &.Mui-focusVisible': {
+                          bgcolor: amount === balance ? 'var(--hotel-primary-subtle)' : 'action.hover',
+                        },
+                      }}
+                    />
+                    {showQuickHalf && (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        aria-pressed={amount === halfBalance}
+                        label={t('payment.quickHalf', { amount: formatCurrency(halfBalance) })}
+                        onClick={() => setAmount(halfBalance)}
+                        sx={{
+                          fontWeight: 700,
+                          bgcolor: amount === halfBalance ? 'var(--hotel-primary-subtle)' : 'background.paper',
+                          color: amount === halfBalance ? 'var(--hotel-primary-text)' : 'text.primary',
+                          borderColor: amount === halfBalance ? 'var(--hotel-primary)' : 'divider',
+                          '&:hover, &:focus, &.Mui-focusVisible': {
+                            bgcolor: amount === halfBalance ? 'var(--hotel-primary-subtle)' : 'action.hover',
+                          },
+                        }}
+                      />
+                    )}
+                  </Stack>
+                )}
+              </Box>
               <RoomPaymentMethodSelect
                 booking={currentBooking}
                 paymentMethods={paymentMethods}

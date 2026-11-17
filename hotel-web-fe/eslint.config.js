@@ -76,7 +76,6 @@ export default [
     // violations and are fixed area by area. Remove entries as they're fixed;
     // never add new ones.
     files: [
-      "src/components/layout/CommandPalette.tsx",
       "src/features/admin/components/CustomerLedger/CustomerLedgerPage.tsx",
       "src/features/admin/components/UrgentTransferAlert.tsx",
       "src/features/admin/components/data-transfer/DesktopBackupsCard.tsx",

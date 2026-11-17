@@ -6,26 +6,35 @@ import {
   Pagination,
   Skeleton,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
   SwapVert as SwapVertIcon,
   Bed as BedIcon,
+  Login as LoginIcon,
+  ExitToApp as CheckOutIcon,
+  Payment as PaymentIcon,
+  Receipt as ReceiptIcon,
 } from '@mui/icons-material';
 import { BookingChannelChip, BillingChip, GroupChip, NightAuditChip } from './BookingMetaChips';
 import type { BookingWithDetails } from '../../../../types';
 import { useCurrency } from '../../../../hooks/useCurrency';
 import { useIsPhone } from '../../../../hooks/useIsPhone';
 import { statusLabel, useTranslation } from '../../../../i18n';
+import { getHotelSettings } from '../../../../utils/hotelSettings';
 import { isPositiveMoney } from '../../../../utils/money';
 import { getBookingChannelInfo } from '../../utils/bookingChannel';
 import {
+  canCheckIn,
+  canCheckOut,
   formatShortDate,
   getBillingChipLabel,
   getBookingBalance,
   getBookingTotal,
   getGuestInitials,
   getNights,
+  isEarlyCheckIn,
   isNightAuditInvolved,
   statusDotColor,
   type BookingView,
@@ -52,6 +61,10 @@ interface BookingListPanelProps {
   onToggleSort: () => void;
   pagination: BookingListPagination;
   onPageChange: (page: number) => void;
+  onCheckIn?: (booking: BookingWithDetails) => void;
+  onCheckOut?: (booking: BookingWithDetails) => void;
+  onPayment?: (booking: BookingWithDetails) => void;
+  onInvoice?: (booking: BookingWithDetails) => void;
 }
 
 interface PhoneBookingRowProps {
@@ -120,6 +133,9 @@ const PhoneBookingRow: React.FC<PhoneBookingRowProps> = ({
   );
 };
 
+const MD_GRID_WITH_ACTIONS = '54px 1fr auto auto auto';
+const MD_GRID_DEFAULT = '54px 1fr auto auto';
+
 const BookingListPanel: React.FC<BookingListPanelProps> = ({
   bookings,
   loading,
@@ -130,10 +146,17 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
   onToggleSort,
   pagination,
   onPageChange,
+  onCheckIn,
+  onCheckOut,
+  onPayment,
+  onInvoice,
 }) => {
   const { format: formatCurrency } = useCurrency();
   const isPhone = useIsPhone();
   const { t } = useTranslation('bookings');
+  const hasRowActions = Boolean(onCheckIn || onCheckOut || onPayment || onInvoice);
+  const desktopGridColumns = hasRowActions ? MD_GRID_WITH_ACTIONS : MD_GRID_DEFAULT;
+  const checkInTime = getHotelSettings().check_in_time;
 
   return (
     <>
@@ -158,7 +181,7 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
               key={index}
               sx={{
                 display: 'grid',
-                gridTemplateColumns: { xs: '44px 1fr', md: '54px 1fr auto auto' },
+                gridTemplateColumns: { xs: '44px 1fr', md: desktopGridColumns },
                 gap: 1.75,
                 alignItems: 'center',
                 px: 2,
@@ -177,6 +200,11 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
               <Box sx={{ gridColumn: { xs: '2 / span 1', md: 'auto' } }}>
                 <Skeleton width={110} height={18} />
               </Box>
+              {hasRowActions && (
+                <Box sx={{ gridColumn: { xs: '2 / span 1', md: 'auto' } }}>
+                  <Skeleton width={88} height={30} />
+                </Box>
+              )}
             </Box>
           ))}
         </Stack>
@@ -221,6 +249,93 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
 
             const channelInfo = getBookingChannelInfo(booking);
             const billingChipLabel = getBillingChipLabel(booking, t);
+            const showCheckIn = Boolean(onCheckIn && canCheckIn(booking));
+            const showCheckOut = !showCheckIn && Boolean(onCheckOut && canCheckOut(booking));
+            const showPayment = !showCheckIn && !showCheckOut && Boolean(
+              onPayment &&
+              !booking.group_number &&
+              !booking.is_complimentary &&
+              isPositiveMoney(balance) &&
+              !['checked_in', 'checked_out', 'completed'].includes(booking.status)
+            );
+            const showInvoice = !showCheckIn && !showCheckOut && !showPayment && Boolean(
+              onInvoice && ['checked_out', 'completed'].includes(booking.status)
+            );
+
+            let rowAction: React.ReactNode = null;
+            if (showCheckIn && onCheckIn) {
+              const btn = (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="success"
+                  startIcon={<LoginIcon fontSize="small" />}
+                  aria-label={t('list.quickCheckInAria', { guest: booking.guest_name })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCheckIn(booking);
+                  }}
+                  sx={{ minHeight: 32, whiteSpace: 'nowrap', fontWeight: 700 }}
+                >
+                  {t('details.checkInAction')}
+                </Button>
+              );
+              rowAction = isEarlyCheckIn(booking, checkInTime) ? (
+                <Tooltip title={t('details.earlyCheckInTooltip', { time: checkInTime || '15:00' })} arrow>
+                  {btn}
+                </Tooltip>
+              ) : btn;
+            } else if (showCheckOut && onCheckOut) {
+              rowAction = (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<CheckOutIcon fontSize="small" />}
+                  aria-label={t('list.quickCheckOutAria', { guest: booking.guest_name })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCheckOut(booking);
+                  }}
+                  sx={{ minHeight: 32, whiteSpace: 'nowrap', fontWeight: 700 }}
+                >
+                  {t('details.checkOutAction')}
+                </Button>
+              );
+            } else if (showPayment && onPayment) {
+              rowAction = (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="success"
+                  startIcon={<PaymentIcon fontSize="small" />}
+                  aria-label={t('list.quickPaymentAria', { guest: booking.guest_name })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPayment(booking);
+                  }}
+                  sx={{ minHeight: 32, whiteSpace: 'nowrap', fontWeight: 700 }}
+                >
+                  {t('details.payment')}
+                </Button>
+              );
+            } else if (showInvoice && onInvoice) {
+              rowAction = (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ReceiptIcon fontSize="small" />}
+                  aria-label={t('list.quickInvoiceAria', { guest: booking.guest_name })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onInvoice(booking);
+                  }}
+                  sx={{ minHeight: 32, whiteSpace: 'nowrap', fontWeight: 700 }}
+                >
+                  {t('details.invoice')}
+                </Button>
+              );
+            }
 
             return (
               <Box
@@ -228,7 +343,7 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
                 onClick={() => onOpenBooking(booking)}
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: { xs: '44px 1fr', md: '54px 1fr auto auto' },
+                  gridTemplateColumns: { xs: '44px 1fr', md: desktopGridColumns },
                   gap: 1.75,
                   alignItems: 'center',
                   px: 2,
@@ -236,6 +351,8 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
                   cursor: 'pointer',
                   bgcolor: 'background.paper',
                   opacity: booking.status === 'voided' ? 0.55 : 1,
+                  transition: 'background-color 120ms ease',
+                  '&:hover': { bgcolor: 'action.hover' },
                 }}
               >
                 <Box sx={{ width: 46, height: 46, borderRadius: '50%', bgcolor: 'var(--hotel-primary-subtle)', color: 'var(--hotel-primary-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900 }}>
@@ -297,6 +414,18 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
                   }}>
                   {booking.invoice_number || booking.folio_number || `#${booking.id}`}
                 </Typography>
+                {hasRowActions && (
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      justifyContent: { xs: 'flex-start', md: 'flex-end' },
+                      minWidth: { md: 108 },
+                      gridColumn: { xs: '2 / span 1', md: 'auto' },
+                    }}
+                  >
+                    {rowAction}
+                  </Box>
+                )}
               </Box>
             );
           })}

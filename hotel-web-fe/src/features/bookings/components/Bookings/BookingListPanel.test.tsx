@@ -154,6 +154,71 @@ describe('BookingListPanel phone rows', () => {
 
     expect(props.onToggleSort).toHaveBeenCalledTimes(1);
   });
+
+  it('desktop quick-action buttons fire callbacks without opening the booking drawer', () => {
+    const onOpenBooking = vi.fn();
+    const onCheckIn = vi.fn();
+    const onCheckOut = vi.fn();
+    const onPayment = vi.fn();
+    const onInvoice = vi.fn();
+
+    const confirmed = buildBooking({ id: '1', guest_name: 'Alice', status: 'confirmed' });
+    const checkedIn = buildBooking({ id: '2', guest_name: 'Bob', status: 'checked_in' });
+    const futurePending = buildBooking({
+      id: '3',
+      guest_name: 'Charlie',
+      status: 'pending',
+      check_in_date: `${formatLocalDate(addLocalDays(new Date(), 2))}T00:00:00.000Z`,
+      check_out_date: `${formatLocalDate(addLocalDays(new Date(), 4))}T00:00:00.000Z`,
+      balance_due: 200,
+    });
+    const checkedOut = buildBooking({
+      id: '4',
+      guest_name: 'Dana',
+      status: 'checked_out',
+      balance_due: 0,
+      payment_status: 'paid',
+    });
+
+    render(
+      <BookingListPanel
+        bookings={[confirmed, checkedIn, futurePending, checkedOut]}
+        loading={false}
+        totalBookings={4}
+        bookingView="all"
+        onOpenBooking={onOpenBooking}
+        sortField="check_in_date"
+        onToggleSort={vi.fn()}
+        pagination={{
+          hasMultiplePages: false,
+          startItem: 1,
+          endItem: 4,
+          totalItems: 4,
+          totalPages: 1,
+          currentPage: 1,
+        }}
+        onPageChange={vi.fn()}
+        onCheckIn={onCheckIn}
+        onCheckOut={onCheckOut}
+        onPayment={onPayment}
+        onInvoice={onInvoice}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check in Alice' }));
+    expect(onCheckIn).toHaveBeenCalledWith(confirmed);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check out Bob' }));
+    expect(onCheckOut).toHaveBeenCalledWith(checkedIn);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept payment for Charlie' }));
+    expect(onPayment).toHaveBeenCalledWith(futurePending);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View invoice for Dana' }));
+    expect(onInvoice).toHaveBeenCalledWith(checkedOut);
+
+    expect(onOpenBooking).not.toHaveBeenCalled();
+  });
 });
 
 describe('BookingSummarySection phone chips', () => {

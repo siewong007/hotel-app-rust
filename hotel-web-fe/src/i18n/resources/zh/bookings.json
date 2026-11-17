@@ -43,8 +43,10 @@
       "upcoming": "未来预订",
       "balance": "逾期未结",
       "normal_balance": "普通",
-      "company_balance": "公司"
-    }
+      "company_balance": "公司",
+      "departing": "离店"
+    },
+    "clearSearchAria": "清除搜索"
   },
   "summary": {
     "arrivals": "抵店 / 入住",
@@ -95,7 +97,11 @@
       "member": "会员"
     },
     "groupChip": "团体 {{number}}",
-    "groupTooltip": "属于多房间预订 {{number}}。搜索团体编号可列出所有客房。"
+    "groupTooltip": "属于多房间预订 {{number}}。搜索团体编号可列出所有客房。",
+    "quickCheckInAria": "办理入住 — {{guest}}",
+    "quickCheckOutAria": "办理退房 — {{guest}}",
+    "quickPaymentAria": "收取支付款项 — {{guest}}",
+    "quickInvoiceAria": "查看发票 — {{guest}}"
   },
   "details": {
     "closeAria": "关闭详情",
@@ -209,7 +215,13 @@
           "title": "恢复 {{number}} 中的所有客房？"
         }
       }
-    }
+    },
+    "unsaved": "未保存",
+    "plusOneNight": "+1晚",
+    "minusOneNight": "-1晚",
+    "extendOneNightAria": "延住 1 晚",
+    "shortenOneNightAria": "缩短 1 晚",
+    "invalidDateOrder": "退房日期必须晚于入住日期"
   },
   "labels": {
     "guest": "客人：",
@@ -288,7 +300,9 @@
     "acceptedBalance": "已通过{{method}}收款 {{amount}}。仍有未结余额。",
     "failed": "收款失败",
     "accept": "收取款项",
-    "processing": "处理中…"
+    "processing": "处理中…",
+    "quickFull": "全额 ({{amount}})",
+    "quickHalf": "50% ({{amount}})"
   },
   "edit": {
     "title": "编辑预订 #{{id}}",

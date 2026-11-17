@@ -354,6 +354,7 @@ const BookingsPage: React.FC = () => {
                 all: totalBookings || bookings.length,
                 arriving: summary?.arriving ?? 0,
                 inHouse: summary?.in_house ?? 0,
+                departing: summary?.departing ?? 0,
                 upcoming: summary?.upcoming ?? 0,
                 // `balance` is the union of the two disjoint buckets.
                 due: (summary?.normal_due ?? 0) + (summary?.company_due ?? 0),
@@ -379,6 +380,10 @@ const BookingsPage: React.FC = () => {
               onToggleSort={() => handleSort(sortField === 'check_in_date' ? 'guest_name' : 'check_in_date')}
               pagination={bookingPagination}
               onPageChange={setCurrentPage}
+              onCheckIn={bookingActionCallbacks.onCheckIn}
+              onCheckOut={bookingActionCallbacks.onCheckOut}
+              onPayment={bookingActionCallbacks.onPayment}
+              onInvoice={bookingActionCallbacks.onInvoice}
             />
           </Card>
         </Grid>

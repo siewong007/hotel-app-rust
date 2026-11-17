@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Autocomplete,
   Badge,
@@ -37,7 +37,7 @@ interface BookingFiltersBarProps {
   onClearMonthSearch: () => void;
   bookingView: BookingView;
   onSelectView: (view: BookingView) => void;
-  viewCounts: { all: number; arriving: number; inHouse: number; upcoming: number; due: number; normalDue: number; companyDue: number };
+  viewCounts: { all: number; arriving: number; inHouse: number; departing: number; upcoming: number; due: number; normalDue: number; companyDue: number };
   hasActiveFilters: boolean;
   onClearFilters: () => void;
   paymentMethods: string[];
@@ -70,14 +70,48 @@ const BookingFiltersBar: React.FC<BookingFiltersBarProps> = ({
   const isPhone = useIsPhone();
   const { t } = useTranslation('bookings');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const slashFocusPendingRef = useRef(false);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      slashFocusPendingRef.current = true;
+      window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const searchField = (
     <TextField
       fullWidth
       size="medium"
+      inputRef={searchInputRef}
       placeholder={t('filters.searchPlaceholder')}
       value={searchQuery}
-      onChange={(e) => onSearchQueryChange(e.target.value)}
+      onChange={(e) => {
+        if (slashFocusPendingRef.current) {
+          slashFocusPendingRef.current = false;
+          if (!searchQuery && e.target.value === '/') return;
+        }
+        onSearchQueryChange(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        slashFocusPendingRef.current = false;
+        if (e.key === 'Escape' && searchQuery) {
+          e.preventDefault();
+          onSearchQueryChange('');
+        }
+      }}
       slotProps={{
         input: {
           startAdornment: (
@@ -85,6 +119,37 @@ const BookingFiltersBar: React.FC<BookingFiltersBarProps> = ({
               <SearchIcon />
             </InputAdornment>
           ),
+          endAdornment: searchQuery ? (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                aria-label={t('filters.clearSearchAria')}
+                onClick={() => onSearchQueryChange('')}
+              >
+                <ClearIcon fontSize="small" />
+              </IconButton>
+            </InputAdornment>
+          ) : !isPhone ? (
+            <InputAdornment position="end">
+              <Box
+                component="kbd"
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  px: 0.75,
+                  py: 0.2,
+                  borderRadius: 0.75,
+                  bgcolor: 'action.hover',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  color: 'text.secondary',
+                }}
+              >
+                /
+              </Box>
+            </InputAdornment>
+          ) : undefined,
         }
       }}
     />
@@ -169,6 +234,7 @@ const BookingFiltersBar: React.FC<BookingFiltersBarProps> = ({
         { key: 'all', label: t('filters.view.all'), count: viewCounts.all },
         { key: 'arriving', label: t('filters.view.arriving'), count: viewCounts.arriving },
         { key: 'in_house', label: t('filters.view.in_house'), count: viewCounts.inHouse },
+        { key: 'departing', label: t('filters.view.departing'), count: viewCounts.departing },
         { key: 'upcoming', label: t('filters.view.upcoming'), count: viewCounts.upcoming },
         { key: 'balance', label: t('filters.view.balance'), count: viewCounts.due },
         { key: 'normal_balance', label: t('filters.view.normal_balance'), count: viewCounts.normalDue },
@@ -184,6 +250,9 @@ const BookingFiltersBar: React.FC<BookingFiltersBarProps> = ({
             fontWeight: 900,
             bgcolor: bookingView === filter.key ? 'text.primary' : 'background.paper',
             color: bookingView === filter.key ? 'background.paper' : 'text.primary',
+            '&:hover, &:focus, &.Mui-focusVisible': {
+              bgcolor: bookingView === filter.key ? 'text.primary' : 'action.hover',
+            },
           }}
         />
       ))}
@@ -246,7 +315,7 @@ const BookingFiltersBar: React.FC<BookingFiltersBarProps> = ({
 
   return (
     <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'minmax(0, 1.4fr) repeat(4, minmax(0, 1fr))' }, gap: 1.25 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'minmax(0, 1.9fr) repeat(4, minmax(0, 1fr))' }, gap: 1.25 }}>
         {searchField}
         {secondaryFilters}
       </Box>

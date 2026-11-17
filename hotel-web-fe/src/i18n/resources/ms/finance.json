@@ -395,7 +395,8 @@
       "searchPlaceholder": "Cari no. lejar, penerangan atau no. invois...",
       "viewInvoice": "Lihat invois",
       "voidEntry": "Batalkan entri",
-      "refFallback": "entri {{id}}"
+      "refFallback": "entri {{id}}",
+      "clearSearchAria": "Kosongkan carian entri"
     },
     "entryAndRateUpdated": "Catatan lejar dan kadar tempahan berjaya dikemas kini!",
     "entryUpdated": "Catatan lejar berjaya dikemas kini!",
@@ -544,7 +545,9 @@
       "selectedEntries": "Entri Dipilih",
       "titleEntry": "Bayaran - {{company}}",
       "totalAmount": "Jumlah Keseluruhan",
-      "totalBalanceDue": "Jumlah Baki Perlu Dibayar"
+      "totalBalanceDue": "Jumlah Baki Perlu Dibayar",
+      "quickFull": "Penuh ({{amount}})",
+      "quickHalf": "50% ({{amount}})"
     },
     "paymentMethod": {
       "bank_transfer": "Pindahan Bank",

@@ -395,7 +395,8 @@
       "searchPlaceholder": "搜索账本号、描述或发票号...",
       "viewInvoice": "查看发票",
       "voidEntry": "作废条目",
-      "refFallback": "条目 {{id}}"
+      "refFallback": "条目 {{id}}",
+      "clearSearchAria": "清除条目搜索"
     },
     "entryAndRateUpdated": "账目记录和预订价格已更新！",
     "entryUpdated": "账目记录已更新！",
@@ -544,7 +545,9 @@
       "selectedEntries": "已选项目",
       "titleEntry": "付款 - {{company}}",
       "totalAmount": "总金额",
-      "totalBalanceDue": "应付余额总计"
+      "totalBalanceDue": "应付余额总计",
+      "quickFull": "全额 ({{amount}})",
+      "quickHalf": "50% ({{amount}})"
     },
     "paymentMethod": {
       "bank_transfer": "银行转账",

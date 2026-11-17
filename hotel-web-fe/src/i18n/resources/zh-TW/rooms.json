@@ -159,8 +159,8 @@
     "attrNoDaily": "不清潔",
     "allFloors": "所有樓層",
     "floorN": "{{floor}} 樓",
-    "roomSearchPlaceholder": "房號",
-    "roomSearchAria": "依房號搜尋",
+    "roomSearchPlaceholder": "房號或賓客…",
+    "roomSearchAria": "依房號、房型、賓客或帳單號搜尋",
     "prioritySortTitle": "依需要注意程度排序客房（待清潔、維修、已預訂優先）",
     "prioritySort": "需要注意優先",
     "filtersTitle": "客房篩選",
@@ -168,7 +168,10 @@
     "sectionAttributes": "屬性",
     "sectionFloor": "樓層",
     "sectionSort": "排序",
-    "sectionGroupBy": "分組依據"
+    "sectionGroupBy": "分組依據",
+    "clearSearchAria": "清除客房搜尋",
+    "resetFilters": "重設",
+    "statFilterAria": "依{{status}}篩選（{{count}}）"
   },
   "filters": {
     "all": "全部",

@@ -57,7 +57,12 @@
       "next": "Seterusnya:",
       "start": "Mula:",
       "end": "Tamat:"
-    }
+    },
+    "viewAll": "Lihat semua",
+    "quickCheckIn": "Daftar masuk",
+    "filterRoomsPlaceholder": "Tapis bilik # atau tetamu…",
+    "clearRoomFilterAria": "Kosongkan penapis bilik",
+    "showingFilteredRooms": "Memaparkan {{shown}} daripada {{total}} bilik"
   },
   "reports": {
     "title": "Laporan & Analitis",

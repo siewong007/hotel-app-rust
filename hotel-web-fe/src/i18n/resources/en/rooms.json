@@ -161,8 +161,8 @@
     "attrNoDaily": "No cleaning",
     "allFloors": "All floors",
     "floorN": "Floor {{floor}}",
-    "roomSearchPlaceholder": "Room #",
-    "roomSearchAria": "Search by room number",
+    "roomSearchPlaceholder": "Room # or guest…",
+    "roomSearchAria": "Search by room number, room type, guest, or folio",
     "prioritySortTitle": "Sort rooms by attention needed (dirty, maintenance, reserved first)",
     "prioritySort": "Attention first",
     "filtersTitle": "Room filters",
@@ -170,7 +170,10 @@
     "sectionAttributes": "Attributes",
     "sectionFloor": "Floor",
     "sectionSort": "Sort",
-    "sectionGroupBy": "Group by"
+    "sectionGroupBy": "Group by",
+    "clearSearchAria": "Clear room search",
+    "resetFilters": "Reset",
+    "statFilterAria": "Filter by {{status}} ({{count}})"
   },
   "filters": {
     "all": "All",

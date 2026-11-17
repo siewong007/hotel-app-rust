@@ -1,9 +1,10 @@
 // Page header for Room Management: title + room/floor summary, today's date,
 // quick status stat tiles, and the status / attribute filter rows.
 
-import React from 'react';
-import { Box, Paper, Typography, ToggleButton, ToggleButtonGroup, TextField, InputAdornment } from '@mui/material';
+import React, { useEffect, useRef } from 'react';
+import { Box, Button, IconButton, Paper, Typography, ToggleButton, ToggleButtonGroup, TextField, InputAdornment } from '@mui/material';
 import {
+  Close as CloseIcon,
   Hotel as HotelIcon,
   Block as BlockIcon,
   SmokingRooms as SmokingIcon,
@@ -79,6 +80,26 @@ const RoomManagementHeader: React.FC<RoomManagementHeaderProps> = ({
 }) => {
   const isPhone = useIsPhone();
   const { t } = useTranslation('rooms');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const slashFocusPendingRef = useRef(false);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      slashFocusPendingRef.current = true;
+      window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Non-default selections surfaced on the phone filter-button badge — the
   // same set handleResetFilters restores (status pills, attribute chips, floor
@@ -228,8 +249,22 @@ const RoomManagementHeader: React.FC<RoomManagementHeaderProps> = ({
   const searchField = (
     <TextField
       size="small"
+      inputRef={searchInputRef}
       value={roomSearch}
-      onChange={(e) => onRoomSearchChange(e.target.value)}
+      onChange={(e) => {
+        if (slashFocusPendingRef.current) {
+          slashFocusPendingRef.current = false;
+          if (!roomSearch && e.target.value === '/') return;
+        }
+        onRoomSearchChange(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        slashFocusPendingRef.current = false;
+        if (e.key === 'Escape' && roomSearch) {
+          e.preventDefault();
+          onRoomSearchChange('');
+        }
+      }}
       placeholder={t('header.roomSearchPlaceholder')}
       slotProps={{
         input: {
@@ -238,11 +273,44 @@ const RoomManagementHeader: React.FC<RoomManagementHeaderProps> = ({
               <SearchIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
             </InputAdornment>
           ),
+          endAdornment: roomSearch ? (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                aria-label={t('header.clearSearchAria')}
+                onClick={() => onRoomSearchChange('')}
+                sx={{ p: 0.25 }}
+              >
+                <CloseIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </InputAdornment>
+          ) : !isPhone ? (
+            <InputAdornment position="end">
+              <Box
+                component="kbd"
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  px: 0.6,
+                  py: 0.1,
+                  borderRadius: 0.75,
+                  bgcolor: 'action.hover',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  color: 'text.secondary',
+                  lineHeight: 1.2,
+                }}
+              >
+                /
+              </Box>
+            </InputAdornment>
+          ) : undefined,
         },
         htmlInput: { 'aria-label': t('header.roomSearchAria') },
       }}
       sx={{
-        width: isPhone ? '100%' : 110,
+        width: isPhone ? '100%' : 220,
         '& .MuiInputBase-root': {
           borderRadius: 999,
           fontSize: isPhone ? '0.875rem' : '0.75rem',
@@ -355,40 +423,56 @@ const RoomManagementHeader: React.FC<RoomManagementHeaderProps> = ({
           </Typography>
         </Box>
 
-        {/* Quick Stats - soft tinted tiles */}
+        {/* Quick Stats - interactive filter tiles */}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           {([
             { count: availableCount, label: t('header.statAvailable'), status: 'available' as const, show: true },
             { count: occupiedCount, label: t('header.statOccupied'), status: 'occupied' as const, show: true },
             { count: reservedCount, label: t('header.statReserved'), status: 'reserved' as const, show: true },
-            { count: dirtyCount, label: t('header.statDirty'), status: 'dirty' as const, show: dirtyCount > 0 },
-            { count: maintenanceCount, label: t('header.statMaintenance'), status: 'maintenance' as const, show: maintenanceCount > 0 },
+            { count: dirtyCount, label: t('header.statDirty'), status: 'dirty' as const, show: dirtyCount > 0 || statusFilter === 'dirty' },
+            { count: maintenanceCount, label: t('header.statMaintenance'), status: 'maintenance' as const, show: maintenanceCount > 0 || statusFilter === 'maintenance' },
           ])
             .map((s) => ({ ...s, color: getStatusAccentColor(s.status) }))
             .filter((s) => s.show)
-            .map((s) => (
-              <Box
-                key={s.label}
-                sx={{
-                  px: 1.75,
-                  py: 0.85,
-                  minWidth: 64,
-                  borderRadius: 1.5,
-                  textAlign: 'center',
-                  bgcolor: tint(s.color, 12),
-                  border: '1px solid',
-                  borderColor: tint(s.color, 40),
-                  color: s.color,
-                }}
-              >
-                <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>
-                  {s.count}
-                </Typography>
-                <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.65rem', letterSpacing: 0.3 }}>
-                  {s.label}
-                </Typography>
-              </Box>
-            ))}
+            .map((s) => {
+              const selected = statusFilter === s.status;
+              return (
+                <Box
+                  key={s.label}
+                  component="button"
+                  type="button"
+                  aria-pressed={selected}
+                  aria-label={t('header.statFilterAria', { status: s.label, count: s.count })}
+                  onClick={() => onStatusFilterChange(selected ? 'all' : s.status)}
+                  sx={{
+                    px: 1.75,
+                    py: 0.85,
+                    minWidth: 64,
+                    borderRadius: 1.5,
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    font: 'inherit',
+                    bgcolor: selected ? tint(s.color, 20) : tint(s.color, 12),
+                    border: '1px solid',
+                    borderColor: selected ? s.color : tint(s.color, 40),
+                    boxShadow: selected ? `0 0 0 1px ${s.color}` : 'none',
+                    color: s.color,
+                    transition: 'transform 120ms ease, background-color 120ms ease, box-shadow 120ms ease',
+                    '&:hover': {
+                      bgcolor: tint(s.color, 20),
+                      transform: 'translateY(-1px)',
+                    },
+                  }}
+                >
+                  <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>
+                    {s.count}
+                  </Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.65rem', letterSpacing: 0.3 }}>
+                    {s.label}
+                  </Typography>
+                </Box>
+              );
+            })}
         </Box>
       </Box>
 
@@ -446,10 +530,19 @@ const RoomManagementHeader: React.FC<RoomManagementHeaderProps> = ({
             </>
           )}
 
-          {/* Room-number search + attention-first sort, pushed to the row end */}
+          {/* Room-number search + attention-first sort + reset, pushed to the row end */}
           <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
             {searchField}
             {attentionFirstToggle}
+            {(activeFilterCount > 0 || Boolean(roomSearch.trim())) && (
+              <Button
+                size="small"
+                onClick={handleResetFilters}
+                sx={{ minHeight: 28, px: 1.25, borderRadius: 999, fontSize: '0.75rem', fontWeight: 700, textTransform: 'none' }}
+              >
+                {t('header.resetFilters')}
+              </Button>
+            )}
           </Box>
         </Box>
       )}

@@ -1660,7 +1660,7 @@ const CustomerLedgerPage: React.FC = () => {
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', md: '380px 1fr' },
+          gridTemplateColumns: { xs: '1fr', md: '320px minmax(0, 1fr)', lg: '330px minmax(0, 1fr)' },
           gap: 2,
           alignItems: 'start',
         }}
