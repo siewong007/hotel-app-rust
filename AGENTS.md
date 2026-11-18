@@ -98,6 +98,7 @@ Refactored desktop Rust moves toward `src-tauri/src/{commands,process,postgres}/
 
 ### TypeScript/React
 
+- Feature directories use kebab-case: `src/features/<kebab-case-domain>/` (e.g. `guest-portal`, `guest-relations`, `online-inventory`, `payment-recovery`).
 - Components: `PascalCase` file and export names. Hooks: `useX` in `useX.ts`.
 - Services: `<Domain>Service` in `<domain>.service.ts` until moved into feature-local `api.ts`.
 - Types and interfaces: `PascalCase`. Constants: `SCREAMING_SNAKE_CASE` for fixed values.

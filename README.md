@@ -90,7 +90,7 @@ Makefile                    # task runner — `make help`
 
 ## Getting started
 
-Prerequisites: Rust 1.95.0 (pinned in `rust-toolchain.toml`), Bun 1.3 (CI pins 1.3.14), Docker,
+Prerequisites: Rust 1.95.0 (pinned in `rust-toolchain.toml`), Bun 1.3 (CI and `.bun-version` pin 1.3.14), Docker,
 and `protoc` (the backend build compiles the gRPC contract).
 
 **Option A — Docker (full stack):**
@@ -155,7 +155,7 @@ cargo test --all-features                       # needs DATABASE_URL or PG suite
 bun run typecheck && bun run lint:strict && bun run test && bun run build
 
 # Root shortcuts
-make check-all lint-all test-all
+make lint format typecheck test build install-hooks check-all
 ```
 
 Schema changes go into the V1 baseline **and** a new checksum-verified patch under

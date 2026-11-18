@@ -1,7 +1,38 @@
 # Refactor Progress Log (`refactor/standards`)
 
-- **Branch**: `refactor/standards` (branched from `146cf7bec`)
-- **Current Phase**: Phase 5 complete — moving to Phase 6 (Final checks, docs & master merge)
+## Executive Summary
+
+The production-standards full-repository refactor has been successfully completed across all phases (Phase 0 to Phase 6) with all CI quality gates, strict typing, linting, unit tests, integration tests, and production builds passing.
+
+### What Changed
+1. **Tooling & Standards (Phase 1)**: Added `.editorconfig`, `.bun-version` (1.3.14), `package.json` engines requirement, `.gitignore` exclusions, zero-dependency git pre-commit hook (`make install-hooks`), `.pre-commit-config.yaml`, unified root `Makefile` targets (`make lint`, `make format`, `make typecheck`, `make test`, `make build`), and documented `@ts-ignore` / `any`-cast rationales.
+2. **Directory Structure & Naming (Phase 2)**: Standardized frontend feature directories to kebab-case (`guest-portal`, `guest-relations`, `online-inventory`, `payment-recovery`) with all imports, documentation, and ESLint configs updated.
+3. **Code Quality & Architecture Boundaries (Phase 3)**: Extracted `features/bookings/api.ts` to strictly enforce the service-layer API boundary; decomposed oversized dialog components (`BookingGroupDialogs.tsx`, `UrgentTransferDialogs.tsx`); eliminated direct `api` calls in `EkycManagementPage` and `CustomerLedgerPage`; migrated reactive state synchronization to `useResetOnChange` hook.
+4. **Security, Observability & Environment (Phase 4)**: Gated telemetry console logs to development mode; fully documented all optional `VITE_*` environment variables in `hotel-web-fe/.env.example`; synced Tauri ACL schemas; confirmed dependency security hygiene.
+5. **App & UX Essentials (Phase 5A)**: Added accessible, localized `<OfflineBanner />` with `useOnlineStatus` hook integrated into both staff `RootLayout` and guest `GuestRootLayout` across all 4 supported locales (`en`, `ms`, `zh`, `zh-TW`); created PII-scrubbing `reportClientError` utility and integrated it into `ErrorBoundary` emitting sanitized `app:client-error` telemetry.
+6. **Core Flows Integration Test Suite (Phase 5B)**: Added [`hotel-web-fe/src/test/coreFlows.happyPath.test.tsx`](../../hotel-web-fe/src/test/coreFlows.happyPath.test.tsx) testing full happy-path workflows across anonymous guest booking, guest portal access, staff front-desk booking & group folio settlement, and staff eKYC compliance & loyalty analytics.
+7. **Documentation Sync & Final Checks (Phase 6)**: Synced `README.md`, `AGENTS.md`, and `CLAUDE.md` (budget strictly preserved at ≤150 lines); verified doc links and proto mirrors.
+
+### Bugs Fixed
+- `fix(desktop): collapse nested if in uploads restore for clippy` — collapsed nested `if let` in [`hotel-desktop/src-tauri/src/postgres.rs`](../../hotel-desktop/src-tauri/src/postgres.rs#L2246-L2254) ensuring `cargo clippy -- -D warnings` passes cleanly.
+- `fix(security): gate Web Vitals console telemetry behind development mode` — wrapped `console.log` in [`hotel-web-fe/src/reportWebVitals.ts`](../../hotel-web-fe/src/reportWebVitals.ts#L13-L23) inside `if (import.meta.env.DEV)` preventing production telemetry leakage in browser console.
+- `chore(env,desktop): document Vite build variables and sync generated Tauri ACL schemas` — synced generated Tauri permission schema files to keep desktop IPC permissions validated against Rust definitions.
+
+### Items Awaiting User Decision
+1. **PostgreSQL 19 GA upgrade**: Running `pg_dump` -> `pg_restore` rehearsal from `19beta3` to PG 19 GA (and desktop `19beta2` bump) per [`docs/guides/postgres-engine-upgrade.md`](../guides/postgres-engine-upgrade.md).
+2. **Off-site backups & restore drill**: Provisioning off-site encrypted bucket (`age` + `rclone`) and scheduling first quarterly restore drill per [`docs/security/production-go-live-checklist.md`](../security/production-go-live-checklist.md).
+3. **External alerting & error monitoring (Sentry / webhook)**: Setting host `SALIMINN_ALERT_WEBHOOK` and adopting Sentry SDK (requiring DPA).
+4. **PDPA retention schedule sign-off**: Approving automated post-stay eKYC document image purging and guest PII anonymization retention schedule in [`docs/security/data-retention-policy-draft.md`](../security/data-retention-policy-draft.md).
+5. **Browser E2E runner & Desktop OS signing certs**: Dev dependency choice for Playwright / Cypress and provisioning Windows PFX / Apple Developer ID credentials.
+
+### Recommended Next Steps
+1. Push `master` to remote after reviewing the merge.
+2. Coordinate with team on running `make install-hooks` locally.
+
+---
+
+- **Branch**: `refactor/standards` (ready to merge into `master`)
+- **Current Phase**: Complete (Phase 0–6)
 
 ## Phase Tracker
 - [x] **Phase 0**: Understand the project & publish [`AUDIT.md`](AUDIT.md)
@@ -11,7 +42,7 @@
 - [x] **Phase 4**: Security, privacy and performance (gated Web Vitals console logging to `import.meta.env.DEV`, documented all `VITE_*` vars in [`hotel-web-fe/.env.example`](../../hotel-web-fe/.env.example), synced Tauri ACL schemas, audited Cargo/Bun dependencies)
 - [x] **Phase 5A**: App & UX essentials (added accessible localized `<OfflineBanner />` with `useOnlineStatus` hook, wired into `RootLayout` and `GuestRootLayout` across all 4 locales `en`, `ms`, `zh`, `zh-TW`; added PII-scrubbing `reportClientError` utility and integrated into `ErrorBoundary` emitting `app:client-error` telemetry)
 - [x] **Phase 5B**: Verification & happy-path test suite (added [`hotel-web-fe/src/test/coreFlows.happyPath.test.tsx`](../../hotel-web-fe/src/test/coreFlows.happyPath.test.tsx) testing happy path integration across anonymous guest booking, guest portal token verification, staff booking lifecycle & group folio settlement, and staff eKYC compliance & loyalty statistics)
-- [ ] **Phase 6**: Final check & documentation sync
+- [x] **Phase 6**: Final check, documentation sync & master merge
 
 ## Bug Fixes (`fix:` commits)
 - `fix(desktop): collapse nested if in uploads restore for clippy` — collapsed nested `if let` in [`hotel-desktop/src-tauri/src/postgres.rs`](../../hotel-desktop/src-tauri/src/postgres.rs#L2246-L2254) (`cargo clippy -- -D warnings` clean; 31 desktop script tests pass).

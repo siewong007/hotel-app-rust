@@ -55,7 +55,7 @@ bun run typecheck && bun run lint:strict && bun run test && bun run build  # typ
 bun run dev | build | build:no-bundle | desktop:prepare:force | sync:resources | test:scripts
 ```
 
-Root `Makefile` wraps the common ones (`make help`): `dev-be`, `check-all`, `lint-all`, `test-all`, `docker-up`, `docs-check`, `db-*`, `sync-proto`.
+Root `Makefile` wraps the common ones (`make help`): `dev-be`, `lint`, `format`, `typecheck`, `test`, `build`, `install-hooks`, `check-all`, `test-all`, `db-*`, `sync-proto`.
 
 ## Database — PostgreSQL only
 
