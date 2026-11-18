@@ -5,6 +5,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import HomeIcon from '@mui/icons-material/Home';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import { useTranslation } from '../../i18n';
+import { reportClientError } from '../../utils/errorReporter';
 
 interface ErrorFallbackProps extends FallbackProps {
   title?: string;
@@ -119,6 +120,8 @@ export function ErrorBoundary({ children, title, detailMessage, onError, onReset
     if (import.meta.env.DEV) {
       console.error('Error Boundary caught an error:', error, errorInfo);
     }
+
+    reportClientError(error, { componentStack: errorInfo.componentStack });
 
     // Call custom error handler if provided
     if (onError) {

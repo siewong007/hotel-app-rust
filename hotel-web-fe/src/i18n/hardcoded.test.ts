@@ -223,6 +223,11 @@ const ALLOWLIST: { path: RegExp; literals: Set<string> }[] = [
     path: /features\/rooms\/components\/RoomConfigurationPage\.tsx$/,
     literals: new Set(['Queen']),
   },
+  {
+    // Client error reporter fallback name when caught value is not an Error instance
+    path: /utils\/errorReporter\.ts$/,
+    literals: new Set(['UnknownError']),
+  },
 ];
 
 // jsx-text heuristic: a "text node" that starts with a closing bracket, comma,

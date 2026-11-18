@@ -76,7 +76,9 @@
     "unavailable": "Unavailable",
     "retry": "Retry",
     "searching": "Searching…",
-    "recording": "Recording…"
+    "recording": "Recording…",
+    "offline": "Offline",
+    "offlineBanner": "You are offline. Changes cannot be saved until your connection returns."
   },
   "field": {
     "name": "Name",

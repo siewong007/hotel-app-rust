@@ -43,4 +43,26 @@ describe('ErrorBoundary', () => {
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain(RAW_MESSAGE);
   });
+
+  it('reports scrubbed error telemetry to the app:client-error listener', () => {
+    const received: unknown[] = [];
+    const listener = (event: Event) => {
+      received.push((event as CustomEvent).detail);
+    };
+    window.addEventListener('app:client-error', listener);
+
+    render(
+      <ErrorBoundary title="Observed Error">
+        <Thrower />
+      </ErrorBoundary>,
+    );
+
+    window.removeEventListener('app:client-error', listener);
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      name: 'TypeError',
+      message: RAW_MESSAGE,
+    });
+  });
 });

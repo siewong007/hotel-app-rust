@@ -76,7 +76,9 @@
     "unavailable": "不可用",
     "retry": "重试",
     "searching": "搜索中…",
-    "recording": "记录中…"
+    "recording": "记录中…",
+    "offline": "离线",
+    "offlineBanner": "您当前处于离线状态。网络恢复前无法保存更改。"
   },
   "field": {
     "name": "名称",

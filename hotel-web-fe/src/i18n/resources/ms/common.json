@@ -76,7 +76,9 @@
     "unavailable": "Tidak tersedia",
     "retry": "Cuba lagi",
     "searching": "Mencari…",
-    "recording": "Merekodkan…"
+    "recording": "Merekodkan…",
+    "offline": "Luar talian",
+    "offlineBanner": "Anda berada di luar talian. Perubahan tidak dapat disimpan sehingga sambungan anda pulih."
   },
   "field": {
     "name": "Nama",

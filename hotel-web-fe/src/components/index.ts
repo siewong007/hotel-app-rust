@@ -43,6 +43,7 @@ export { ResponsiveTabs } from './common/ResponsiveTabs';
 export type { ResponsiveTabsProps, ResponsiveTabItem } from './common/ResponsiveTabs';
 export { StickyActionBar } from './common/StickyActionBar';
 export type { StickyActionBarProps } from './common/StickyActionBar';
+export { OfflineBanner } from './common/OfflineBanner';
 
 // Data table primitives
 export { DataTable } from './data-table/DataTable';

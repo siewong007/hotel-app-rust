@@ -179,6 +179,11 @@ const FILE_ALLOWLIST = [
     pathRe: /features\/rooms\/components\/RoomConfigurationPage\.tsx$/,
     literals: new Set(['Queen']),
   },
+  {
+    // Client error reporter fallback name when caught value is not an Error instance
+    pathRe: /utils\/errorReporter\.ts$/,
+    literals: new Set(['UnknownError']),
+  },
 ];
 
 // jsx-text heuristic: a "text node" that starts with a closing bracket, comma,

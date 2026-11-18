@@ -13,7 +13,7 @@ import { CommandPaletteProvider } from '../components/layout/CommandPalette';
 import { UpdateNotifier } from '../desktop/UpdateNotifier';
 import { BootSplash, LoadingFallback, MinimalLoadingFallback } from './RouteFallbacks';
 import { FirstLoginPasskeyPrompt } from '../navigation/routeRegistry';
-import { ErrorBoundary, PageErrorBoundary } from '../components';
+import { ErrorBoundary, OfflineBanner, PageErrorBoundary } from '../components';
 import { GuestPortalShell } from '../features/guest-portal/components/GuestPortalShell';
 import { useTranslation } from '../i18n';
 import { getHotelSettings } from '../utils/hotelSettings';
@@ -145,6 +145,7 @@ export const RootLayout: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <ErrorBoundary title={tErr('boundary.auth')}>
+        <OfflineBanner />
         <Suspense fallback={<LoadingFallback />}>
           <Outlet />
         </Suspense>
@@ -162,6 +163,7 @@ export const RootLayout: React.FC = () => {
           {/* Urgent guest bank-transfer bar rides on top of the topbar and
               sticks with it: it has no close control by design. */}
           <Box sx={{ position: 'sticky', top: 0, zIndex: (theme) => theme.zIndex.appBar + 1 }}>
+            <OfflineBanner />
             <UrgentTransferAlert />
             <AppTopbar />
           </Box>

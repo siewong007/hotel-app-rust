@@ -1,7 +1,7 @@
 # Refactor Progress Log (`refactor/standards`)
 
 - **Branch**: `refactor/standards` (branched from `146cf7bec`)
-- **Current Phase**: Phase 4 complete — starting Phase 5
+- **Current Phase**: Phase 5 in progress (Phase 5A completed, moving to Phase 5B)
 
 ## Phase Tracker
 - [x] **Phase 0**: Understand the project & publish [`AUDIT.md`](AUDIT.md)
@@ -9,9 +9,8 @@
 - [x] **Phase 2**: Structure and naming (standardized frontend feature directories `guest-portal`, `guest-relations`, `online-inventory`, `payment-recovery` + updated imports, `eslint.config.js`, comments, and docs)
 - [x] **Phase 3**: Code quality (enforced service-layer API boundary across `BookingGroupSection`, `EkycManagementPage`, `CustomerLedgerPage`; extracted `features/bookings/api.ts`, `BookingGroupDialogs.tsx`, `UrgentTransferDialogs.tsx`; migrated `useCellEditorDraft` and `UpdateCheckoutDateDialog` to `useResetOnChange`)
 - [x] **Phase 4**: Security, privacy and performance (gated Web Vitals console logging to `import.meta.env.DEV`, documented all `VITE_*` vars in [`hotel-web-fe/.env.example`](../../hotel-web-fe/.env.example), synced Tauri ACL schemas, audited Cargo/Bun dependencies)
-- [ ] **Phase 5**: Fill the gaps
-- [ ] **Phase 4**: Security, privacy and performance
-- [ ] **Phase 5**: Fill the gaps
+- [x] **Phase 5A**: App & UX essentials (added accessible localized `<OfflineBanner />` with `useOnlineStatus` hook, wired into `RootLayout` and `GuestRootLayout` across all 4 locales `en`, `ms`, `zh`, `zh-TW`; added PII-scrubbing `reportClientError` utility and integrated into `ErrorBoundary` emitting `app:client-error` telemetry)
+- [ ] **Phase 5B**: Verification & happy-path test suite
 - [ ] **Phase 6**: Final check & documentation sync
 
 ## Bug Fixes (`fix:` commits)

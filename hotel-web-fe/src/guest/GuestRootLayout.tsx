@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation } from '@tanstack/react-router';
-import { ErrorBoundary, LogoLoader } from '../components';
+import { ErrorBoundary, LogoLoader, OfflineBanner } from '../components';
 import { useAuth } from '../auth/AuthContext';
 import { getHotelSettings } from '../utils/hotelSettings';
 import { BootSplash, LoadingFallback } from '../router/RouteFallbacks';
@@ -75,6 +75,7 @@ export function GuestRootLayout() {
     if (user?.user_type !== 'guest') return <CrossAppRedirect to="/" />;
     return (
       <>
+        <OfflineBanner />
         {oneTap}
         <Suspense fallback={<LoadingFallback />}>
           <GuestPortalShell showAccountNav>{page}</GuestPortalShell>
@@ -86,6 +87,7 @@ export function GuestRootLayout() {
   if (isPortal || isLegal || isOffers) {
     return (
       <>
+        <OfflineBanner />
         {oneTap}
         <Suspense fallback={<LogoLoader variant="page" />}>
           <GuestPortalShell showAccountNav={Boolean(isAuthenticated && user?.user_type === 'guest')}>
@@ -101,6 +103,7 @@ export function GuestRootLayout() {
   // same product the portal shows.
   return (
     <>
+      <OfflineBanner />
       {oneTap}
       <GuestPortalThemeProvider>{page}</GuestPortalThemeProvider>
     </>
