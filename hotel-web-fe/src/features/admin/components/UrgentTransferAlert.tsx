@@ -1,43 +1,23 @@
 import React from 'react';
-import {
-  Alert,
-  Badge,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { Badge, Box, Button, Typography } from '@mui/material';
 import { keyframes } from '@mui/system';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
-import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import { PaymentApprovalsService, PendingPaymentEntry } from '../../../api';
 import { useAuth } from '../../../auth/AuthContext';
 import { useIsPhone } from '../../../hooks/useIsPhone';
 import { useTranslation } from '../../../i18n';
-import { formatCurrency } from '../../../utils/currency';
-import { formatHotelDateTime } from '../../../utils/date';
 import {
   useApprovePayment,
   useRejectPayment,
   useUrgentTransferClaims,
 } from '../hooks/usePaymentApprovalsQueries';
-import { canRejectPaymentClaim, hasPaymentReceipt } from '../utils/paymentApprovals';
-import ApprovePaymentDialog from './ApprovePaymentDialog';
+import { UrgentTransferDialogs } from './UrgentTransferDialogs';
 
 const pulse = keyframes`
   0% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.7); }
   70% { box-shadow: 0 0 0 10px rgba(211, 47, 47, 0); }
   100% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
 `;
-
-const REJECT_REASON_MAX = 1_000;
 
 /** "12 min" / "3 h 5 min" / "1 d 2 h" — how long a claim has waited. */
 export function formatWaiting(createdAt: string, now: number, t: (key: string, opts?: Record<string, number>) => string): string {
@@ -184,172 +164,39 @@ export const UrgentTransferAlert: React.FC = () => {
         </Button>
       </Box>
 
-      <Dialog
-        open={modalOpen && !approveTarget && !rejectTarget}
-        // No backdrop / Escape close: only the explicit minimise button.
-        onClose={() => undefined}
-        fullScreen={isPhone}
-        maxWidth="md"
-        fullWidth
-        aria-labelledby="urgent-transfer-title"
-      >
-        <DialogTitle id="urgent-transfer-title" sx={{ bgcolor: 'error.main', color: 'error.contrastText' }}>
-          {t('urgentTransfer.title', { count: total })}
-        </DialogTitle>
-        <DialogContent dividers>
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {t('urgentTransfer.explain')}
-          </Alert>
-          {error ? (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-              {error}
-            </Alert>
-          ) : null}
-          <Stack spacing={1.5}>
-            {items.map((entry) => {
-              const receipt = hasPaymentReceipt(entry);
-              const rejectable = canRejectPaymentClaim(entry.booking_status);
-              return (
-                <Box
-                  key={entry.id}
-                  data-testid="urgent-transfer-item"
-                  sx={{ border: 1, borderColor: 'error.light', borderRadius: 1, p: 1.5 }}
-                >
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, 1fr)' },
-                      gap: 1,
-                      mb: 1.5,
-                    }}
-                  >
-                    {[
-                      [t('paymentApprovals.col.booking'), refLabel(entry)],
-                      [t('paymentApprovals.col.guest'), entry.guest_name ?? '—'],
-                      [t('common:field.amount'), formatCurrency(entry.amount)],
-                      [t('urgentTransfer.submitted'), formatHotelDateTime(entry.created_at)],
-                      [t('urgentTransfer.waiting'), formatWaiting(entry.created_at, now, t)],
-                    ].map(([label, value]) => (
-                      <Box key={label}>
-                        <Typography variant="caption" color="text.secondary">
-                          {label}
-                        </Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {value}
-                        </Typography>
-                      </Box>
-                    ))}
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        {t('paymentApprovals.receipt')}
-                      </Typography>
-                      <Box>
-                        {receipt && entry.receipt_file_available ? (
-                          <Button
-                            size="small"
-                            startIcon={<ReceiptLongOutlinedIcon />}
-                            onClick={() => void openReceipt(entry)}
-                            sx={{ p: 0, minWidth: 0 }}
-                          >
-                            {t('urgentTransfer.viewReceipt')}
-                          </Button>
-                        ) : (
-                          <Chip size="small" color="warning" label={t('urgentTransfer.noReceipt')} />
-                        )}
-                      </Box>
-                    </Box>
-                  </Box>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <Button
-                      variant="contained"
-                      color="success"
-                      disabled={busy}
-                      onClick={() => {
-                        setError(null);
-                        setApproveTarget(entry);
-                      }}
-                    >
-                      {t('urgentTransfer.confirmApprove')}
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      disabled={busy || !rejectable}
-                      onClick={() => {
-                        setError(null);
-                        setReason('');
-                        setRejectTarget(entry);
-                      }}
-                    >
-                      {t('paymentApprovals.reject')}
-                    </Button>
-                  </Stack>
-                </Box>
-              );
-            })}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Typography variant="caption" color="text.secondary" sx={{ flex: 1, px: 1 }}>
-            {t('urgentTransfer.minimiseHint')}
-          </Typography>
-          <Button onClick={() => setModalOpen(false)}>{t('urgentTransfer.minimise')}</Button>
-        </DialogActions>
-      </Dialog>
-
-      <ApprovePaymentDialog
-        entry={approveTarget}
+      <UrgentTransferDialogs
+        items={items}
+        total={total}
+        now={now}
+        isPhone={isPhone}
+        modalOpen={modalOpen}
+        approveTarget={approveTarget}
+        rejectTarget={rejectTarget}
+        reason={reason}
+        error={error}
+        busy={busy}
         isApproving={approveMutation.isPending}
-        onCancel={() => setApproveTarget(null)}
-        onConfirm={(entry) => void confirmApprove(entry)}
+        isRejecting={rejectMutation.isPending}
+        refLabel={refLabel}
+        formatWaiting={formatWaiting}
+        onMinimise={() => setModalOpen(false)}
+        onClearError={() => setError(null)}
+        onOpenReceipt={(entry) => { void openReceipt(entry); }}
+        onSelectApprove={(entry) => {
+          setError(null);
+          setApproveTarget(entry);
+        }}
+        onCancelApprove={() => setApproveTarget(null)}
+        onConfirmApprove={(entry) => { void confirmApprove(entry); }}
+        onSelectReject={(entry) => {
+          setError(null);
+          setReason('');
+          setRejectTarget(entry);
+        }}
+        onCancelReject={() => setRejectTarget(null)}
+        onReasonChange={setReason}
+        onConfirmReject={() => { void confirmReject(); }}
       />
-
-      <Dialog
-        open={Boolean(rejectTarget)}
-        onClose={() => !rejectMutation.isPending && setRejectTarget(null)}
-        fullScreen={isPhone}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>{t('paymentApprovals.rejectDialog.title')}</DialogTitle>
-        <DialogContent>
-          {error ? (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          ) : null}
-          <Typography sx={{ mb: 2 }}>
-            {t('paymentApprovals.rejectDialog.bodyStart')} <strong>{rejectTarget ? refLabel(rejectTarget) : ''}</strong>
-            {t('paymentApprovals.rejectDialog.bodyEnd')}
-          </Typography>
-          <TextField
-            autoFocus
-            fullWidth
-            required
-            multiline
-            minRows={3}
-            label={t('paymentApprovals.rejectDialog.labelReject')}
-            placeholder={t('paymentApprovals.rejectDialog.placeholderReject')}
-            value={reason}
-            onChange={(event) => setReason(event.target.value.slice(0, REJECT_REASON_MAX))}
-            helperText={t('paymentApprovals.rejectDialog.charsLeft', { count: REJECT_REASON_MAX - reason.length })}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRejectTarget(null)} disabled={rejectMutation.isPending}>
-            {t('common:actions.cancel')}
-          </Button>
-          <Button
-            color="error"
-            variant="contained"
-            disabled={!reason.trim() || rejectMutation.isPending}
-            startIcon={rejectMutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined}
-            onClick={() => void confirmReject()}
-          >
-            {t('paymentApprovals.reject')}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </>
   );
 };

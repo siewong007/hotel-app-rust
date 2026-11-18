@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -24,6 +24,7 @@ import { formatLocalDate, addLocalDays, formatHotelDate } from '../../../utils/d
 import { isGreaterMoney, multiplyMoney, subtractMoney, sumMoney, toMoneyNumber } from '../../../utils/money';
 import { errorMessage } from '../../../utils/errorMessage';
 import { useTranslation } from '../../../i18n/useTranslation';
+import { useResetOnChange } from '../../../hooks/useResetOnChange';
 
 interface UpdateCheckoutDateDialogProps {
   open: boolean;
@@ -44,7 +45,7 @@ const UpdateCheckoutDateDialog: React.FC<UpdateCheckoutDateDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  useResetOnChange([open, booking], () => {
     if (open && booking) {
       const currentCheckout = typeof booking.check_out_date === 'string'
         ? booking.check_out_date.split('T')[0]
@@ -52,7 +53,7 @@ const UpdateCheckoutDateDialog: React.FC<UpdateCheckoutDateDialogProps> = ({
       setNewCheckoutDate(currentCheckout);
       setError(null);
     }
-  }, [open, booking]);
+  });
 
   if (!booking) return null;
 

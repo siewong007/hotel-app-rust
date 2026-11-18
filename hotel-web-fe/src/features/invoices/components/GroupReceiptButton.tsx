@@ -5,7 +5,7 @@ import {
 } from '@mui/material';
 import { Print as PrintIcon, ReceiptLong as ReceiptIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import { fetchBookingGroup } from '../../bookings/components/Bookings/BookingGroupSection';
+import { fetchBookingGroup } from '../../bookings/api';
 import { fetchGroupReceipt, type GroupReceipt } from '../api/groupReceipt';
 import { useTranslation } from '../../../i18n';
 import { useCurrency } from '../../../hooks/useCurrency';

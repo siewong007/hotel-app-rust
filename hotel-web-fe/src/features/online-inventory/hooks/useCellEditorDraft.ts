@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
+import { useResetOnChange } from '../../../hooks/useResetOnChange';
 import type { EditableCell, GridCellView } from '../types';
 import { DEFAULT_EDIT, PRICE_PATTERN } from '../utils';
 
@@ -26,9 +27,9 @@ export const useCellEditorDraft = (view: GridCellView | null) => {
   const [draft, setDraft] = useState<EditableCell>({ ...DEFAULT_EDIT });
 
   // Re-seed the draft whenever a different cell opens the editor.
-  useEffect(() => {
+  useResetOnChange([view], () => {
     if (view) setDraft({ ...view.current });
-  }, [view]);
+  });
 
   const patchDraft = (patch: Partial<EditableCell>) =>
     setDraft((d) => ({ ...d, ...patch }));

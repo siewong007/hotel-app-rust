@@ -48,26 +48,15 @@ vi.mock('../hooks/useEkycQueries', () => ({
 }));
 
 vi.mock('../../../api/ekyc.service', () => ({
-  EkycService: { exportEkycApplications: vi.fn() },
+  EkycService: {
+    exportEkycApplications: vi.fn(),
+    // The detail dialog loads document images through EkycService; answer 404
+    // so they settle on the "No document on file" state without a real fetch.
+    getApplicationDocumentBlob: vi.fn(() =>
+      Promise.reject(Object.assign(new Error('document not stored'), { response: { status: 404 } })),
+    ),
+  },
 }));
-
-// The detail dialog loads document images through the raw api client; answer
-// 404 so they settle on the "No document on file" state without a real fetch.
-vi.mock('../../../api/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../api/client')>();
-  return {
-    ...actual,
-    api: {
-      ...actual.api,
-      get: vi.fn(() => ({
-        blob: () =>
-          Promise.reject(
-            Object.assign(new Error('document not stored'), { response: { status: 404 } }),
-          ),
-      })),
-    },
-  };
-});
 
 vi.mock('./EkycCreateDialog', () => ({
   default: () => null,

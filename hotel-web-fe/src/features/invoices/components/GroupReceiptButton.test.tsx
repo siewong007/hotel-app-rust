@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   fetchGroupReceipt: vi.fn(),
 }));
 
-vi.mock('../../bookings/components/Bookings/BookingGroupSection', () => ({
+vi.mock('../../bookings/api', () => ({
   fetchBookingGroup: (...a: unknown[]) => mocks.fetchBookingGroup(...a),
 }));
 vi.mock('../api/groupReceipt', () => ({

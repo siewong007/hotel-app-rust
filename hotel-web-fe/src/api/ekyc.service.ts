@@ -244,6 +244,11 @@ export class EkycService {
     return await api.get(`ekyc/admin/applications/${applicationId}`).json();
   }
 
+  /** Fetch an eKYC document image blob for staff inspection. */
+  static async getApplicationDocumentBlob(applicationId: number, kind: string): Promise<Blob> {
+    return await api.get(`ekyc/admin/applications/${applicationId}/documents/${kind}`).blob();
+  }
+
   static async getReasonCodes(): Promise<EkycReasonCode[]> {
     return await api.get('ekyc/admin/reason-codes').json();
   }

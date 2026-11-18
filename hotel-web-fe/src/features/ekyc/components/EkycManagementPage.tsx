@@ -66,7 +66,6 @@ import {
   EkycReasonCode,
   EkycService,
 } from '../../../api/ekyc.service';
-import { api } from '../../../api/client';
 import { storage } from '../../../utils/storage';
 import { useAuth } from '../../../auth/AuthContext';
 import { useIsPhone } from '../../../hooks/useIsPhone';
@@ -202,9 +201,7 @@ const SecureDocumentImage: React.FC<{
     setImageUrl(null);
     setLoadState('loading');
 
-    api
-      .get(`ekyc/admin/applications/${applicationId}/documents/${kind}`)
-      .blob()
+    EkycService.getApplicationDocumentBlob(applicationId, kind)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);

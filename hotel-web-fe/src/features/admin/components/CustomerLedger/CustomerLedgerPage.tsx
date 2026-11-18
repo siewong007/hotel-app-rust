@@ -75,7 +75,6 @@ import {
 import { alpha } from '@mui/material/styles';
 import { useQueryClient } from '@tanstack/react-query';
 import { BookingsService, CompaniesService, LedgerService } from '../../../../api';
-import { api } from '../../../../api/client';
 import { queryKeys } from '../../../../api/queryKeys';
 import { useActiveCompanies, useBookingsWithDetails } from '../../../bookings/hooks/useBookingQueries';
 import { useRooms } from '../../../rooms/hooks/useRoomQueries';
@@ -100,7 +99,6 @@ import { compareMoney, isGreaterMoney, isPositiveMoney, subtractMoney, sumMoney,
 import { getIdempotencyAttempt, type IdempotencyAttempt } from '../../../../utils/idempotency';
 import CheckoutInvoiceModals from '../../../invoices/components/CheckoutInvoiceModals';
 import { useCheckoutFlow } from '../../../invoices/hooks/useCheckoutFlow';
-import { enhanceBookingDetails } from '../../../../utils/bookingUtils';
 import { useLedgers } from '../../hooks/useLedgers';
 import { ApiNotificationSeverity, emitApiNotification } from '../../../../utils/apiNotifications';
 
@@ -1328,8 +1326,8 @@ const CustomerLedgerPage: React.FC = () => {
     if (!ledger.booking_id) return;
     try {
       setLoadingLedgerInvoice(true);
-      const booking = await api.get(`bookings/${ledger.booking_id}`).json<BookingWithDetails>();
-      checkoutFlow.openReceipt(enhanceBookingDetails(booking), ledger);
+      const booking = await BookingsService.getBookingById(String(ledger.booking_id));
+      checkoutFlow.openReceipt(booking, ledger);
     } catch (err) {
       showSnackbar(err instanceof Error && err.message ? err.message : t('ledger.errors.loadInvoice'), 'error');
     } finally {
