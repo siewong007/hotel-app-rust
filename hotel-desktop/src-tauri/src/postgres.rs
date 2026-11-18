@@ -2243,14 +2243,14 @@ pub async fn upgrade_database_from_backup(
     // committed; a failure here re-enters rollback() with the uploads dirs
     // already put back (or named as stranded asides) by
     // restore_uploads_tarball itself.
-    if let Some(tarball) = &latest.uploads_path {
-        if let Err(err) = restore_uploads_tarball(tarball).await {
-            let _ = stop_postgres(app_handle).await;
-            return Err(rollback(format!(
-                "uploads restore from {:?} failed: {}",
-                tarball, err
-            )));
-        }
+    if let Some(tarball) = &latest.uploads_path
+        && let Err(err) = restore_uploads_tarball(tarball).await
+    {
+        let _ = stop_postgres(app_handle).await;
+        return Err(rollback(format!(
+            "uploads restore from {:?} failed: {}",
+            tarball, err
+        )));
     }
 
     // (h) Success.

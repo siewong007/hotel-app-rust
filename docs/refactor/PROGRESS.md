@@ -1,7 +1,7 @@
 # Refactor Progress Log (`refactor/standards`)
 
 - **Branch**: `refactor/standards` (branched from `146cf7bec`)
-- **Current Phase**: Phase 0 complete — starting Phase 1
+- **Current Phase**: Phase 1 (Tooling and standards) — applying desktop Clippy fix
 
 ## Phase Tracker
 - [x] **Phase 0**: Understand the project & publish [`AUDIT.md`](AUDIT.md)
@@ -13,7 +13,7 @@
 - [ ] **Phase 6**: Final check & documentation sync
 
 ## Bug Fixes (`fix:` commits)
-- *(Pending Phase 1 & Phase 4)*
+- `fix(desktop): collapse nested if in uploads restore for clippy` — collapsed nested `if let` in [`hotel-desktop/src-tauri/src/postgres.rs`](../../hotel-desktop/src-tauri/src/postgres.rs#L2246-L2254) (`cargo clippy -- -D warnings` clean; 31 desktop script tests pass).
 
 ## Decisions
 - Preserve 6 pre-existing untracked files from concurrent sessions (`0032_*`, `0033_*` SQL patches in backend + desktop mirror, `backup_completeness_check.rs`, `role_hierarchy.rs`) untouched and unstaged.
