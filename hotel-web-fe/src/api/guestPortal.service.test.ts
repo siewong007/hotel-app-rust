@@ -102,7 +102,7 @@ describe('GuestPortalService', () => {
     it('posts bank-transfer with the consents body and token in a header, not the path', async () => {
       const response = { payment_id: 9, status: 'pending', booking_status: 'confirmed' };
       const consents = [
-        { document: 'payment_terms' as const, version: '2026-09-09', granted: true, locale: 'en' as const },
+        { document: 'payment_terms' as const, version: '2026-11-18', granted: true, locale: 'en' as const },
       ];
       post.mockReturnValue(mockJsonResponse(response));
 
@@ -142,7 +142,7 @@ describe('GuestPortalService', () => {
     it('posts paypal create-order with the consents body and token in a header, not the path', async () => {
       const response = { order_id: 'ord_1', payment_id: 9 };
       const consents = [
-        { document: 'payment_terms' as const, version: '2026-09-09', granted: true, locale: 'en' as const },
+        { document: 'payment_terms' as const, version: '2026-11-18', granted: true, locale: 'en' as const },
       ];
       post.mockReturnValue(mockJsonResponse(response));
 

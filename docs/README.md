@@ -58,10 +58,12 @@ entry point names it `README.md`; otherwise this index is the way in.
 | Desktop build pipeline | [`../hotel-desktop/BUILD_SPEED.md`](../hotel-desktop/BUILD_SPEED.md) |
 | Desktop updater | [`../hotel-desktop/UPDATER.md`](../hotel-desktop/UPDATER.md) |
 | App sitemap (Claude Design guideline) | [`../hotel-web-fe/design-guidelines/app-structure.md`](../hotel-web-fe/design-guidelines/app-structure.md) |
-| Claude Design component sync | [`../.design-sync/NOTES.md`](../.design-sync/NOTES.md) |
+| Claude Design component sync | [`../.design-sync/NOTES.md`](../.design-sync/NOTES.md) + [`../.design-sync/conventions.md`](../.design-sync/conventions.md) |
 | OCI dev infrastructure | [`../infra/terraform/oci/README.md`](../infra/terraform/oci/README.md) |
 | Open work tracker | [`ongoing-dev.md`](ongoing-dev.md) |
 | Contribution process | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
+| Vulnerability reporting & security policy | [`../SECURITY.md`](../SECURITY.md) |
+| Community code of conduct | [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) |
 | Release history | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | Agent conventions (layers, naming, safety) | [`../AGENTS.md`](../AGENTS.md) |
 | Agent routing index (commands, CI, env) | [`../CLAUDE.md`](../CLAUDE.md) |
@@ -86,7 +88,8 @@ code before trusting a claim in them.
 
 There is no archive directory. Shipped plans, superseded runbooks, and agent
 reports are deleted once their conclusions reach an owner document, and git
-history is the archive. The last such sweep was on 2026-10-05.
+history is the archive. The last full documentation & regulatory sweep was on
+2026-11-18.
 
 ## Maintenance rules
 

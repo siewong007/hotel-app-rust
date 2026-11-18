@@ -1,14 +1,14 @@
 # Production Readiness Assessment
 
-Assessment date: 2026-09-15, with a second review pass on 2026-09-16 against
-`master` (`46ce8b88d`) that added backlog items 17–19 and the config/env/doc
-fixes listed in §12. Reviewed against `master` (`ea5d738e3`) plus
-uncommitted frontend bookings changes present in the worktree (not assessed;
-concurrent feature work). Status refreshed 2026-09-19 against `master`
-(`8aaf5a6b7`) — no §11 item changed state; deltas are noted inline where they
-touch a finding. The gRPC service pilot (tonic + Connect-ES, runtime-flagged)
-landed after the assessed revision and is outside this assessment's coverage.
-Execution steps for every open item now live in
+Assessment date: 2026-09-15 (initial pass), refreshed 2026-09-19 and
+**2026-11-18** against `master` (`f12e2ff2f`). Updates since the September
+baseline include: database-enforced `audit_logs` partition triggers (patch 0022),
+least-privilege `hotel_app` runtime DB role provisioning (patches 0017/0024),
+hourly session retention (patch 0017), multi-room `booking_groups` (patches
+0025–0029), `manager` ownership of user/team/role/`data_transfer` administration
+(patch 0031), PG19 Beta 4 schema prerequisite removal (patches 0015/0016/0021),
+and the `2026-11-18` Malaysian/Sarawakian legal & PDPA compliance corpus.
+Execution steps for every open item live in
 [production-go-live-checklist.md](production-go-live-checklist.md).
 
 This is a **hardening review, not a certification**. It states what the
@@ -38,8 +38,9 @@ external validations in §14 are done.
 
 - **Backend**: Rust 2024 / Axum 0.8 / SQLx (runtime-checked queries, not
   compile-time macros) / PostgreSQL. Domain modules under
-  `hotel-app-be/src/modules/<domain>/` (38 merged routers); cross-cutting
-  auth, middleware, rate limiting, metrics in `src/core/`.
+  `hotel-app-be/src/modules/<domain>/` (40 domain directories: 38 merged routers +
+  internal `consent` and `booking_groups`); cross-cutting auth, middleware, rate
+  limiting, metrics in `src/core/`.
 - **Frontend**: React 19 / TS / Vite / MUI / TanStack / ky. All HTTP through
   `src/api/client.ts`; access token in memory only, refresh via HttpOnly
   cookie. Sourcemaps disabled for the web build (`vite.config.ts:101`).
@@ -121,30 +122,42 @@ limitation, documented). Rate limits are shared across replicas via
 ### Sensitive data
 
 Guest PII, IC/passport numbers, eKYC images, payment records and audit logs
-are handled with: private filesystem storage for identity documents,
-`ekyc_document_downloaded` audit events, soft-delete + `PII_REDACTED`
-scrubbing on guest deletion, hashed tokens everywhere tokens exist, and a
-business-data-only `hotel-backup` v1 format that excludes credentials,
-sessions and eKYC evidence.
+are handled with: private filesystem storage (`private_uploads/ekyc`) for
+identity documents, `ekyc_document_downloaded` and `guests:reveal` audit events,
+hashed tokens everywhere tokens exist, database-enforced append-only triggers
+across all `audit_logs` partitions (`0022`), and a `hotel-backup` v1 format whose
+business-data scopes (`standard`, `full`, `backup`) exclude credentials, team
+role grants, sessions, and eKYC evidence (carried only in the passphrase-encrypted
+super-admin `system` scope). Note: `GuestRepository::hard_delete` performs a hard
+`DELETE` (blocked whenever bookings, support threads, or financial records
+reference the guest); automated PII anonymisation/redaction on historical guest
+rows is not yet implemented (tracked in `data-retention-policy-draft.md`).
 
 ## 4. Compliance and privacy readiness
 
-**Malaysia PDPA likely applies** (hotel in Malaysia processing Malaysian
-guests' personal data). This section is technical readiness only — legal
-review is still required.
+**Malaysian & Sarawakian statutory framework applies** — Personal Data
+Protection Act 2010 (Act 709, as amended by the Personal Data Protection
+(Amendment) Act 2024 [Act A1727]), Consumer Protection Act 1999 (Act 599) and
+Consumer Protection (Electronic Trade Transactions) Regulations 2024
+[P.U. (A) 170/2024], Electronic Commerce Act 2006 (Act 658), Registration of
+Guests Act 1965 (Act 381), Tourism Industry Act 1992 (Act 482), Tourism Tax Act
+2017 (Act 791), Service Tax Act 2018 (Act 807), Income Tax Act 1967 (Act 53),
+Control of Smoking Products for Public Health Act 2024 (Act 852), and Sarawak
+Business Names Ordinance (Cap. 64) / trade licensing. This section assesses
+technical readiness; formal counsel sign-off remains external (§14).
 
 | Area | Status | Evidence / gap |
 |---|---|---|
-| Purpose limitation + consent capture | Existing | `consent` module records versioned consent per user/guest/anonymous booking with IP/UA and locale (`consent_gate.rs`, `consent_records.rs` tests) |
-| Privacy notice / terms / eKYC consent / payment terms | Existing | `features/legal/` — versioned documents, locale-aware, linked at consent points |
-| Access/export (data subject) | Existing | data-transfer export is permission- + step-up-gated and audited |
-| Correction/deletion | Partial | guest soft-delete + PII redaction exists; no self-service correction flow for guests |
-| Retention | **Missing** | no automated retention/purge for audit logs, eKYC images, sessions, exports, or logs; PDPA requires a documented schedule and enforcement. `audit_logs` is now monthly-partitioned, so its enforcement is a partition detach/drop rather than a `DELETE` scan |
-| Breach response | Partial | documented in `production-operations.md`; no drill evidence |
-| Auditability | Existing | comprehensive audit trail incl. eKYC doc access and transfers |
-| Cookies/tracking | Existing | only the refresh cookie; no trackers found |
-| Third-party processors | Partial | PayPal (disabled by default), Google, Cloudflare Turnstile, SMTP — no processor inventory/DPA documentation |
-| Data residency | Partial | single Malaysian-serving VPS; residency statement not documented |
+| Purpose limitation + consent capture | Existing | `consent` module enforces version-exact (`2026-11-18`), locale-stamped (`en`/`ms`/`zh`/`zh-TW`) consent per user/guest/anonymous single or group booking, payment, and biometric eKYC with IP/UA (`consent_gate.rs`, `consent_records.rs`); marketing preferences pin `policy_version` in `notification_consent_events` |
+| Legal & regulatory notices | Existing | `features/legal/` (`2026-11-18` generation) + landing footer disclosures cover PDPA Amendment Act 2024 (s.12A DPO contact, s.12B 72h breach notice, s.9 processor security, s.129 cross-border transfers, s.43A portability, ss.4/40 biometric explicit consent, 24h common-area CCTV, minors r.4), CPETTR 2024, Act 381, Act 852, SST-inclusive & Tourism Tax pricing, LHDN e-Invoice particulars, and TTPM redress |
+| Access / portability (PDPA ss. 30, 43A) | Existing | audited `data_transfer` export + guest profile endpoints support structured responses within the 21-day statutory clock (`production-operations.md`) |
+| Correction / erasure (PDPA ss. 34, 40, 42) | Partial | signed-in guests can self-correct contact details (`PATCH /api/guest-portal/me/profile`) and staff can edit guest records (`guests:update`); guest deletion is hard-`DELETE` only (blocked by FKs) with no automated PII anonymisation, and eKYC image deletion on s.42 withdrawal is currently a manual operator runbook (`production-operations.md`) |
+| Retention (PDPA s.10 & tax statutes) | **Partial** | **Live:** hourly session purge (`0017_session_retention.sql`), 24h staged-upload sweep, `job_runs` prune, 14d logrotate, 14/5/7 backup rotation. **Pending sign-off & code:** eKYC image post-stay purge, inactive-guest PII anonymisation, `email_deliveries` cleanup, and owner-run `audit_logs` partition detach/drop (`data-retention-policy-draft.md`) |
+| Breach response (PDPA s.12B) | Partial | 72-hour JPDP & 7-day data-subject notification procedure documented in `production-operations.md`; no live drill evidence yet |
+| Auditability | Existing | append-only `audit_logs` enforced by DB triggers across all partitions (`0022`), covering auth, RBAC, payments, eKYC views, and exports |
+| Cookies & browser storage | Existing | strictly necessary `refresh_token` (HttpOnly, `SameSite=Lax`) + `auth_session_hint` cookies and `locale`/theme storage; zero ad/cross-site trackers; disclosed at `/legal/cookies` |
+| Third-party processors (PDPA s.9) | Partial | PayPal, Google Identity, Cloudflare Turnstile, SMTP, VPS host — disclosed by class in `/legal/privacy`; internal processor/DPA register still needed |
+| Tax & e-Invoicing | Existing / Scoped | SST (`service_tax_rate = 8%`, inclusive extraction) and Tourism Tax (`RM10/night` foreign additive levy) implemented; LHDN MyInvois live CTC API intentionally out of scope (`docs/features.md`) |
 
 ## 5. Deployment hardening
 
@@ -236,21 +249,26 @@ Gaps and notes:
 
 ## 9. Testing and quality gates
 
-- 54 backend test files incl. live-PG suites in CI (auth sessions, consent
-  gates, guest-portal IDOR, payment characterization, rate limiter, security
+- 83 backend test files (79 reading `DATABASE_URL`) incl. live-PG suites in CI
+  (auth sessions, consent gates, guest-portal IDOR, single & group booking/payment
+  characterization, settlement locks, role hierarchy, rate limiter, security
   headers, patch catalog/lifecycle, eKYC review queue). Skip-without-DB
   semantics are documented.
-- 253 frontend Vitest files; four independent gates (typecheck /
-  lint:strict / test / build). `openapi_drift` keeps the spec honest.
-- Security workflow: gitleaks, CodeQL, cargo-audit, dependency review.
-- **Gaps:** no browser E2E suite, no load/performance tests, no automated
-  restore test, desktop `tauri build` not exercised in CI.
+- 333 frontend Vitest files (316 in `src/`, 17 in `salim-inn/`); four independent
+  gates (typecheck / lint:strict / test / build). `openapi_drift` keeps the spec
+  honest.
+- Security workflow: gitleaks, CodeQL, cargo-audit, `js-advisories` (`bun audit`),
+  dependency review.
+- **Gaps:** no browser E2E suite, no load/performance tests, no automated full-DB
+  restore boot test; PR `ci.yml` checks desktop Rust against placeholder
+  resources while full `tauri build` + OS package install smokes run in
+  `desktop-build.yml` on release tags and manual dispatch.
 
 ## 10. Dependencies and supply chain
 
 - Lockfiles committed (Cargo, bun.lock); base images pinned
-  (`rust:1.95.0-bookworm`, `oven/bun:1.3.14-alpine`, `nginx:1.28-alpine`);
-  Actions SHA-pinned; Dependabot weekly incl. desktop; cargo-audit in CI.
+  (`rust:1.95.0-bookworm`, `oven/bun:1.3.14-alpine`, `nginx:1.31-alpine`);
+  Actions SHA-pinned; Dependabot weekly incl. desktop; cargo-audit + bun-audit in CI.
 - `dependabot.yml` ignores **all** sqlx updates, including patches — narrow
   it to `version-update:semver-major` or accept the manual-review burden.
 - No SBOM/provenance attestation on release artifacts (SHA256SUMS only);
@@ -260,11 +278,11 @@ Gaps and notes:
 
 | # | Sev | Area | Finding | Status | Validation |
 |---|---|---|---|---|---|
-| 1 | P1 | Database | `postgres:19beta3` (pre-release) in prod; no supported upgrade path to GA | Existing — Beta 4 shipped 2026-09-24 and reverted SQL/PGQ and `SPLIT/MERGE PARTITION`; patches 0015/0016 (2026-10-06) removed the schema's uses and must run on beta3 before the move; RC expected early Oct 2026, GA possibly Oct 2026 | `pg_dump`+`pg_restore` rehearsal to 19-GA on staging per `guides/postgres-engine-upgrade.md`, into a fresh volume |
-| 2 | P1 | Backup | No off-site/encrypted copies; host-held dumps only | **Partial** (this session) — env-gated `age`+`rclone copy`+`rclone check` ship now in `database-backup.sh`; destination, recipients file and bucket ACLs remain operator-owned. **2026-09-25: owner chose local-only backups on the AIC host; off-site deliberately not configured (accepted risk)** | set `SALIMINN_OFFSITE_REMOTE`+`SALIMINN_AGE_RECIPIENTS_FILE` on the backup unit, confirm `offsite:true` in `backup-status.json` + a remote restore |
-| 3 | P1 | Database | Running deployment uses `hotel_admin` superuser until the next release | **Implemented; pending release** — deploy scripts apply patch 0017 and provision `hotel_app` before restarting the backend | `SELECT current_user` on backend conn returns `hotel_app`; disposable runtime privilege runner passes |
-| 4 | P1 | Observability | Failure signals have no external consumer (backup-health marker, job failures, audit-write failures) | **Partial** (this session) — `check-backup-health.sh` POSTs transition-deduped alerts + recovery to `SALIMINN_ALERT_WEBHOOK` (`/opt/saliminn/backup-alert.env`); job/audit failure alerting still in-app only; no external uptime probe | set the webhook env file, trigger a forced failure, confirm the POST arrives |
-| 5 | P1 | Compliance | No retention schedule/enforcement for audit logs, eKYC images, sessions, exports, logs | **Partial** (this session) | `docs/security/data-retention-policy-draft.md` proposes schedules — legal sign-off required, then purge jobs; `audit_logs` is monthly-partitioned so its purge is a partition drop; not enforced yet |
+| 1 | P1 | Database | `postgres:19beta3` (pre-release) in prod; no supported upgrade path to GA | Existing — Beta 4 shipped 2026-09-24 and reverted SQL/PGQ and `SPLIT/MERGE PARTITION`; patches 0015/0016/0021 removed the schema's uses and ran on beta3 ahead of the PG19 GA move | `pg_dump`+`pg_restore` rehearsal to 19-GA on staging per `guides/postgres-engine-upgrade.md`, into a fresh volume |
+| 2 | P1 | Backup | No off-site/encrypted copies; host-held dumps only | **Partial** — env-gated `age`+`rclone copy`+`rclone check` ship in `database-backup.sh`; **2026-09-25: owner chose local-only backups on the AIC host; off-site deliberately not configured (accepted risk)** | set `SALIMINN_OFFSITE_REMOTE`+`SALIMINN_AGE_RECIPIENTS_FILE` on the backup unit, confirm `offsite:true` in `backup-status.json` + a remote restore |
+| 3 | P1 | Database | Running deployment uses `hotel_admin` superuser until runtime-role cutover verified | **Implemented; verify on host** — deploy scripts apply patches 0017/0024 and provision `hotel_app` before restarting the backend | `SELECT current_user` on backend conn returns `hotel_app`; disposable runtime privilege runner passes |
+| 4 | P1 | Observability | Failure signals have no external consumer (backup-health marker, job failures, audit-write failures) | **Partial** — `check-backup-health.sh` POSTs transition-deduped alerts + recovery to `SALIMINN_ALERT_WEBHOOK` (`/opt/saliminn/backup-alert.env`); job/audit failure alerting still in-app only; no external uptime probe | set the webhook env file, trigger a forced failure, confirm the POST arrives |
+| 5 | P1 | Compliance | Incomplete retention enforcement across non-session stores | **Partial** — hourly session purge (`0017`), 24h staged-upload sweep, `job_runs` prune, logrotate, and backup pruning are **live**; eKYC image purge, guest PII anonymisation, `email_deliveries` cleanup, and owner-run `audit_logs` partition drop await legal sign-off (`data-retention-policy-draft.md`) | signed-off retention policy + automated jobs for remaining stores |
 | 6 | P1 | DR | No restore has ever been demonstrated | Missing | quarterly drill record per `backup-restore.md` |
 | 7 | P2 | Staging | backup timer ran prod script; logrotate wrote prod file/path | **Fixed** (this session) | `bash -n`; next staging deploy writes correct units |
 | 8 | P2 | Backup | uploads/private_uploads unprotected | **Fixed** (this session) | container test: archive created, verified, pruned, failure alerts (below) |

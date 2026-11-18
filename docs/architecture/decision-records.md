@@ -44,26 +44,25 @@ use the PostgreSQL V1 lifecycle.
 
 ---
 
-## ADR 003: Layered Backend Architecture (Routes → Handlers → Services → Repositories → Models)
+## ADR 003: Layered Domain-Module Backend Architecture (`modules/<domain>/`)
 
-**Status:** Accepted (2025); partial migration (2026)
+**Status:** Accepted (2025); domain-module migration completed (2026)
 
 **Context:** Early backend code had a flat structure with business logic mixed into handlers. This made testing difficult and violated separation of concerns.
 
-**Decision:** Adopt a five-layer architecture:
-- `routes/` — HTTP path registration, auth/rate-limit guards
-- `handlers/` — HTTP input/output translation (thin)
-- `services/` — Business workflows, validation orchestration
-- `repositories/` — SQL persistence (only)
-- `models/` — DTOs and domain structs
+**Decision:** Adopt a five-layer architecture inside self-contained domain modules under `modules/<domain>/`:
+- `routes.rs` — HTTP path registration, auth/rate-limit guards
+- `handlers.rs` — HTTP input/output translation (thin)
+- `service.rs` — Business workflows, validation orchestration
+- `repository.rs` — SQL persistence (only)
+- `models.rs` — DTOs and domain structs
 
-Long-term goal: migrate to domain modules under `modules/<domain>/`.
+Shared cross-cutting globals remain in `core/`, `routes/mod.rs`, `services/{audit,account_emails,google_identity,invoice_numbers}.rs`, `repositories/{audit,invoice_numbers}.rs`, and `models/{audit,common,row_mappers}.rs`.
 
 **Consequences:**
-- ✅ Clear separation of concerns
+- ✅ Clear separation of concerns and bounded domain ownership (40 domain directories)
 - ✅ Service-layer code is testable without HTTP
 - ✅ Repositories isolate SQL changes
-- ❌ Migration is ongoing; some handlers still contain inline SQL
 - ❌ Requires discipline to maintain layering
 
 ---
@@ -168,23 +167,23 @@ Introducing a store library now requires a new ADR.
 - ✅ Reuses web frontend code
 - ❌ Backend and database bundled can be large
 - ❌ Cross-compilation complexity for sidecar
-- ❌ Limited backup/restore capabilities
+- ✅ Managed local backup/restore (`pg_dump` + uploads archive + safety rollback) added later (`guides/desktop-backup-restore.md`)
 
 ---
 
 ## ADR 008: Append-Only Audit Logging
 
-**Status:** Accepted (2025)
+**Status:** Accepted (2025), hardened 2026-10 (`0022_audit_logs_append_only_guards.sql`)
 
 **Context:** Regulatory and operational requirements demanded an immutable audit trail.
 
-**Decision:** Implement an append-only audit log service (`services/audit.rs`). Audit entries are INSERT-only; no UPDATE or DELETE operations are allowed on audit records.
+**Decision:** Implement an append-only audit log service (`services/audit.rs`) backed by database-level `BEFORE UPDATE/DELETE` row triggers and `BEFORE TRUNCATE` statement triggers across `audit_logs` and every monthly/default partition (`prevent_audit_log_mutation`).
 
 **Consequences:**
 - ✅ Immutable audit trail
-- ✅ Tamper-evident (database-level append-only)
-- ❌ Storage grows unbounded (requires retention policy)
-- ❌ Some mutation handlers may not yet call the audit service
+- ✅ Tamper-evident (enforced at database trigger level across all partitions)
+- ❌ Storage grows unbounded until partition-drop retention is approved
+- ❌ Some legacy mutation paths require ongoing audit review
 
 ---
 
@@ -319,7 +318,7 @@ is a browser preference (`localStorage`), consistent with how `themeMode` and
 - ✅ Bundle parity, plural coverage and placeholder correctness are enforced by
   tests on both sides — a half-translated locale fails CI instead of silently
   serving English
-- ✅ No schema change: the language column and its default already ship
+- ✅ Minimal schema surface: `guests.language_preference`, `consent_records.locale` (`en`/`ms`/`zh`/`zh-TW`, patches 0004/0007), and `default_locale` in `system_settings` (patch 0011)
 - ❌ Features a library would give for free must be written if ever needed:
   context/gender selection, ICU message format, translator tooling integration
 - ❌ Translations live in the repo, so a copy change is a code change
@@ -376,7 +375,7 @@ permissions gate the surface.
 
 ## ADR 014: gRPC-Web for Selected Domains (Strangler Migration)
 
-**Status:** Accepted (2026-09); partial rollout — five services live, 368 REST
+**Status:** Accepted (2026-09); partial rollout — five services live, 399 REST
 paths remain
 
 **Context:** The REST/JSON contract under `/api` is correct and complete, but

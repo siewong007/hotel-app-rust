@@ -136,10 +136,10 @@ export const EKYC_CONSENTS: ConsentPrompt[] = [
       'zh-TW': '我明確同意{ekyc}：僅為核實我的身分而處理我的身分證件及面部影像（生物識別資料）。',
     },
     helper: {
-      en: 'Sensitive personal data requires your explicit consent under section 40 of the Personal Data Protection Act 2010. This step is optional — you can verify at reception instead.',
-      ms: 'Data peribadi sensitif memerlukan persetujuan nyata anda di bawah seksyen 40 Akta Perlindungan Data Peribadi 2010. Langkah ini adalah pilihan — anda boleh mengesahkan di kaunter penyambut tetamu sebagai gantian.',
-      zh: '根据《2010年个人资料保护法令》第40条，敏感个人资料需要您的明确同意。此步骤为可选——您也可以在前台进行验证。',
-      'zh-TW': '根據《2010年個人資料保護法令》第40條，敏感個人資料需要您的明確同意。此步驟為可選——您也可以在前台進行驗證。',
+      en: 'Sensitive personal data (biometric data) requires your explicit consent under sections 4 and 40 of the Personal Data Protection Act 2010 (as amended in 2024). This step is optional — you can verify at reception instead.',
+      ms: 'Data peribadi sensitif (data biometrik) memerlukan persetujuan nyata anda di bawah seksyen 4 dan 40 Akta Perlindungan Data Peribadi 2010 (sebagaimana dipinda pada 2024). Langkah ini adalah pilihan — anda boleh mengesahkan di kaunter penyambut tetamu sebagai gantian.',
+      zh: '根据经2024年修订的《2010年个人资料保护法令》第4条及第40条，敏感个人资料（生物识别资料）需要您的明确同意。此步骤为可选——您也可以在前台核验证件。',
+      'zh-TW': '根據經2024年修訂的《2010年個人資料保護法令》第4條及第40條，敏感個人資料（生物識別資料）需要您的明確同意。此步驟為可選——您也可以在前台核驗證件。',
     },
   },
 ];

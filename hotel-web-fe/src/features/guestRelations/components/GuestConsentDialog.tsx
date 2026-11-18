@@ -16,6 +16,7 @@ import { errorMessage } from '../../../utils';
 import type { GuestSubscription } from '../../../types';
 import { useTranslation } from '../../../i18n/useTranslation';
 import { type NotificationTopic } from '../../communications/types';
+import { MARKETING_CONSENT_VERSION } from '../../legal/content';
 import { useRecordGuestConsent } from '../hooks/useGuestRelationsQueries';
 
 const TOPICS: NotificationTopic[] = ['announcement', 'promotion', 'birthday_voucher'];
@@ -114,7 +115,10 @@ const ConsentForm: React.FC<ConsentFormProps> = ({
       setFormError(null);
       await recordConsent.mutateAsync({
         guestId,
-        data: { subscriptions: changedSubscriptions },
+        data: {
+          subscriptions: changedSubscriptions,
+          policy_version: MARKETING_CONSENT_VERSION,
+        },
       });
       onSaved?.(t('consent.updated', { name: guestName }));
       onClose();

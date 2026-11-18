@@ -17,6 +17,7 @@ import { useNavigate } from '../../../router';
 import {
   HOTEL_LEGAL_IDENTITY,
   LEGAL_DOCUMENT_PATHS,
+  getHotelLegalIdentity,
   getLegalDocuments,
   type LegalDocumentId,
   type LegalLocale,
@@ -162,8 +163,12 @@ export const LegalDocumentPage: React.FC<{ documentId: LegalDocumentId }> = ({ d
   // mounted. Re-resolving on `hotelSettingsChange` keeps a reader from being
   // left looking at the compiled-in fallback.
   const [documents, setDocuments] = React.useState(getLegalDocuments);
+  const [identity, setIdentity] = React.useState(getHotelLegalIdentity);
   React.useEffect(() => {
-    const refresh = () => setDocuments(getLegalDocuments());
+    const refresh = () => {
+      setDocuments(getLegalDocuments());
+      setIdentity(getHotelLegalIdentity());
+    };
     window.addEventListener('hotelSettingsChange', refresh);
     return () => window.removeEventListener('hotelSettingsChange', refresh);
   }, []);
@@ -440,18 +445,18 @@ export const LegalDocumentPage: React.FC<{ documentId: LegalDocumentId }> = ({ d
             {lt('questionsTitle')}
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.9 }}>
-            {HOTEL_LEGAL_IDENTITY.registeredName}
+            {identity.registeredName} ({identity.companyRegistrationNumber})
             <br />
-            {HOTEL_LEGAL_IDENTITY.addressLines.map((line) => (
+            {identity.addressLines.map((line) => (
               <React.Fragment key={line}>
                 {line}
                 <br />
               </React.Fragment>
             ))}
-            <Link href={`mailto:${HOTEL_LEGAL_IDENTITY.email}`}>{HOTEL_LEGAL_IDENTITY.email}</Link>
+            <Link href={`mailto:${identity.email}`}>{identity.email}</Link>
             {' · '}
-            <Link href={`tel:${HOTEL_LEGAL_IDENTITY.phone.replace(/\s/g, '')}`}>
-              {HOTEL_LEGAL_IDENTITY.phone}
+            <Link href={`tel:${identity.phone.replace(/\s/g, '')}`}>
+              {identity.phone}
             </Link>
           </Typography>
         </Box>

@@ -142,7 +142,7 @@ docker exec saliminn-db psql -U hotel_admin -d hotel_management \
   "DELETE FROM public.hotel_schema_revisions WHERE generation = 1 AND version > 1;"
 
 # 4. Re-run the deploy. 5. Re-check the SELECT — expect 1.1 plus every
-#    entry in patches/manifest.tsv (versions 2–22 on 2026-10-12).
+#    entry in patches/manifest.tsv (versions 2–31 as of 2026-11-18).
 ```
 
 The full runbook — including the post-deploy export smoke test and the desktop

@@ -104,10 +104,18 @@ describe('LegalDocumentPage business registration number', () => {
     vi.restoreAllMocks();
   });
 
-  it('discloses the configured number in the booking terms', () => {
+  it('discloses the configured number in the booking terms and contact footer', () => {
     saveHotelSettings({ ...getHotelSettings(), hotel_business_number: 'SA5551234' });
 
     render(<LegalDocumentPage documentId="terms_of_service" />);
+
+    expect(screen.getAllByText(/SA5551234/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('discloses the configured number on sibling legal pages too', () => {
+    saveHotelSettings({ ...getHotelSettings(), hotel_business_number: 'SA5551234' });
+
+    render(<LegalDocumentPage documentId="payment_terms" />);
 
     expect(screen.getByText(/SA5551234/)).toBeTruthy();
   });
@@ -117,7 +125,7 @@ describe('LegalDocumentPage business registration number', () => {
   // left on the compiled-in fallback for the life of the tab.
   it('picks up a number that arrives after mount', () => {
     render(<LegalDocumentPage documentId="terms_of_service" />);
-    expect(screen.getByText(/SA2012724/)).toBeTruthy();
+    expect(screen.getAllByText(/SA2012724/).length).toBeGreaterThanOrEqual(2);
 
     const settings = { ...getHotelSettings(), hotel_business_number: 'SA7770001' };
     saveHotelSettings(settings);
@@ -125,7 +133,7 @@ describe('LegalDocumentPage business registration number', () => {
       window.dispatchEvent(new CustomEvent('hotelSettingsChange', { detail: settings }));
     });
 
-    expect(screen.getByText(/SA7770001/)).toBeTruthy();
+    expect(screen.getAllByText(/SA7770001/).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/SA2012724/)).toBeNull();
   });
 

@@ -2,7 +2,7 @@
 
 Routing index for coding agents. Hard budget: **≤150 lines**, index/routing only — detail goes to
 `.claude/refs/` (on demand), `.claude/rules/` (auto-loaded, keep lean), or `docs/`. Do not add
-here without removing something. Facts verified 2026-10-05 against `origin/master` (`bcb8c4000`).
+here without removing something. Facts verified 2026-11-18 against `origin/master` (`f12e2ff2f`).
 **What deploys is `origin/master`, not this tree** — confirm with `git show origin/master:<path>`.
 Line anchors rot; Grep first. This volume path has a trailing space — quote paths in shell.
 
@@ -63,7 +63,7 @@ Root `Makefile` wraps the common ones (`make help`): `dev-be`, `check-all`, `lin
 the `seed` bin's demo dataset (`cargo run --bin seed -- --list`; refuses production; never deployed);
 `make db-patch` converges an existing V1 DB, and the backend refuses to start until it has
 (`core/schema_catalog.rs`). **No second migration file** — the only forward path is the checksum-verified
-`database/postgres/patches/` catalog (`manifest.tsv`, generation 1, head version 24 on 2026-10-13 — read
+`database/postgres/patches/` catalog (`manifest.tsv`, generation 1, head version 31 on 2026-11-18 — read
 it, never a remembered range), run by `apply-patches.sh` and `src-tauri/src/postgres/patches.rs`. Details: `hotel-app-be/database/README.md`.
 
 - **PG19 Beta 4 reverted SQL/PGQ and `SPLIT/MERGE PARTITION`** — patches 0015/0016 removed both from the schema; they must reach a database while it still runs `19beta3`, before any move off it (`docs/guides/postgres-engine-upgrade.md`).
@@ -78,8 +78,8 @@ it, never a remembered range), run by `apply-patches.sh` and `src-tauri/src/post
 
 `modules/<domain>/routes.rs` (RBAC gate) → auth middleware → `handlers.rs` (thin) →
 `service.rs` (where a domain has one) → `repository.rs` → `models.rs`. **All domains live in
-`modules/<domain>/` — put new domains there** (39 directories; 38 routers merged in
-`routes/mod.rs::create_router`; `consent` is the only routeless module). The residual flat files are shared
+`modules/<domain>/` — put new domains there** (40 directories; 38 routers merged in
+`routes/mod.rs::create_router`; `consent` and `booking_groups` are internal routeless modules). The residual flat files are shared
 globals only: `routes/mod.rs` composition, `services/{audit,account_emails,google_identity,invoice_numbers}.rs`,
 `repositories/{audit,invoice_numbers}.rs`, `models/{audit,common,row_mappers}.rs`.
 
@@ -88,7 +88,7 @@ globals only: `routes/mod.rs` composition, `services/{audit,account_emails,googl
 - `core/db.rs` — `hotel_today(executor)`, `decimal_to_db`, `generate_uuid`. Each connection takes its timezone from `system_settings.timezone`, so SQL `CURRENT_DATE` **is** the business day. Never use `chrono::Local`/`Utc` for business dates.
 - `core/sql_compat.rs` — `param!(N)`, `current_timestamp()`, `current_date()`. Never literal `$1`/`NOW()`.
 - `core/i18n.rs` — `SUPPORTED_LOCALES = ["en","ms","zh","zh-TW"]`; guest mail resolves `language_preference` → `default_locale` setting → `en`; email catalogs in `core/locales/`. Every mutating handler calls `services/audit.rs`; free text goes through `utils/sanitization.rs::Sanitizer`; request models carry `validator` derives.
-- `main.rs` spawns every background loop through `core::leader::spawn_exclusive` (night audit, payment receipts, unpaid-hold release — window `unpaid_hold_release_hours`, 24 default / 0 disables — communications worker + scheduler, rate-limit bucket prune): a `pg_advisory_lock` on a pinned connection makes exactly one replica drive each loop, and `core::cache_bus::spawn_listener` LISTENs for cross-replica cache invalidation + data-change fan-out. Rate limits live in `rate_limit_buckets` (Postgres fixed windows, fail-open on DB error) — `RateLimiters::new(pool)`; `RateLimiter::new(config)` is the memory-only test constructor. Adding/removing **any** route drifts `docs/api/openapi.json` and fails `tests/openapi_drift.rs` — regenerate with `HOTEL_APP_UPDATE_OPENAPI=1 cargo test --all-features --test openapi_drift`.
+- `main.rs` spawns every background loop through `core::leader::spawn_exclusive` (night audit, payment receipts, unpaid-hold release — window `unpaid_hold_release_hours`, 24 default / 0 disables — communications worker + scheduler, hourly session retention + rate-limit bucket prune): a `pg_advisory_lock` on a pinned connection makes exactly one replica drive each loop, and `core::cache_bus::spawn_listener` LISTENs for cross-replica cache invalidation + data-change fan-out. Rate limits live in `rate_limit_buckets` (Postgres fixed windows, fail-open on DB error) — `RateLimiters::new(pool)`; `RateLimiter::new(config)` is the memory-only test constructor. Adding/removing **any** route drifts `docs/api/openapi.json` and fails `tests/openapi_drift.rs` — regenerate with `HOTEL_APP_UPDATE_OPENAPI=1 cargo test --all-features --test openapi_drift`.
 
 `sqlx` is plain `sqlx::query()`, **not** the checking macros — a type/column mismatch compiles cleanly
 and fails in production; new `FromRow` over date/timestamp/numeric/array columns needs a live-PG fetch test.
@@ -105,12 +105,12 @@ and fails in production; new `FromRow` over date/timestamp/numeric/array columns
 
 ## Testing
 
-Backend: 59 files in `hotel-app-be/tests/`; PG-backed ones **skip without `DATABASE_URL`, exit 0, and
+Backend: 83 files in `hotel-app-be/tests/` (79 read `DATABASE_URL`); PG-backed ones **skip without `DATABASE_URL`, exit 0, and
 each skip counts as a PASS** — `payment_characterization` reports 48 passed in 0.00s with no DB and the
 same 48 in ~3.5s for real (2026-10-05), so judge by wall-clock + per-suite counts. Patch/drift suites
-need `psql`. Fix-gated tests carry `#[ignore]` (one today: ledger-summary reversal netting); CI fails
+need `psql`. Fix-gated tests carry `#[ignore]` (zero today); CI fails
 when one starts passing. Characterization tests must assert *correct* values. Frontend: Vitest +
-Testing Library (285 files, 7 in `salim-inn/`); build ky errors with `src/api/testSupport/httpError.ts`;
+Testing Library (333 files, 17 in `salim-inn/`); build ky errors with `src/api/testSupport/httpError.ts`;
 never run two vitest suites concurrently here — they starve each other's timeouts.
 
 ## CI, deployment, environment
@@ -125,7 +125,7 @@ rerun, stale-`#[ignore]`); desktop fmt/check/test on Linux + Windows against pla
 production" run may have deployed nothing — read the job conclusion. Never hand-provision secrets on
 the host; CI owns them. A rolled-back host is **mixed**: read `SELECT version();` and the running compose file.
 
-Env: root `.env.example` feeds `docker compose`; `hotel-app-be/.env.example` is the full backend reference.
+Env: root `.env.example` feeds `docker compose`; `hotel-app-be/.env.example` is the full backend reference; `hotel-web-fe/.env.example` holds optional `VITE_*` build vars.
 Real `.env` files exist here, are Git-ignored, and hold live secrets — **never read one into a document,
 commit, or log**. Required: `DATABASE_URL`, `JWT_SECRET` (≥32 chars), `POSTGRES_PASSWORD` for Compose (the
 latter two are `:?` in every compose file). `APP_ENV` (wins) or `ENVIRONMENT` picks development/staging/

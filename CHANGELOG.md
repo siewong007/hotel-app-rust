@@ -11,28 +11,51 @@ users, administrators, deployment or security. Published releases and downloads:
 
 ## Unreleased (since v0.3.0)
 
-Compiled 2026-10-05 from `git log v0.3.0..master`. The public face of the
-property arrives: a four-language landing page for Salim Inn. The legal pages
-now speak all four languages. Front-desk work gains a new-reservations strip,
-a staff bell for guest support and bank-transfer claims, and a soft
-smoking-room preference.
+Compiled 2026-11-18 from `git log v0.3.0..master`. The public face of the
+property arrives: a four-language landing page for Salim Inn with live Sibu
+weather and atmosphere relighting. Multi-room group bookings, arrival-day room
+holds, channel settlement locks, automatic session retention, and a revised
+manager/admin role hierarchy ship across the PMS, alongside an upgraded
+four-language Malaysian and Sarawakian legal and PDPA compliance corpus
+(`2026-11-18`).
 
 ### Highlights
 
 - **Public landing page** (`/salim-inn/`, where cookie-less visitors to `/` now
   land):
-  - a calibrated flythrough film, real interiors from the owner's photos, and a
-    booking card
+  - a calibrated flythrough film, real interiors from the owner's photos, live
+    Sibu weather and solar atmosphere relighting, and a booking card
   - a neighbourhood guide to Farley's kopitiams, clinics and shops, with
     must-try dishes
-  - a Google Maps link and an extended FAQ
+  - a Google Maps link, an extended FAQ, and CPETTR 2024 supplier and legal
+    footer disclosures
   - link-preview tags and a real `robots.txt`
   - English, Bahasa Melayu, Simplified and Traditional Chinese, with only the
     visitor's language bundle loaded
-- **Four-language legal corpus** — terms, privacy notice, payment terms, eKYC
-  consent and consent prompts in all four languages. The Chinese text is
-  marked as a draft pending native/legal review, and no consent version
-  changed.
+- **Multi-room / group bookings** (`booking_groups`) — online and front-desk
+  multi-room reservations with unified group PayPal or bank-transfer checkout,
+  proportional per-room voucher splitting and automatic resplit on room
+  changes/removals, group hold expiry, and staff group check-in/cancel actions.
+- **Four-language Malaysian & Sarawakian legal corpus (`2026-11-18`)** —
+  upgraded Booking Terms, Privacy Notice, Payment Terms, eKYC Biometric
+  Consent, and public Cookie Usage (`/legal/cookies`) across `en`, `ms`, `zh`,
+  and `zh-TW`:
+  - Personal Data Protection (Amendment) Act 2024 (Act A1727) disclosures:
+    Data Protection Contact (s.12A), mandatory 72-hour data breach notification
+    (s.12B), direct data-processor security duties (s.9), amended cross-border
+    transfers (s.129), data portability (s.43A), 21-day access/correction
+    timelines, biometric data explicit consent (ss. 4 & 40), common-area 24-hour
+    CCTV notice, and minor-guest parental consent (Regulations 2013 r.4)
+  - Consumer Protection (Electronic Trade Transactions) Regulations 2024
+    [P.U. (A) 170/2024], Electronic Commerce Act 2006, Consumer Protection Act
+    1999 (including TTPM redress), Registration of Guests Act 1965 (Act 381),
+    Control of Smoking Products for Public Health Act 2024 (Act 852), Service
+    Tax Act 2018 (SST-inclusive room/extra-bed pricing), Tourism Tax Act 2017
+    (RM10/night foreign tourist levy), Income Tax Act 1967 (LHDN e-Invoice
+    particulars), Sarawak business registration disclosures, and NSRC `997`
+    anti-scam guidance
+  - Marketing preference updates now pin `policy_version` to the active Privacy
+    Notice generation.
 - **Localization close-out:**
   - a Traditional Chinese help-article set
   - the remaining 697 Simplified Chinese guest-portal strings translated
@@ -50,13 +73,27 @@ smoking-room preference.
 - **Payment approvals** — the queue shows stay context. Staff rejects are
   refused once a booking was confirmed by hand. Approval history shows the
   actual status.
-- **Rooms and bookings:**
+- **Rooms, channels, payments and bookings:**
+  - arrival-day-only room holds (`reconcile_room_holds`): future bookings no
+    longer mark rooms `reserved` days or months ahead of arrival
+  - channel settlement payment-method locks (`settlement_payment_methods`),
+    OTA room-upgrade difference collection at the desk, and online check-in
+    holdback for desk-collected charges (Tourism Tax, extra beds)
+  - payment void reasons, closed-day night-audit reversing journal entries, and
+    receptionist payment-void permission
+  - configurable hotel base currency (`public.hotel_currency()`, defaulting to
+    `MYR` rather than hardcoded `USD`)
   - a soft smoking/non-smoking preference steers online room allocation and
     never blocks a booking
   - room cards show the guest's requests next to staff remarks, the holding
     stay, and who created it
   - unpaid and awaiting-confirmation holds now count as holding a room
-  - the booking detail side panel scrolls
+  - streamlined staff PMS workflows, keyboard shortcuts, and visual ergonomics
+- **Role hierarchy & access control:** `manager` (priority 150 > `admin` 100)
+  now owns user, role, permission, team, and data-transfer management; `admin`
+  retains property operations without user-management or data-transfer grants.
+  Teams (`teams`, `team_members`, `team_roles`) are protected in `hotel-backup`
+  v1 because team membership confers RBAC roles.
 - **Online inventory** — stale-write protection, so a concurrent edit is
   rejected instead of overwritten. Changes now need
   `online_inventory:manage`, and the tab works on phones.
@@ -76,18 +113,39 @@ smoking-room preference.
 - The backend refuses to start on a database that lacks any schema patch the
   build was compiled against, and names the missing revisions. Before, the
   first symptom was a 500.
-- `dompurify` raised to `^3.4.16` (GHSA-p98j-92pf-mc4p).
+- Automatic hourly session retention (`session_purge_expired_days`,
+  `session_purge_revoked_days`, `session_idle_days`) and per-account active
+  device caps (`session_max_active_per_user`) purge expired/revoked refresh,
+  user, and guest-portal sessions.
+- Database-enforced append-only row and `TRUNCATE` triggers protect
+  `audit_logs` and all monthly/default partitions (`prevent_audit_log_mutation`).
+- Least-privilege runtime PostgreSQL role (`hotel_app`) provisioned on deploy.
+- `dompurify` raised to `^3.4.17` (GHSA-p98j-92pf-mc4p).
 
 ### Upgrade and deployment notes
 
-- **Schema patches 0009–0016** run in the deploy step:
+- **Schema patches 0009–0031** run in the deploy step:
   - 0009: booking smoking preference
   - 0010: `online_inventory:manage`
   - 0011: `default_locale` plus `system_settings.default_value`
   - 0012 and 0014: the new-reservations clock and its 07:00 default
   - 0013: the staff-notifications table for databases created before it
   - 0015: drops the SQL/PGQ `hotel_graph` property graph
-  - 0016: rebuilds late audit-log partitions without `SPLIT PARTITION`
+  - 0016 and 0021: late audit-log partition creation and row-move without `SPLIT PARTITION`
+  - 0017: automatic session retention settings and indexes
+  - 0018: arrival-day-only room holds (`reconcile_room_holds`)
+  - 0019 and 0020: payment void reason, closed-day reversal date, and reception void permission
+  - 0022: database-wide `audit_logs` append-only partition triggers
+  - 0023: channel settlement payment-method locks
+  - 0024: runtime role capability adjustments for `hotel_app`
+  - 0025, 0026, 0027 and 0029: `booking_groups` schema, group payment columns, per-room voucher split/resplit
+  - 0028: `job_runs` convergence patch for pre-existing live databases
+  - 0030: `public.hotel_currency()` defaults replacing hardcoded `'USD'`
+  - 0031: `manager` role priority elevation and user-management / `data_transfer:*` ownership transfer
+- **Consent document generation `2026-11-18`:** `terms_of_service`,
+  `privacy_notice`, `payment_terms`, and `ekyc_biometric` all advance to
+  version `2026-11-18`; clients running older bundles are prompted to reload and
+  accept the current notices.
 
   Because of the startup guard above, a server that skips the catalog will not
   start.

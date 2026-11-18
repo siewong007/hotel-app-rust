@@ -1,7 +1,7 @@
 # Dependencies
 
 Architecturally significant dependencies and the reasoning behind them — not a
-lockfile dump. Last reviewed during the 2026-09-13 modernization pass.
+lockfile dump. Last reviewed 2026-11-18 (initial modernization pass: 2026-09-13).
 
 ## Frontend (`hotel-web-fe`)
 
@@ -16,15 +16,15 @@ lockfile dump. Last reviewed during the 2026-09-13 modernization pass.
 | @tanstack/react-table 9 | Tables | Behind shared `DataTable`; v9 feature-gated API (`tableFeatures`) |
 | ky | HTTP client | Wrapped by `src/api/client.ts` — never call `fetch` directly |
 | @connectrpc/connect + connect-web + @bufbuild/protobuf | gRPC-Web (Connect) clients | For the strangler migration only — generated stubs in `src/gen/` (do not hand-edit), dispatched per context by `src/api/grpc/flags.ts`; REST via ky stays default/fallback (ADR 014) |
-| date-fns | Dates | Business-day math belongs to the backend (`hotel_today`) |
+| Native `Date` + `Intl` (`src/utils/date.ts`) | Dates | No `date-fns` or `dayjs`; business-day math belongs to the backend (`hotel_today`) |
 | @nivo/{bar,line,pie,core} | Charts | Dashboard/reports; wrapped by `src/components/charts/` — never imported directly |
-| jspdf + jspdf-autotable | PDF export | Receipts/reports |
-| three | 3D scenes on the public landing page | Imported only by `salim-inn/` (the flythrough film and interiors). The React app in `src/` never loads it. |
+| jspdf + jspdf-autotable | PDF export | Receipts/reports (with embedded CJK font for `zh`/`zh-TW`) |
+| three + postprocessing + n8ao + three-mesh-bvh + polygon-clipping + lenis + detect-gpu + stats-gl | 3D scenes on the public landing page | Imported only by `salim-inn/` (the flythrough film, interiors, smooth scroll, and GPU tiering). The React app in `src/` never loads them. |
 | @paypal/react-paypal-js | PayPal buttons | Guest + staff payment surfaces |
 | qrcode.react | QR rendering | 2FA enrollment, share links |
 | web-vitals 6 | RUM metrics | `onINP` (FID removed in v6) |
 | vitest 5 + jsdom 30 + @testing-library/* | Tests | Three independent gates: `typecheck`, `lint`, `test` |
-| eslint 10 + `@typescript-eslint/parser` | Lint | Parser only — neither the `typescript-eslint` meta-package nor `@typescript-eslint/eslint-plugin` is installed; `eslint.config.js` pairs the parser with `eslint-plugin-react-hooks` and `eslint-plugin-react-compiler`. The parser's `typescript` peer range `<6.1.0` is the TypeScript 7 blocker — see below |
+| eslint 10 + `@typescript-eslint/parser` (`^8.72.0`) | Lint | Parser only — neither the `typescript-eslint` meta-package nor `@typescript-eslint/eslint-plugin` is installed; `eslint.config.js` pairs the parser with `eslint-plugin-react-hooks` v7 (which now bundles React Compiler diagnostics directly; standalone `eslint-plugin-react-compiler` was removed). The parser's `typescript` peer range `<6.1.0` is the TypeScript 7 blocker — see below |
 
 ### Why TypeScript 6, not 7
 
@@ -33,9 +33,8 @@ it. Verified against **npm**, not just `node_modules`, on 2026-09-15:
 
 | Package | Version | `peerDependencies.typescript` |
 |---|---|---|
-| `@typescript-eslint/parser` (installed) | 8.70.0 | `>=4.8.4 <6.1.0` |
-| `@typescript-eslint/parser` (npm `latest`) | 8.70.0 | `>=4.8.4 <6.1.0` |
-| `@typescript-eslint/parser` (npm `canary`) | 8.70.1-alpha.15 | `>=4.8.4 <6.1.0` |
+| `@typescript-eslint/parser` (installed) | `^8.72.0` | `>=4.8.4 <6.1.0` |
+| `@typescript-eslint/parser` (npm `latest` at check) | `8.72.0` | `>=4.8.4 <6.1.0` |
 
 `@typescript-eslint/typescript-estree` hard-codes the same range as
 `SUPPORTED_TYPESCRIPT_VERSIONS`, so on TS 7 the parser throws at module load and
@@ -45,14 +44,12 @@ version this project can actually run. Upstream: typescript-eslint#10940, aimed 
 TS ≥ 7.1. Do not retry the bump until that issue closes — re-check with
 `npm view @typescript-eslint/parser@latest peerDependencies`.
 
-### Everything else is current
+### Dependency hygiene
 
-Checked against crates.io and npm on 2026-09-15: **all 13 audited backend crates
-and all 18 audited frontend packages resolve to their latest stable release.**
-The only gaps found were two patch-level drifts — `@tanstack/react-router`
-1.170.35 → 1.170.36 and `web-vitals` 6.2.1 → 6.2.2 — both direct dependencies,
-both bumped in the same pass and re-gated. Re-run the comparison with
-`npm view <pkg> version` and
+Checked via `cargo audit` and `bun audit` in CI (`security.yml`). Direct
+dependencies are kept on current stable releases (e.g. `@tanstack/react-router`
+`^1.170.46`, `web-vitals` `^6.2.3`, `dompurify` override `^3.4.17`). Re-check
+upstream versions with `npm view <pkg> version` and
 `curl -H 'User-Agent: …' https://crates.io/api/v1/crates/<crate>` (crates.io
 rejects requests without a User-Agent and returns nothing useful).
 
@@ -92,6 +89,7 @@ builds), `lazy_static` (replaced by `std::sync::LazyLock`).
 | tauri 2 + shell/updater/process plugins | Desktop shell | Updater shares the reqwest instance via feature unification |
 | reqwest 0.13 | Outbound HTTP | Same `rustls` feature set as backend; `charset`/`http2`/`system-proxy` kept for the updater |
 | tokio, serde/serde_json, thiserror 2, log/env_logger | Plumbing | |
+| tar 0.4, flate2 1 | Managed backup archives | Uploads `.tar.gz` bundling & extraction (`guides/desktop-backup-restore.md`) |
 | rand 0.10, sha2 0.11, hex, bcrypt | Local crypto | Patch checksums, bootstrap credentials |
 | dirs 7 | Platform data dirs | Embedded PostgreSQL location |
 

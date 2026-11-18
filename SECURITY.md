@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Hotel app is an academic and portfolio-oriented project. Security fixes are currently considered for the active `master` branch.
+This repository backs a live hotel property management deployment (`saliminn.my`) as well as desktop installations handling real guest personal data (governed by Malaysia's Personal Data Protection Act 2010, as amended in 2024), identity documents, and payment records. Security fixes are supported on the active `master` branch.
 
 | Version | Supported |
 | --- | --- |

@@ -51,7 +51,7 @@ cargo fmt --check                             # CI gate; `cargo fmt` to fix
 integration test after a signature change — run `cargo test`, or at least
 `cargo check --tests`.
 
-55 of the 59 files under `tests/` read `DATABASE_URL` and return early without it (or,
+79 of the 83 files under `tests/` read `DATABASE_URL` and return early without it (or,
 for some, when the server is unreachable). The suite still exits 0, and each early
 return counts as a *pass*, so a no-database run reports the same counts as a real
 one. Do not judge by run count or exit code. Judge by wall-clock and per-suite
@@ -69,7 +69,7 @@ src/
   core/           Auth, DB pool, errors, middleware, rate limiting, metrics, caches, SQL compat
   routes/         Router composition — every module router merged in routes/mod.rs
   modules/        All domains: <domain>/{routes,handlers,service,repository,models}.rs
-                  (38 routed; `consent` is internal with no routes)
+                  (40 directories: 38 routed; `consent` and `booking_groups` are internal)
   grpc/           tonic gRPC/gRPC-Web adapters (rooms, room types, housekeeping,
                   maintenance, guests) merged into the same Axum router at
                   `/hotel.*` paths — they reuse the module service layer (ADR 014)

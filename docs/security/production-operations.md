@@ -6,9 +6,9 @@ intentionally not covered by these controls.
 ## Required release controls
 
 Before a production release, CI must be green and the Security workflow must
-have no unresolved secret-scan, CodeQL, dependency-review, or Rust advisory
-finding. Review Dependabot updates as ordinary pull requests; do not merge a
-security update without its normal test suite.
+have no unresolved secret-scan, CodeQL, dependency-review, Rust advisory, or
+JS advisory (`bun audit`) finding. Review Dependabot updates as ordinary pull
+requests; do not merge a security update without its normal test suite.
 
 The production backend must set `ENVIRONMENT=production` (or
 `APP_ENV=production`), use HTTPS-only non-localhost `ALLOWED_ORIGINS`, set a
@@ -38,8 +38,9 @@ a fresh password/passkey enrollment for any account whose ownership is unclear.
 
 For a suspected account or token compromise:
 
-1. Deactivate the affected account or reset its password in the RBAC console;
-   this revokes its active sessions.
+1. Deactivate the affected account or reset its password in User Management
+   (`manager` or `super_admin` role per patch 0031); this revokes its active
+   sessions.
 2. Preserve relevant application, Caddy, and GitHub Actions logs outside the
    host before performing cleanup.
 3. Review audit events and database changes for the incident window.
@@ -162,10 +163,51 @@ of guest, payment, or eKYC data:
    cleanup — they are the forensic record.
 3. Scope: audit queries (`resource_type`, `action`, timestamps) plus
    `ekyc_document_downloaded` events establish which records left.
-4. Notify: Malaysian PDPA breach-notification obligations may apply once
-   scope is known — the decision and timeline belong to the hotel's
-   designated officer/legal counsel, not to this runbook.
+4. Notify (Malaysian PDPA s.12B — mandatory timelines): under section 12B of
+   the Personal Data Protection Act 2010 (inserted by the Personal Data
+   Protection (Amendment) Act 2024, effective 1 June 2025) and the JPDP Data
+   Breach Notification Guidelines 2025, where a personal data breach causes or
+   is likely to cause **significant harm**:
+   - notify the **Personal Data Protection Commissioner (JPDP)** as soon as
+     practicable and **no later than 72 hours** after becoming aware of the
+     breach (phased notification is permitted if full details are still under
+     investigation, with written justification for any delay);
+   - notify **affected data subjects without unnecessary delay and within 7
+     days** after the initial notification to the Commissioner, setting out the
+     nature of the breach and protective steps they can take.
 5. Remediate the entry point, rotate `JWT_SECRET` (invalidates all staff
    sessions — plan the timing), DB credentials, and any implicated API keys.
 6. Record timeline, scope, root cause, and corrective actions; require an
    independent review before closing.
+
+## PDPA data-subject requests and eKYC biometric withdrawal
+
+Privacy inquiries and statutory requests arrive at the published Data
+Protection Contact (`hotelIdentity.ts` / `/legal/privacy`).
+
+1. **Verify identity first** — confirm the requester owns the guest record or
+   holds lawful authority (parent/guardian for a minor under 18 per Personal
+   Data Protection Regulations 2013 r.4) before disclosing, correcting, or
+   erasing any data.
+2. **Statutory response clock (21 days)** — under sections 31 and 35 of the
+   Personal Data Protection Act 2010, respond to Data Access (s.30) and Data
+   Correction (s.34) requests within **21 calendar days** of receiving a
+   complete request. If unable to comply within 21 days, send written notice
+   with reasons before day 21 and complete within **14 additional days**. Data
+   portability requests (s.43A) are fulfilled using structured JSON/CSV export
+   where technically feasible. Note that signed-in portal guests can also edit
+   their own contact particulars directly (`PATCH /api/guest-portal/me/profile`).
+3. **eKYC biometric withdrawal / image erasure (PDPA ss. 40, 42)** — no
+   self-service file-delete endpoint exists today. When a verified guest
+   withdraws eKYC biometric consent after check-out (and no active police/legal
+   hold applies):
+   - inspect the guest's `ekyc_verifications` row to read the relative paths
+     under `private_uploads/ekyc/`;
+   - confirm each path resolves strictly inside `/opt/saliminn/private_uploads/ekyc/`
+     (never `rm` an unvalidated path), remove the document and selfie image
+     files from disk, and `NULL` out the image-path columns on
+     `ekyc_verifications` while retaining the non-biometric verification
+     status and `ekyc_decision_history`;
+   - record an `ekyc_notes` entry documenting the request date, operator, and
+     completed erasure. Note that earlier encrypted/local backup archives age
+     out on the 7-copy uploads retention cycle (`database-backup.sh`).

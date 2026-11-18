@@ -27,8 +27,8 @@ workspace, so run commands from each subdirectory.
 - A public landing page for the property (Salim Inn), in English, Bahasa Melayu, and
   Simplified and Traditional Chinese
 - Browse rooms and offers, check availability
-- Book without an account (public, rate-limited endpoints)
-- Manage the booking via a secure access token: guest portal, payments, eKYC document
+- Book single or multi-room stays without an account (public, rate-limited, PDPA consent-gated endpoints)
+- Manage single or group bookings via a secure access token: guest portal, payments, eKYC document
   upload, self check-in
 
 **Front desk**
@@ -138,8 +138,9 @@ make db-seed       # optional deterministic staging dataset
 | `BACKEND_PORT` | No | API port, default `3030` |
 
 Compose reads the root [.env.example](.env.example); the full backend reference —
-SMTP, PayPal, Turnstile, Google sign-in, pool tuning, all optional — is
-[hotel-app-be/.env.example](hotel-app-be/.env.example). Never commit real `.env` files.
+SMTP, PayPal, Turnstile, Google sign-in, session retention, pool tuning, all optional — is
+[hotel-app-be/.env.example](hotel-app-be/.env.example), and optional frontend build-time
+`VITE_*` variables live in [hotel-web-fe/.env.example](hotel-web-fe/.env.example). Never commit real `.env` files.
 
 ## Development
 
@@ -178,14 +179,14 @@ Schema changes go into the V1 baseline **and** a new checksum-verified patch und
 ## Status
 
 - **Implemented:** everything marked *Delivered* in [docs/features.md](docs/features.md) —
-  bookings, rooms, housekeeping, payments, ledgers, invoicing, night audit, eKYC, guest
-  portal, loyalty, promotions, communications (email), i18n (en/ms/zh/zh-TW), and the
-  desktop app.
+  single and multi-room group bookings, rooms, housekeeping, payments, ledgers, invoicing,
+  night audit, eKYC, versioned PDPA consent capture (`consent_records`), guest portal,
+  loyalty, promotions, communications (email), i18n (en/ms/zh/zh-TW), and the desktop app.
 - **In progress:** gRPC-Web migration (rooms, housekeeping, maintenance, guests done;
-  368 REST paths remain in the OpenAPI document); desktop OS signing/notarization
+  399 REST paths / 475 operations remain in the OpenAPI document); desktop OS signing/notarization
   (wired, awaiting certificates); the PostgreSQL 19 GA move. Production is on `19beta3`;
-  patches 0015/0016 removed the schema's uses of the features PostgreSQL 19 Beta 4
-  reverted, and must run there before the move.
+  patches 0015/0016/0021/0022 removed the schema's uses of features PostgreSQL 19 Beta 4
+  reverted and hardened partition append-only guards ahead of the move.
 - **Planned:** SMS notification channel. PayPal refund/dispute webhooks are verified and
   audit-logged but not auto-applied — manual reconciliation today.
 

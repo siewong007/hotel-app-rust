@@ -320,7 +320,9 @@ export const ms: Copy = {
     rights: `© ${new Date().getFullYear()} Salim Inn, Sibu`,
     linksLabel: 'Maklumat laman',
     aboutUs: 'Tentang Kami',
+    bookingTerms: 'Terma Tempahan',
     privacyPolicy: 'Dasar Privasi',
+    paymentTerms: 'Terma Pembayaran',
     cookieUsage: 'Penggunaan Kuki',
   },
   mobileCta: {

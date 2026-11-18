@@ -5,14 +5,15 @@ Every rule here is executable — no judgment required.
 
 ## Leak #1: Reading large files whole (biggest token leak)
 
-The hot files are huge (measured 2026-10-05, all under `hotel-app-be/src/modules/`
-since the domain-module migration): the V1 baseline SQL 10.7k lines,
-`modules/bookings/lifecycle.rs` ~3.7k, `modules/payments/service.rs` ~3.2k,
-`modules/analytics/repository.rs` ~2.5k, `modules/payments/repository.rs` ~2.3k,
-`features/invoices/components/CheckoutInvoiceModal.tsx` ~2.2k, `src-tauri/src/postgres.rs` ~2.8k,
+The hot files are huge (measured 2026-11-18, all under `hotel-app-be/src/modules/`
+since the domain-module migration): the V1 baseline SQL ~11.2k lines,
+`modules/payments/service.rs` ~4.3k, `modules/bookings/lifecycle.rs` ~4.2k,
+`src-tauri/src/postgres.rs` ~2.8k, `modules/payments/repository.rs` ~2.7k,
+`modules/guest_booking/service.rs` ~2.6k, `modules/analytics/repository.rs` ~2.5k,
+`features/invoices/components/CheckoutInvoiceModal.tsx` ~2.2k,
 `features/admin/components/CustomerLedger/CustomerLedgerPage.tsx` ~2.2k,
-`modules/ledgers/repository.rs` ~2.1k, `seed.sql` ~1.7k. Reading one whole can burn 30–60k tokens in a single call. Handlers are
-thin wrappers now — `modules/bookings/handlers.rs` is 274 lines, and `BookingsPage.tsx` was split
+`modules/ledgers/repository.rs` ~2.2k, `seed.sql` ~1.7k. Reading one whole can burn 30–60k tokens in a single call. Handlers are
+thin wrappers now — `modules/bookings/handlers.rs` is ~274 lines, and `BookingsPage.tsx` was split
 down to ~450, so neither is worth avoiding any more.
 
 **Fix (mandatory procedure):**
@@ -23,7 +24,7 @@ down to ~450, so neither is worth avoiding any more.
 3. If the file is >400 lines, NEVER Read it without `offset`/`limit`. Grep for the
    function name first to get a line number, then Read ±80 lines around it.
 4. CLAUDE.md and `.claude/refs/*.md` already list known line anchors
-   (e.g. `create_booking_handler` at modules/bookings/lifecycle.rs:1076 — that name also
+   (e.g. `create_booking_handler` at modules/bookings/lifecycle.rs:1116 — that name also
    exists in `modules/bookings/handlers.rs` and `modules/guest_booking/handlers.rs`, so grep the
    qualified path). Start from those, but always verify — anchors rot as code moves.
 5. If you need a broad sweep ("where is X handled across the repo"), delegate to an

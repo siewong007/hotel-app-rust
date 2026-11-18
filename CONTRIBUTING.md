@@ -97,10 +97,10 @@ rules are in [AGENTS.md](AGENTS.md).
   - Functions and variables: `snake_case`
   - Types, structs, enums, traits: `PascalCase`
   - Constants: `SCREAMING_SNAKE_CASE`
-- **Architecture:** Follow the layered pattern:
-  `routes/` → `handlers/` → `services/` → `repositories/` → `models/`
+- **Architecture:** Follow the domain-module pattern:
+  `modules/<domain>/routes.rs` → `handlers.rs` → `service.rs` → `repository.rs` → `models.rs`
 - **SQL:** Always parameterize SQL queries. Never interpolate user input.
-  Use PostgreSQL `$N` placeholders or the existing `param!(N)` helper.
+  Use `param!(N)` and `sql_compat::{current_timestamp,current_date}` from `core/sql_compat.rs` (never literal `$1` or `NOW()`).
 - **Sanitization:** Apply `Sanitizer` from `utils/sanitization.rs` to free-text user input.
 - **Errors:** Return generic error messages to clients; log specifics server-side.
 - **Transactions:** Use transactions for multi-step mutations.
@@ -137,7 +137,7 @@ rules are in [AGENTS.md](AGENTS.md).
   - Or in separate test modules under `tests/`
 - **Integration tests:** Database-backed tests in `hotel-app-be/tests/`
   - Run with `cargo test --all-features` (`postgres` is a default feature — do not pass `--no-default-features`)
-  - **55 of the 59 files read `DATABASE_URL` and return early without it, and the suite still exits 0.** Each early return counts as a *pass*, so the run count looks the same with or without a database — it is no evidence. Point `DATABASE_URL` at a scratch database (baseline + `seed.sql` + patches, never one with real data) and judge by per-suite wall-clock: `payment_characterization` takes ~3.5s for real and 0.00s when skipped. See [`docs/development.md`](docs/development.md#validate).
+  - **79 of the 83 files read `DATABASE_URL` and return early without it, and the suite still exits 0.** Each early return counts as a *pass*, so the run count looks the same with or without a database — it is no evidence. Point `DATABASE_URL` at a scratch database (baseline + `seed.sql` + patches, never one with real data) and judge by per-suite wall-clock: `payment_characterization` takes ~3.5s for real and 0.00s when skipped. See [`docs/development.md`](docs/development.md#validate).
 - **What to test:**
   - Pure business logic and calculations
   - SQL query builders and PostgreSQL helpers
@@ -244,6 +244,8 @@ it. [docs/README.md](docs/README.md) is the full map — the short version:
 - **CLAUDE.md** — Agent routing index: commands, CI jobs, environment, architecture essentials
 - **AGENTS.md** — Layer responsibilities, naming, refactoring safety, dependency policy
 - **CONTRIBUTING.md** — Contribution process: branching, PR checklist, commit conventions
+- **SECURITY.md** — Vulnerability reporting policy and contributor security boundaries
+- **CODE_OF_CONDUCT.md** — Community standards and enforcement
 - **docs/README.md** — Documentation index: which document owns which subject
 - **docs/features.md** — Feature registry; the only place delivery status is recorded
 - **docs/architecture/overview.md** — System architecture as it exists today

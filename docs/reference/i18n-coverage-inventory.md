@@ -15,11 +15,12 @@ history has it); usage guide:
   and bare `zh` resolve to `zh`)
 - Namespaces: **30** bundles per locale under
   `hotel-web-fe/src/i18n/resources/<locale>/`
-- Flattened leaf keys (recounted 2026-10-05): **en 7,797 · ms 7,741 · zh 7,726 · zh-TW 7,674** —
+- Flattened leaf keys (recounted 2026-11-18): **en 8,125 · ms 8,067 · zh 8,052 · zh-TW 8,000** —
   ms/zh/zh-TW counts are lower *by design*: `Intl.PluralRules` gives Malay
   and both Chinese locales only the `other` category, so `_one`/`_zero`
   variants legitimately do not exist there. The parity suite accounts for
-  this.
+  this. (Per-namespace breakdown below reflects the 2026-10-05 snapshot; re-run
+  `resources.test.ts` for live enforcement.)
 - Initial locale resolution (in precedence order): explicit stored choice →
   `?lang=` link parameter (`matchLocale`, marks the choice explicit) →
   hotel-configured `default_locale` system setting (applied from the
@@ -118,10 +119,11 @@ predominantly:
 
 ## `tOr` retirement list
 
-`tOr` survives at **24 sites, all dynamic-key lookups** marked
-`// intentional:` — the key embeds a runtime DB/enum/registry value, so no
-static key can retire it. (Per-site detail: git history of this file and the
-i18n-coverage work it records.)
+`tOr` survived the initial 2026-09-15 pass at **24 dynamic-key lookup sites**
+(listed below); subsequent features (`channels`, `loyalty`, `communications`,
+group bookings) added dynamic enum/status `tOr` calls (~102 total call sites as
+of 2026-11-18). Every static string should still use `t(...)` so bundle parity
+tests enforce translation across all four locales.
 
 | File | Lookup |
 |---|---|

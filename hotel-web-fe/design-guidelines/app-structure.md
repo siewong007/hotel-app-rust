@@ -75,6 +75,8 @@ each person sees the subset their role's permissions allow.
 
 ### Not in the sidebar
 - `/profile` — the signed-in user's account
+- `/guest-relations/follow-ups` — cross-guest follow-up queue opened from Guest Relations
+- `/ekyc`, `/my-rewards` — guest-facing identity verification and loyalty rewards views
 - `/guest-checkin` → `/guest-checkin/verify` → `/guest-checkin/form` →
   `/guest-checkin/confirm` — the four-step guest self-check-in wizard
 - `/guest-portal` (`?view=booking` opens booking) and `/portal`, `/portal/book` — the
@@ -82,7 +84,7 @@ each person sees the subset their role's permissions allow.
 - `/booking/recover-payment/$token`, `/unsubscribe/$token` — token pages reached
   from guest email
 - `/legal/terms`, `/legal/privacy`, `/legal/payment-terms`,
-  `/legal/identity-verification` — legal notices in four languages
+  `/legal/identity-verification`, `/legal/cookies` — public legal and cookie notices in four languages
 
 ## Where the library components are used today
 

@@ -63,8 +63,8 @@ Templates for each task type: `.claude/refs/delegation-templates.md`. Use them.
 ## Reporting contract (put this in every delegation prompt)
 
 Subagents return CONCLUSIONS and `file:line` references only. Anything long
-(logs, scan results, drafts, diffs) gets written to a file — repo-facing content
-under `.claude/reports/` or `.claude/refs/`, throwaway output in the session
+(logs, scan results, drafts, diffs) gets written to a file — active working notes
+under `docs/working-notes/` (deleted on merge) or `.claude/refs/`, throwaway output in the session
 scratchpad — and only the path comes back. Final message ≤15 lines unless the
 template says otherwise. If a subagent replies with a wall of text, that is a
 failed delegation prompt; fix the prompt, not the agent.
@@ -88,7 +88,7 @@ The agent (or commander) that produced work does not certify it. Minimum bars:
   against the acceptance criteria verbatim.
 - **Code changes** → actual execution: backend `cargo check --all-features` (and
   `cargo clippy --all-features -- -D warnings` before claiming CI-ready);
-  frontend `npm run typecheck && npm run lint && npm run test`. Compiler/tests are
+  frontend `bun run typecheck && bun run lint:strict && bun run test`. Compiler/tests are
   the fresh context.
 - **High-risk judgment** (schema design, money math, auth changes) → second opinion
   from a fresh opus agent, or generate 2–3 candidate answers and have a fresh agent

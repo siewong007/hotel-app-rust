@@ -15,7 +15,7 @@ The desktop build has two stages:
    - Skipped (fast path) when `pgsql/` already contains binaries matching the major version parsed from `CONFIGURED_POSTGRES_MAJOR_VERSION` in `src-tauri/src/postgres.rs`.
    - Partially non-fatal in `desktop:prepare`: if provisioning fails but `pgsql/` already exists and was not proven wrong (e.g. no Homebrew, offline machine), the existing tree is used and the build continues. If the existing tree is CONFIRMED to be the wrong PostgreSQL build (version/build mismatch, inconsistent or missing binaries, mismatched manifest), provisioning exits 2 and `desktop:prepare` refuses to continue — the app cannot start with that tree, so shipping it would only defer the failure to the user's machine.
 2. Sync backend database resources into `src-tauri/database/`.
-   - The PostgreSQL V1 baseline and one-time seed are copied only when content changes.
+   - The PostgreSQL V1 baseline, one-time `seed.sql`, and `patches/` catalog (`manifest.tsv`, `_begin.sql`, `_end.sql`, and every `000N_*.sql` patch) are copied only when content changes.
 3. Build the Tauri frontend bundle.
    - The Vite build is skipped when frontend source, public assets, build config, package files, and `VITE_`/`TAURI_ENV_` environment inputs are unchanged and `hotel-web-fe/dist/index.html` exists.
 4. Build the backend sidecar.

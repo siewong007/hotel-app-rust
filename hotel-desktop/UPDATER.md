@@ -59,7 +59,7 @@ installable-in-sequence (updates verify against the *installed* app's pubkey).
 3. The `desktop-release` job (`if: github.ref_type == 'tag'`,
    `contents: write`) downloads all three artifacts, runs
    `build-update-manifest.mjs`, and publishes the result to the tag's GitHub
-   Release: `latest.json`, installers (`*.dmg`, `*.deb`, `*.AppImage`,
+   Release: `latest.json`, installers (`*.dmg`, `*.deb`, `*.rpm`, `*.AppImage`,
    `*-setup.exe`, `*.msi`), updater bundles + `*.sig`, and portable archives.
    Re-runs are idempotent (`gh release upload --clobber` when the release
    already exists).

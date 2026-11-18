@@ -129,10 +129,10 @@ bin/              seed/ (deterministic demo dataset, `make db-seed`),
 database/postgres/  Baseline, seed, and the checksum-verified patch catalog
 ```
 
-Thirty-nine domain directories live in `modules/<domain>/` — thirty-eight are
-merged into the router; `consent` is the only internal module (service/repository
-with no HTTP routes). New domains go there; domain code no longer lives in
-flat-by-layer directories.
+Forty domain directories live in `modules/<domain>/` — thirty-eight are
+merged into the router; `consent` and `booking_groups` are internal modules
+(services/repositories with no standalone HTTP routers). New domains go there;
+domain code no longer lives in flat-by-layer directories.
 
 Cross-cutting machinery:
 
@@ -148,9 +148,9 @@ Cross-cutting machinery:
 - Background loops spawned in `main.rs` through `core::leader::spawn_exclusive`
   (Postgres advisory locks — one runner per loop across replicas): night audit,
   payment receipts, unpaid online-hold release, communications delivery worker
-  and campaign scheduler, and the rate-limit bucket prune. A
-  `core::cache_bus` LISTEN task applies cross-replica cache invalidation and
-  data-change fan-out.
+  and campaign scheduler, and the hourly session-retention + rate-limit bucket
+  prune loop. A `core::cache_bus` LISTEN task applies cross-replica cache
+  invalidation and data-change fan-out.
 
 Error handling: handlers return `ApiError` variants mapped to HTTP status +
 JSON error body; internal detail is logged server-side, client-facing messages
@@ -223,12 +223,13 @@ database/postgres/migrations/0001_v1_baseline.sql   (V1 baseline, fresh installs
   logic uses `hotel_today(executor)`, never `chrono::Local`.
 
 Major entity groups: users/roles/permissions + sessions/refresh tokens/passkeys;
-guests and guest-portal access; rooms, room types, housekeeping, maintenance;
-bookings, booking channels, rates/rate plans, promotions; invoices, payments
-(PayPal + staff-recorded), deposit refunds; customer/city ledgers; night audit
-runs; eKYC submissions; communications (campaigns, deliveries, preferences);
-loyalty; support tickets; audit logs (partitioned, append-only); system
-settings.
+guests, consent records, and guest-portal access; rooms, room types,
+housekeeping, maintenance; bookings, booking groups, booking channels,
+rates/rate plans, promotions; invoices, payments (PayPal + staff-recorded),
+deposit refunds; customer/city ledgers; night audit runs; eKYC submissions;
+communications (campaigns, deliveries, preferences); loyalty; support tickets;
+audit logs (partitioned, database-enforced append-only); system settings
+(including `public.hotel_currency()`).
 
 High-level relationships between the principal groups:
 
@@ -311,7 +312,7 @@ See [../features.md](../features.md) for the status registry. Delivered domains:
 |---|---|---|
 | Auth, users, RBAC, teams | `modules/{auth,users,rbac,profile,passkey,two_factor,teams}` | `features/{auth,user}`, `features/admin/components/rbac` |
 | Rooms & housekeeping | `modules/{rooms,housekeeping,maintenance}` | `features/{rooms,housekeeping}` |
-| Bookings & rates | `modules/{bookings,rates,booking_channels,guest_booking}` | `features/{bookings,rates,onlineInventory}` |
+| Bookings & rates | `modules/{bookings,booking_groups,rates,booking_channels,guest_booking}` | `features/{bookings,rates,channels,onlineInventory}` |
 | Guests, companies, relations | `modules/{guests,companies,guest_relations}` | `features/{guests,guestRelations}` |
 | Payments & ledgers | `modules/{payments,ledgers,payment_retry,webhooks}` | `features/{invoices,paymentRecovery}`, `features/admin/components/{CustomerLedger,PaymentApprovalsPage}` |
 | Night audit, analytics, insights | `modules/{night_audit,analytics,audit,insights}` | `features/{insights,dashboard}`, `features/admin/components/{AuditLogPage,NightAuditPage}` |
@@ -323,7 +324,7 @@ See [../features.md](../features.md) for the status registry. Delivered domains:
 | Realtime | `modules/realtime` (`/api/updates/socket`), hub sockets under loyalty/support | `hooks/useDataChangeSocket`, socket hooks per feature |
 | gRPC-Web (partial) | `src/grpc/` adapters — RoomService, RoomTypeService, HousekeepingService, MaintenanceService, GuestService | `api/grpc/` + `gen/` Connect-ES clients behind `grpcEnabled(context)` flags |
 | Guest portal | `modules/{guest_portal,guest_booking,consent}` | `guest/` entry + `features/guestPortal` |
-| Legal & misc public pages | — (static content) | `features/legal`, `/offers`, `/unsubscribe/$token` |
+| Legal & misc public pages | — (static content) | `features/legal` (`/legal/{terms,privacy,payment-terms,identity-verification,cookies}`), `/offers`, `/unsubscribe/$token` |
 | Public landing page | — (static; hands off to the guest booking flow) | `hotel-web-fe/salim-inn/` (standalone document, own content model) |
 | Search | `modules/search` | shared search |
 

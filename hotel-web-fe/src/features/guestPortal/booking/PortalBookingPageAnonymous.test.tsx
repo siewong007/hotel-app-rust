@@ -368,8 +368,8 @@ describe('PortalBookingPage anonymous checkout', () => {
     // The consent the guest gave travels with the booking, pinned to the
     // version of the text they were shown.
     expect(payload.consents).toEqual([
-      { document: 'terms_of_service', version: '2026-09-13', granted: true, locale: 'en' },
-      { document: 'privacy_notice', version: '2026-09-09', granted: true, locale: 'en' },
+      { document: 'terms_of_service', version: '2026-11-18', granted: true, locale: 'en' },
+      { document: 'privacy_notice', version: '2026-11-18', granted: true, locale: 'en' },
     ]);
     // Untouched optional box is sent as an explicit refusal, not omitted.
     expect(payload.marketing_opt_in).toBe(false);

@@ -1,7 +1,7 @@
 # Ledger Workflow (reference)
 
-Re-verified 2026-09-17 against `master`. Paths updated for the domain-module
-migration — every domain now lives under `hotel-app-be/src/modules/<domain>/`.
+Re-verified 2026-11-18 against `master`. Paths follow the domain-module
+layout — every domain lives under `hotel-app-be/src/modules/<domain>/`.
 Re-verify anchors with `grep -n "fn <name>"` before relying on one; line
 anchors rot.
 
@@ -9,13 +9,13 @@ anchors rot.
 
 - `modules/ledgers/routes.rs` (181 lines) — RBAC gate
   (`require_permission_helper` with `LEDGERS_READ`/`CREATE`/`UPDATE`/`VOID`/`MANAGE`
-  consts) + dispatch to `handlers::ledgers::*`.
+  consts) + dispatch to `super::handlers::*`.
 - `modules/ledgers/handlers.rs` (144 lines) — thin wrappers into `service.rs`.
 - `modules/ledgers/service.rs` (368 lines) — sanitizes free text and threads
   `user_id` for audit logging, then delegates to `repository.rs`. Domain logic
   stays in the repository (contrast `modules/bookings/service.rs`, which does
   own permission/ownership logic — see `booking-workflow.md`).
-- `modules/ledgers/repository.rs` (2076 lines).
+- `modules/ledgers/repository.rs` (2188 lines).
 
 **Routes** — `ledgers:read` for list/detail/summary/payment reads, `ledgers:create`
 for ledger/payment creation, `ledgers:update` for edits and payment-date changes,
@@ -32,14 +32,14 @@ Key functions (`modules/ledgers/repository.rs`):
 
 - **`list_customer_ledgers`** (:147), **`get_customer_ledger`** (:274), **`get_customer_ledger_with_payments`** (:291).
 - **`create_customer_ledger`** (:319) — resolves `due_date`: caller's value → else the named company's `payment_terms_days` (looked up by `company_name`) → else `default_payment_terms_days` (:40 — `settings_cache::get_positive_i32(pool, "default_payment_terms_days", 30)`, so the final fallback is 30 days). Allocates `invoice_number` via `services::invoice_numbers::next_invoice_number`, inserts with hardcoded status `'pending'` and `paid_amount = 0`.
-- **`update_customer_ledger`** (:513), **`delete_customer_ledger`** (:854).
-- **`create_ledger_payment`** (:1352) — validates a positive amount against a non-voided ledger, inserts the payment row, then recomputes `paid_amount` and status: `new_total_paid ≥ total_amount` → `paid`, `> 0` → `partial`, else `pending`. The `_with_outcome` variant (:1324) is the `pub(crate)` core both callers share.
-- **`create_company_ledger_payment`** (:1607) — company-wide allocation across entries in one transaction (`_with_outcome` core at :1454).
-- **`get_ledger_payments`** (:1620), **`get_ledger_summary`** (:1648).
-- **`void_ledger`** (:1687) — refuses if already voided; stamps void fields + status `void`.
-- **`create_ledger_reversal`** (:1763) — refuses to reverse a reversal (`original.is_reversal` check); inserts a sibling row with opposite `transaction_type` (debit↔credit), an `original_transaction_id` back-pointer, description prefixed `"REVERSAL: "`, status hardcoded `'paid'`.
-- **`update_ledger_payment`** (:1888) — always applies `payment_date`; `payment_amount`/`payment_method`/`payment_reference`/`notes` only when provided; re-syncs the ledger's `paid_amount`/`status`/`payment_date` from the resulting payment set.
-- **`delete_ledger_payment`** (:2009).
+- **`update_customer_ledger`** (:513), **`delete_customer_ledger`** (:891).
+- **`create_ledger_payment`** (:1407) — validates a positive amount against a non-voided ledger, inserts the payment row, then recomputes `paid_amount` and status: `new_total_paid ≥ total_amount` → `paid`, `> 0` → `partial`, else `pending`.
+- **`create_company_ledger_payment`** (:1663) — company-wide allocation across entries in one transaction.
+- **`get_ledger_payments`** (:1676), **`get_ledger_summary`** (:1704).
+- **`void_ledger`** (:1752) — refuses if already voided; stamps void fields + status `void`.
+- **`create_ledger_reversal`** (:1828) — refuses to reverse a reversal (`original.is_reversal` check); inserts a sibling row with opposite `transaction_type` (debit↔credit), an `original_transaction_id` back-pointer, description prefixed `"REVERSAL: "`, status hardcoded `'paid'`.
+- **`update_ledger_payment`** (:2000) — always applies `payment_date`; `payment_amount`/`payment_method`/`payment_reference`/`notes` only when provided; re-syncs the ledger's `paid_amount`/`status`/`payment_date` from the resulting payment set.
+- **`delete_ledger_payment`** (:2121).
 
 **Booking → Ledger integration**: when a company-billed booking transitions to
 `checked_out`/`completed`, `modules/bookings/lifecycle.rs`'s

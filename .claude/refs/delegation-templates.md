@@ -30,7 +30,8 @@ contains a trailing space after "SSD". Always double-quote paths in shell comman
 > CONTEXT YOU MUST READ FIRST: .claude/rules/00-diagnosis.md (all three leak
 > checklists apply), plus {specific files with line anchors}.
 > SPEC: {exact behavior, inputs/outputs, edge cases. If SQL is involved: must use
-> param!/sql_compat helpers and update BOTH database/postgres/ and
+> param!/sql_compat helpers and update BOTH database/postgres/migrations/0001_v1_baseline.sql,
+> a registered patch in database/postgres/patches/manifest.tsv, and the desktop mirror}.
 > DO NOT: {out-of-scope things, e.g. "refactor surrounding code, touch CI config"}.
 > ACCEPTANCE CRITERIA: (1) {behavioral check, e.g. "POST /x returns 201 and row
 > appears"}; (2) `cargo check --all-features` exits 0 [backend] and/or
@@ -64,7 +65,7 @@ contains a trailing space after "SSD". Always double-quote paths in shell comman
 > confirmed, say "unconfirmed" — do not fill gaps from memory.
 > ACCEPTANCE CRITERIA: (1) direct answer in first 3 lines; (2) every claim tagged
 > verified/inferred with source; (3) long findings written to
-> ".claude/reports/{topic}-{YYYY-MM-DD}.md", not pasted.
+> "docs/working-notes/reports/{topic}-{YYYY-MM-DD}.md" (or session scratchpad), not pasted.
 > REPORT FORMAT: answer, 3–5 key facts with tags, path to the report file. Max 15 lines.
 
 ## 5. REVIEW (fresh-context general-purpose, sonnet; opus for auth/money/schema)

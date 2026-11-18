@@ -16,6 +16,7 @@ vi.mock('../api', () => ({
 }));
 
 import PortalNotificationPreferences from './PortalNotificationPreferences';
+import { MARKETING_CONSENT_VERSION } from '../../legal/content';
 
 const initialPreferences = {
   subscriptions: [
@@ -74,6 +75,7 @@ describe('PortalNotificationPreferences', () => {
     await waitFor(() =>
       expect(mocks.updatePreferences).toHaveBeenCalledWith({
         subscriptions: [{ topic: 'promotion', subscribed: true }],
+        policy_version: MARKETING_CONSENT_VERSION,
       }, 'guest-token')
     );
     await waitFor(() => expect((promotionToggle as HTMLInputElement).checked).toBe(true));

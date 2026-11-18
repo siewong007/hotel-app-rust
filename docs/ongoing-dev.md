@@ -5,44 +5,39 @@ done** rather than striking them through. Shipped behavior belongs in the
 owning document (see [`README.md`](README.md)), and active plans live in
 [`working-notes/`](working-notes/) until they merge.
 
-Last pruned and re-verified against the code on 2026-10-05, updated
-2026-10-06 when patches 0015/0016 and the seed first-run fix landed. That pass
-retired every plan and report: the two September plans (seed system,
-four-locale legal corpus and landing page), the gRPC phase records, the
-19beta3 cutover runbook, and all of `.claude/reports/`. It also carried the
-still-open findings from the July 2026 audits into this file. Earlier prune
-notes are in `git log -- docs/ongoing-dev.md`.
+Last pruned and re-verified against the code on 2026-11-18. Active plans live
+in [`working-notes/`](working-notes/) until they merge; earlier prune notes are
+in `git log -- docs/ongoing-dev.md`.
 
 ## P0 — broken or security-relevant
 
 - **PostgreSQL 19 track (H7, owner decision 2026-08-22: stay on the beta
   track).** Production, staging, CI and compose run `postgres:19beta3`.
-  - **Schema blockers resolved 2026-10-06.** 19 Beta 4 (2026-09-24) reverted
-    SQL/PGQ and `ALTER TABLE … SPLIT/MERGE PARTITION`, and the RC (planned
-    early October 2026) and GA (possibly October 2026) follow. Two patches
-    remove both dependencies: 0015 drops the `hotel_graph` property graph, and
-    0016 rebuilds late audit partitions without `SPLIT PARTITION` (0021, 2026-10-12,
-    now moves only the late month's rows instead of rebuilding the default).
-  - **Before the dump:** both patches must be applied **while a database is
-    still on 19beta3**. Done for production and staging: the 2026-10-06 deploys
-    (runs 37440989198 and 37440989404) found 1.15 already recorded and applied
-    1.16. A beta3 dump that still holds the graph fails to restore on beta4 or
-    later. A pre-0015 backup restores there only with the
-    graph's TOC entry filtered out: write `pg_restore -l` through
-    `grep -v 'PROPERTY GRAPH'` to a list file, then `pg_restore -L <list>`.
-  - **Then:** the dump-and-restore in
+  - **Schema blockers resolved 2026-10-06 / 2026-10-12.** 19 Beta 4 (2026-09-24)
+    reverted SQL/PGQ and `ALTER TABLE … SPLIT/MERGE PARTITION` ahead of the PG19
+    RC/GA releases. Patches 0015 (drops `hotel_graph`), 0016 + 0021 (moves late
+    audit-log partition rows without `SPLIT PARTITION`), and 0022 (partition
+    append-only guards) remove both dependencies.
+  - **Before the dump:** patches 0015/0016 must be applied **while a database is
+    still on 19beta3**. Done for production and staging on 2026-10-06 (runs
+    37440989198 and 37440989404). A beta3 dump that still holds the graph fails
+    to restore on beta4 or later; filter `PROPERTY GRAPH` out of `pg_restore -l`
+    if restoring a pre-0015 backup.
+  - **Then:** execute the dump-and-restore onto PostgreSQL 19 GA per
     [`guides/postgres-engine-upgrade.md`](guides/postgres-engine-upgrade.md),
-    rehearsed on staging first. The desktop bundle (`19beta2`, see P2) moves
-    in the same push, and its pgdata version gate refuses mismatched data
+    rehearsed on staging first. The desktop bundle (`19beta2`, see P2) moves in
+    the same push, and its pgdata version gate refuses mismatched data
     directories.
 - eKYC PII follow-up (from the 2026-08-22 history rewrite): production server
-  copies of `uploads/ekyc/*` still need separate handling. Git history is
-  clean, but deployed artifacts were not part of that rewrite.
+  copies of `uploads/ekyc/*` still need separate handling, and automated eKYC
+  image retention/erasure tooling (currently manual — see
+  [`security/data-retention-policy-draft.md`](security/data-retention-policy-draft.md))
+  awaits retention-period sign-off.
 - Security-eval items still open:
-  - **M10 least-privilege DB role rollout.** Release scripts now provision the
-    restricted runtime role after patch 0017 and use separate runtime credentials.
-    Staging and production rollout still need verification; no live deployment
-    was performed by the repository reliability work.
+  - **M10 least-privilege DB role rollout.** Release scripts provision the
+    restricted `hotel_app` runtime role (`deploy/db-least-privilege.sql` +
+    patches 0017 and 0024) and use separate runtime credentials; verify live
+    runtime `current_user = 'hotel_app'` on staging and production after deploy.
   - **L14 desktop signing certificates.**
 
 ## P1 — decided, not yet executed

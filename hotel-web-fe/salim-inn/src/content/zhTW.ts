@@ -319,7 +319,9 @@ export const zhTW: Copy = {
     rights: `© ${new Date().getFullYear()} Salim Inn, Sibu`,
     linksLabel: '網站資訊',
     aboutUs: '關於我們',
+    bookingTerms: '預訂條款',
     privacyPolicy: '隱私權政策',
+    paymentTerms: '付款條款',
     cookieUsage: 'Cookie 使用說明',
   },
   mobileCta: {

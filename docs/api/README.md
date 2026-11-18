@@ -11,7 +11,7 @@ cd hotel-app-be
 HOTEL_APP_UPDATE_OPENAPI=1 cargo test --all-features --test openapi_drift
 ```
 
-The OpenAPI document is a method+path index (443 operations across 367
+The OpenAPI document is a method+path index (475 operations across 399
 paths). This page documents the cross-cutting contract every endpoint shares;
 for per-endpoint request/response shapes read the handler and model files —
 `src/modules/<domain>/handlers.rs` and `src/modules/<domain>/models.rs` are
@@ -35,7 +35,7 @@ the source of truth.
 | Refresh | HttpOnly cookie on the refresh endpoint; tokens are revocable DB rows |
 | Guest portal (`/api/guest-portal/**`) | Guest session cookie/bearer from `/api/guest-portal/auth/*`; booking access tokens (anonymous-booking credential, SHA-256 at rest) and 48-hour pre-check-in tokens |
 | Webhooks (`/api/webhooks/paypal`) | **No bearer** — PayPal signature verification + IP rate limit |
-| Public endpoints | `/api/booking/{offers,room-types,quote,reservations}` (anonymous booking, IP rate-limited), `/api/promotions`, `/api/promotions/{slug}`, auth/guest-portal public routes, `/health` |
+| Public endpoints | `/api/booking/{offers,room-types,quote,reservations,groups*}` (anonymous single/group booking, IP rate-limited, PDPA consent-gated), `/api/promotions`, `/api/promotions/{slug}`, auth/guest-portal public routes, `/health` |
 
 Authorization: after auth, route wrappers call
 `check_permission("<resource>:<action>")` — e.g. `bookings:read`,
@@ -82,29 +82,43 @@ field in the body; the server stores the key + a SHA-256 fingerprint of the
 material request. Exact replay returns the original payment; same key with
 different fields → `409`.
 
+## PDPA consent contract
+
+Entry points that collect guest personal data, commit payment, or process
+biometric identity images require `consents: Vec<ConsentAcceptance>` (`{document,
+version, granted, locale}`) verified server-side by `modules/consent`:
+- Account registration & online single/group booking: `terms_of_service` +
+  `privacy_notice`
+- Online payment (PayPal / bank-transfer claim): `payment_terms`
+- Online eKYC submission: `ekyc_biometric` (explicit consent under PDPA s.40)
+
+Submissions missing a required document, carrying `granted: false`, or pinning a
+version older than `ConsentDocument::current_version()` (`2026-11-18`) fail with
+`400 BadRequest` before any write occurs.
+
 ## Endpoint domains
 
-Grouped by path prefix. Counts are operations in `openapi.json`, 444 in total, recounted
-2026-10-05 by iterating `paths[*]` methods; each operation is counted under the first
-matching row:
+Grouped by path prefix. Counts are operations in `openapi.json`, 475 in total across
+399 paths, recounted 2026-11-18 by iterating `paths[*]` methods; each operation is
+counted under the first matching row:
 
 | Prefix | Ops | Domain |
 |---|---|---|
-| `/api/admin/*` | 66 | Back-office: communications, loyalty, promotions, payments, segments, vouchers, online-inventory |
-| `/api/guest-portal/*` | 51 | Guest self-service: auth, bookings, pre-check-in, eKYC, payments, vouchers, support, preferences |
+| `/api/admin/*` | 67 | Back-office: communications, loyalty, promotions, payments, segments, vouchers, online-inventory |
+| `/api/guest-portal/*` | 62 | Guest self-service: auth, single/group bookings, pre-check-in, eKYC, payments, vouchers, support, preferences |
 | `/api/guests*` | 31 | Guest records + guest-relations interactions/preferences/reviews |
-| `/api/bookings*`, `/api/booking*` | 45 | Booking lifecycle + channel attribution |
-| `/api/rooms*`, `/api/room-types`, `/api/room-rates` | 35 | Inventory and pricing |
-| `/api/auth/*` | 20 | Login/refresh/logout, password, passkey, 2FA, Google |
+| `/api/bookings*`, `/api/booking/*` | 43 | Single & group booking lifecycle + public anonymous booking |
+| `/api/rooms*`, `/api/room-types*`, `/api/room-rates*`, `/api/room-type-prices*` | 39 | Inventory and pricing |
+| `/api/auth/*` | 23 | Login/refresh/logout, password, passkey, 2FA, Google |
 | `/api/users*` | 17 | Staff user management |
 | `/api/ekyc*` | 16 | eKYC submissions + review queue |
 | `/api/rbac/*` | 15 | Role/permission management |
-| `/api/ledgers*`, `/api/payments*`, `/api/invoices*` | 29 | Money |
-| `/api/profile/*` | 14 | Self-service profile/settings |
+| `/api/ledgers*`, `/api/payments*`, `/api/invoices*` | 31 | Money, invoices, settlement locks |
+| `/api/profile*` | 14 | Self-service profile/settings |
 | `/api/teams*` | 8 | Team management |
 | `/api/data-transfer/*` | 9 | `hotel-backup` JSON export + staged import pipeline — see below |
 | `/api/night-audit*`, `/api/audit-logs*`, `/api/analytics*`, `/api/insights*`, `/api/reports*` | 21 | Ops intelligence |
-| `/api/{housekeeping,maintenance,support,communications,settings,booking-channels,companies,search,rate-plans,market-codes,rate-codes,rate-management,complimentary,revenue,promotions,loyalty,guest-relations,system,updates,channel-*}*` | 64 | Assorted domains |
+| `/api/{housekeeping,maintenance,support,communications,settings,booking-channels,companies,search,rate-plans,market-codes,rate-codes,rate-management,complimentary,revenue,promotions,loyalty,guest-relations,system,updates,channel-*}*` | 76 | Assorted domains |
 | `/api/webhooks/paypal` | 1 | PayPal signature-verified events |
 | `/health`, `/ws/status` | 2 | Infrastructure probes (root level) |
 

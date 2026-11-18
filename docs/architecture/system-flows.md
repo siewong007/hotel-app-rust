@@ -94,8 +94,8 @@ move a booking through the edit path:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending : staff-created booking<br/>(room reserved)
-    [*] --> pending_payment : online booking<br/>(anonymous or portal)
+    [*] --> pending : staff-created booking<br/>(room held on arrival day)
+    [*] --> pending_payment : online single/group booking<br/>(anonymous or portal)
     pending --> pending_confirmation : payment submitted,<br/>awaiting staff confirmation
     pending_payment --> pending_confirmation
     pending --> confirmed : staff confirms
@@ -120,7 +120,14 @@ stateDiagram-v2
 - `pending`, `pending_payment`, `pending_confirmation`, `confirmed`,
   `checked_in`, and `auto_checked_in` are the **overlap-blocking** statuses —
   the `bookings_no_room_date_overlap` exclusion constraint covers exactly
-  these, so two active bookings can never share a room's date range.
+  these, so two active bookings can never share a room's date range. Physical
+  `rooms.status = 'reserved'` holds apply only on the booking's arrival day
+  (`reconcile_room_holds`, patch 0018) so future bookings do not block current
+  walk-ins.
+- Channel-attributed online check-ins post only the channel-settled room
+  portion automatically (`settlement_payment_methods`, patch 0023), holding
+  back desk-collected charges (`tourism_tax_amount`, `extra_bed_charge`, and
+  desk room-upgrade differences) for reception settlement.
 - `voided` bookings reverse their payment/loyalty effects; reactivation goes
   back through `confirmed` and re-reserves a room after a fresh availability
   check.
@@ -131,12 +138,14 @@ stateDiagram-v2
 
 ## Anonymous online booking
 
-Guests book without an account through `modules/guest_booking` — public
-`GET /api/booking/offers`, `GET /api/booking/room-types`,
-`POST /api/booking/quote`, and `POST /api/booking/reservations` are
-unauthenticated by design and rate-limited by origin IP. Public pricing is
-list-price only; vouchers, credits, and loyalty stay behind the authenticated
-`/api/guest-portal/me/*` variants.
+Guests book single or multi-room (`booking_groups`) stays without an account
+through `modules/guest_booking` — public `GET /api/booking/offers`,
+`GET /api/booking/room-types`, `POST /api/booking/quote`,
+`POST /api/booking/reservations`, and `/api/booking/groups*` are
+unauthenticated by design, PDPA consent-gated (`modules/consent`), and
+rate-limited by origin IP. Public pricing is list-price only; vouchers,
+credits, and loyalty stay behind the authenticated `/api/guest-portal/me/*`
+variants.
 
 ```mermaid
 sequenceDiagram
@@ -144,16 +153,16 @@ sequenceDiagram
     participant API as guest_booking service
     participant DB as PostgreSQL
 
-    Guest->>API: POST /api/booking/reservations
-    API->>API: generate access token (256-bit)
+    Guest->>API: POST /api/booking/reservations (or /groups)
+    API->>API: validate PDPA consents + generate access token (256-bit)
     API->>DB: BEGIN
-    API->>DB: recheck online availability + allocate room<br/>(FOR UPDATE SKIP LOCKED)
-    API->>DB: insert anonymous guest + booking (pending_payment)
+    API->>DB: recheck online availability + allocate room(s)<br/>(FOR UPDATE SKIP LOCKED)
+    API->>DB: insert anonymous guest + booking(s) + consent_records (pending_payment)
     API->>DB: persist SHA-256 hash of access token
-    API->>DB: mark room reserved + history (source: anonymous)
+    API->>DB: reconcile arrival-day room hold + history (source: anonymous)
     API->>DB: COMMIT — bookings_no_room_date_overlap guards the range
     API-->>Guest: booking_number + raw access token (shown once)
-    Guest->>API: /api/guest-portal/me/* (bearer token)
+    Guest->>API: /api/guest-portal/me/* (bearer / X-Booking-Access-Token)
     API->>DB: SHA-256(token) lookup; expiry vs stay dates
 ```
 

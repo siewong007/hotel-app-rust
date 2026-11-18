@@ -24,6 +24,7 @@ export const RATING = { score: 8.4, outOf: 10, count: 190, source: 'Wego', month
 // Facts
 export const SITE = {
   name: 'Salim Inn',
+  businessNumber: 'SA2012724',
   address: {
     line1: 'No. 21 & 22, Lorong Salim 17',
     line2: 'Jalan Salim, Farley Commercial Centre',

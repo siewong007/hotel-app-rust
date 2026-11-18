@@ -3,10 +3,10 @@
 This runbook moves the hotel database to a PostgreSQL build that cannot read
 the existing data directory: one beta to the next, beta to GA, or a major
 version. It works by dump and restore into a fresh volume. **Next planned use:
-the PostgreSQL 19 GA move**, targeted for October 2026 (go-live checklist row
-5). Beta on-disk formats have no supported upgrade path to GA, so the GA move
-needs this procedure too. It first needs patches 0015 and 0016 applied on
-beta3 (see the prerequisite below).
+the PostgreSQL 19 GA move** (go-live checklist row 5; production currently runs
+`19beta3`). Beta on-disk formats have no supported upgrade path to GA, so the
+GA move needs this procedure too. It first needs patches 0015 and 0016 applied
+on beta3 (see the prerequisite below).
 
 Written for the AIC host ([`vps-access.md`](vps-access.md)). Every command runs
 as `root` on the host, where `docker` takes no `sudo`. Rehearse on staging
@@ -91,7 +91,7 @@ directory aside so the new cluster comes up empty. **Do not skip it.**
 | DB container | `saliminn-db` | `saliminn-staging-db` |
 | Volume | `saliminn_postgres_data` | `saliminn-staging_postgres_data` |
 | Compose file on host | `/opt/saliminn/docker-compose.prod.yml` | `/opt/saliminn-staging/docker-compose.prod.yml` |
-| Role / database | `hotel_admin` / `hotel_management` | `hotel_admin` / `hotel_management` |
+| Role / database | `hotel_admin` / `hotel_management` (owner/dump role; runtime app uses `hotel_app`) | `hotel_admin` / `hotel_management` |
 | Mount point | `/var/lib/postgresql` | `/var/lib/postgresql` |
 
 Set these once per shell, for the stack you are working on:

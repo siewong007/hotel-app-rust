@@ -4,8 +4,8 @@ Canonical en → zh → ms renderings for hotel-domain terms. Every entry is
 extracted from the committed bundles — this file documents what shipped, not
 what should have. Sources of truth:
 
-- `hotel-web-fe/src/i18n/resources/{en,zh,ms}/*.json` — 16 namespaces
-- `hotel-app-be/src/core/locales/{en,zh,ms}.json` — email catalog
+- `hotel-web-fe/src/i18n/resources/{en,ms,zh,zh-TW}/*.json` — 30 namespaces (`zh-TW` mirrors `zh` terminology in Traditional script)
+- `hotel-app-be/src/core/locales/{en,ms,zh,zh-TW}.json` — email catalog
 
 One canonical term per concept. Deviating needs a reason recorded here —
 either an accepted variant in §7 or an open item in §8. `Where` cites the

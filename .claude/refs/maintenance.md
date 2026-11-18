@@ -5,7 +5,7 @@ Who may change what, where lessons go, and when to clean up.
 ## Files agents may modify WITHOUT asking the user
 
 - `.claude/rules/lessons.md` — append-only during normal work (format below).
-- `.claude/reports/*` — subagent output; freely created, freely pruned.
+- `docs/working-notes/{plans,reports}/*` — active plans/reports (deleted on merge per `docs/working-notes/README.md`; `.claude/reports/` is retired).
 - `.claude/refs/*.md` — MUST be updated when the code they describe changes
   (stale refs are worse than none). Verify each line anchor with Grep before
   writing it.
@@ -53,8 +53,7 @@ add it — flag the conflict to the user and record which one won.
   promote proven rules into the relevant `.claude/rules/*.md` file (ask-first
   files need approval), delete superseded entries. Keep a dated one-line note of
   what was consolidated.
-- `.claude/reports/` > 20 files → delete reports older than 60 days unless
-  referenced by a rules/refs file.
+- `docs/working-notes/` — delete merged plans/reports once their conclusions reach an owner doc (`docs/working-notes/README.md`).
 - Memory: if `MEMORY.md` exceeds ~40 lines, run the
   `anthropic-skills:consolidate-memory` skill.
 - When a change touches code a `.claude/refs/*.md` documents → spot-check 3 of

@@ -95,8 +95,10 @@ not serialized by this lock. Job status remains process-local as described above
 
 ## Permissions and step-up authentication
 
-Every endpoint runs on a dedicated `data_transfer:*` permission set, seeded
-for the `admin`/`super_admin` roles by patch `0004_data_transfer_permissions`.
+Every endpoint runs on a dedicated `data_transfer:*` permission set, introduced
+by patch `0005_data_transfer_permissions` and reassigned to the
+`manager`/`super_admin` roles by patch `0031_manager_owns_user_management`
+(`admin` no longer holds `data_transfer:*`).
 Neither `settings:manage` nor `users.is_super_admin` opens this surface any
 more — access is an explicit grant, and `data_transfer:manage` implies every
 action of the resource through the usual `<resource>:manage` rule.
@@ -187,7 +189,7 @@ One JSON object, emitted in a fixed key order. Downloaded as
     "public.bookings": []
   },
   "integrity": {
-    "entities": 75,
+    "entities": 77,
     "rows": 49069,
     "entityRows": {"public.amenities": 12, "public.bookings": 8021},
     "completedAt": "2026-09-14T09:25:31.700000+00:00"
@@ -226,9 +228,9 @@ fails to parse at all.
 
 ## Entity coverage
 
-75 tables are transferable. The catalog lives in
-`services/data_transfer.rs::TABLE_INSERT_ORDER` (parents before children), with
-`repositories/data_transfer.rs::KNOWN_TABLES` as a deliberately identical mirror
+77 tables are transferable. The catalog lives in
+`modules/data_transfer/service.rs::TABLE_INSERT_ORDER` (parents before children), with
+`modules/data_transfer/repository.rs::KNOWN_TABLES` as a deliberately identical mirror
 that whitelist-checks every table name interpolated into SQL — a test fails if
 the two lists drift. Which entities a given database actually exports is
 introspected live from `pg_class`, so the manifest always describes the real
@@ -237,7 +239,7 @@ schema.
 Each transferable table is additionally classified in `SENSITIVE_TABLES`
 (same file): the sensitive set carries guest identity/contact data, bookings,
 payments, ledgers, loyalty movement, operational history, support threads,
-consent records, and staff-linked records — 56 tables today. The remainder
+consent records, and staff-linked records — 52 tables today. The remainder
 (amenities, rate plans, room types, promotions definitions, …) is the
 non-sensitive set a `standard` export emits. The classification is explicit,
 not derived: the registry test fails when a new transferable table lands
@@ -245,7 +247,9 @@ without a sensitivity decision.
 
 Grouped by domain:
 
-- **Configuration & reference:** `amenities`, `booking_channels`, `companies`,
+- **Configuration & reference:** `amenities`, `booking_channels`,
+  `channel_pricing_rules`, `channel_commission_rules`,
+  `channel_room_type_mappings`, `channel_rate_plan_mappings`, `companies`,
   `corporate_accounts`, `corporate_account_contacts`, `email_templates`,
   `rate_plans`, `reward_catalog`, `services`, `system_settings`
 - **Guests:** `guests`, `guest_documents`, `guest_notes`, `guest_preferences`,
@@ -264,28 +268,28 @@ Grouped by domain:
 - **Inventory:** `room_types`, `room_type_amenities`, `rooms`, `room_events`,
   `room_rates`, `room_status_transitions`, `room_status_change_log`,
   `room_history`, `room_changes`, `online_inventory_allocations`
-- **Bookings & money:** `bookings`, `booking_guests`, `booking_history`,
-  `booking_modifications`, `booking_services`, `payments`,
+- **Bookings & money:** `booking_groups`, `bookings`, `booking_guests`,
+  `booking_history`, `booking_modifications`, `booking_services`, `payments`,
   `payment_receipt_requests`, `invoices`, `customer_ledgers`,
   `customer_ledger_payments`
 - **Operations:** `housekeeping_tasks`, `maintenance_tickets`,
   `night_audit_runs`, `night_audit_details`, `night_audit_posted_nights`,
   `self_checkin_events`
-- **Support & teams:** `support_conversations`, `support_messages`,
-  `support_events`, `teams`, `team_members`, `team_roles`
+- **Support:** `support_conversations`, `support_messages`, `support_events`
 
-30 tables are **protected**. They are excluded from `standard`, `full` and
-`backup` documents and emitted in those files' `manifest.exclusions` with one
-of five reason codes. A `system` export carries them instead, and its manifest
-lists only what it genuinely left out — the exclusions list always describes
-the file you are holding, not a fixed set.
+32 tables are **protected** (`PROTECTED_TABLE_ORDER`, plus
+`public.audit_logs_default` in `EXCLUDED_TABLES`). They are excluded from
+`standard`, `full` and `backup` documents and emitted in those files'
+`manifest.exclusions` with one of five reason codes. A `system` export carries
+them instead, and its manifest lists only what it genuinely left out — the
+exclusions list always describes the file you are holding, not a fixed set.
 
 The reason codes still carry: they are why these tables are gated behind super
 admin, step-up and encryption rather than available at `full`.
 
 | Reason | Tables | Why |
 |---|---|---|
-| `credentials_and_auth_state` | `public.users`, `public.roles`, `public.permissions`, `public.role_permissions`, `public.user_roles`, `public.user_permissions`, `public.route_access_policies` | Password hashes, TOTP seeds, RBAC grants — exporting hands every export holder the credential store; importing could plant a forged `is_super_admin` account |
+| `credentials_and_auth_state` | `public.users`, `public.roles`, `public.permissions`, `public.role_permissions`, `public.user_roles`, `public.user_permissions`, `public.teams`, `public.team_members`, `public.team_roles`, `public.route_access_policies` | Password hashes, TOTP seeds, RBAC and team role grants — exporting hands every export holder the credential store; importing could plant a forged `is_super_admin` or privileged team grant |
 | `session_or_token_material` | `public.refresh_tokens`, `public.user_sessions`, `public.passkeys`, `public.passkey_challenges`, `public.two_factor_challenges`, `public.guest_portal_sessions`, `public.payment_retry_capabilities` | Live sessions and token/challenge state |
 | `sensitive_ekyc_pii` | `public.ekyc_verifications`, `public.ekyc_decision_history`, `public.ekyc_access_events`, `public.ekyc_sensitive_reveals`, `public.ekyc_idempotency_keys`, `public.ekyc_notes`, `public.ekyc_reason_codes` | Identity documents and biometric evidence |
 | `ephemeral_queue_state` | `public.email_deliveries`, `public.support_action_idempotency_keys`, `public.support_guest_request_idempotency_keys` | Live send/request queues — re-importing would replay sends |
@@ -367,7 +371,7 @@ executes additionally require a fresh `X-Step-Up` token — see
   "unsupportedEntities": ["public.hack_the_planet"],
   "validationErrors": [],
   "relationshipProblems": [
-    {"entity": "public.team_members", "rows": 4,
+    {"entity": "public.user_guests", "rows": 4,
      "reason": "user_id references public.users rows not present in this database"}
   ],
   "warnings": ["the backup was exported from a different environment ('staging' vs this 'production')"],
@@ -475,7 +479,7 @@ excluded one is checked per row against the destination's existing keys.
   `actor_user_id`, `assigned_to_user_id`, …, `AUDIT_USER_FK_COLUMNS`) —
   **remap to the importing admin**, so attribution survives the missing account.
 - *Nullable non-audit columns* become `NULL`.
-- *Required non-audit columns* (e.g. `team_members.user_id`) — the row is
+- *Required non-audit columns* (e.g. `user_guests.user_id`) — the row is
   skipped, counted, and reported in `relationshipProblems` on both the preview
   and the finished job's report. The importer never fabricates a user.
 

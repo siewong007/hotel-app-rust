@@ -1,435 +1,443 @@
-import { HOTEL_ADDRESS_ONE_LINE, HOTEL_LEGAL_IDENTITY } from './hotelIdentity';
+import { HOTEL_LEGAL_IDENTITY, type HotelLegalIdentity } from './hotelIdentity';
 import type { LegalDocument } from './types';
 
 /**
- * PDPA s.7 "Notice and Choice" notice.
+ * PDPA s.7 "Notice and Choice" notice, updated for the Personal Data Protection
+ * (Amendment) Act 2024 (Act A1727 — fully in force across Phases 1–3 by 1 June
+ * 2025) and the 2025 Personal Data Protection Commissioner (JPDP) guidelines.
  *
- * Section 7(1) of the Personal Data Protection Act 2010 lists what a written
- * notice must tell a data subject, and every one of those items has a section
- * below:
- *   (a) that data is being processed + a description  -> `what-we-collect`
- *   (b) the purposes of collection                     -> `why-we-use-it`
- *   (c) any information available as to the source     -> `where-it-comes-from`
- *   (d) right of access and correction, and the contact
- *       details for inquiries and complaints           -> `your-rights`
- *   (e) the class of third parties to whom we disclose -> `who-we-share-with`
- *   (f) the choices available to limit processing      -> `your-choices`
- *   (g) whether supply is obligatory or voluntary, and
- *       the consequences of not supplying              -> `is-it-obligatory`
+ * Section 7(1) of the Personal Data Protection Act 2010 (Act 709) lists what a
+ * written notice must tell a data subject, and every item has a dedicated
+ * section below:
+ *   (a) that data is being processed + description      -> `what-we-collect`
+ *   (b) the purposes of collection                      -> `why-we-use-it`
+ *   (c) any information available as to the source      -> `where-it-comes-from`
+ *   (d) right of access/correction + DPO/contact (s.12A)-> `controller`, `your-rights`
+ *   (e) class of third parties + processor duty (s.9)   -> `who-we-share-with`
+ *   (f) choices to limit processing (ss. 42, 43)        -> `your-choices`
+ *   (g) obligatory vs voluntary supply & consequences   -> `is-it-obligatory`
  *
- * Retention, security and the 2024 amendment duties (breach notification, data
- * portability, DPO contact) have their own sections. Section 7(2) requires the
- * notice in both national language and English, which `LocalizedText` enforces.
- *
- * zh/zh-TW copy: DRAFT — pending native/legal review.
+ * Additional statutory disclosures cover biometric sensitive data (ss. 4 & 40),
+ * common-area 24-hour CCTV surveillance (JPDP CCTV Guidelines), minors under 18
+ * (Personal Data Protection Regulations 2013 r.4), amended cross-border
+ * transfers (s.129), data portability (s.43A), retention (s.10), and mandatory
+ * 72-hour data breach notification (s.12B). Section 7(2) requires the notice in
+ * both Bahasa Malaysia and English, enforced at compile time by `LocalizedText`.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-09-09';
+export const PRIVACY_NOTICE_VERSION = '2026-11-18';
 
-export const privacyNotice: LegalDocument = {
-  id: 'privacy_notice',
-  version: PRIVACY_NOTICE_VERSION,
-  effectiveDate: '2026-09-09',
-  title: {
-    en: 'Privacy Notice (Personal Data Protection Act 2010)',
-    ms: 'Notis Privasi (Akta Perlindungan Data Peribadi 2010)',
-    zh: '隐私通知（2010年个人资料保护法令）',
-    'zh-TW': '隱私通知（2010年個人資料保護法令）',
-  },
-  summary: {
-    en: `${HOTEL_LEGAL_IDENTITY.tradingName} collects personal data so we can take your booking, host your stay, take payment, and meet our legal obligations as a hotel operator in Malaysia. This notice explains what we collect and the control you have over it. It is given to you under section 7 of the Personal Data Protection Act 2010.`,
-    ms: `${HOTEL_LEGAL_IDENTITY.tradingName} mengumpul data peribadi supaya kami boleh menerima tempahan anda, menguruskan penginapan anda, menerima bayaran, dan memenuhi kewajipan undang-undang kami sebagai pengendali hotel di Malaysia. Notis ini menerangkan apa yang kami kumpul dan kawalan yang anda miliki ke atasnya. Notis ini diberikan kepada anda di bawah seksyen 7 Akta Perlindungan Data Peribadi 2010.`,
-    zh: `${HOTEL_LEGAL_IDENTITY.tradingName}收集个人资料，以便承接您的预订、安排您的住宿、收取款项，并履行我们作为马来西亚酒店经营者的法定义务。本通知说明我们收集的内容以及您对其享有的控制权。本通知依据《2010年个人资料保护法令》第7条向您发出。`,
-    'zh-TW': `${HOTEL_LEGAL_IDENTITY.tradingName}收集個人資料，以便承接您的預訂、安排您的住宿、收取款項，並履行我們作為馬來西亞酒店經營者的法定義務。本通知說明我們收集的內容以及您對其享有的控制權。本通知依據《2010年個人資料保護法令》第7條向您發出。`,
-  },
-  sections: [
-    {
-      id: 'controller',
-      heading: {
-        en: '1. Who is responsible for your data',
-        ms: '1. Pihak yang bertanggungjawab ke atas data anda',
-        zh: '1. 您的个人资料由谁负责',
-        'zh-TW': '1. 您的個人資料由誰負責',
-      },
-      emphasis: 'info',
-      body: [
-        {
-          en: `The data controller is ${HOTEL_LEGAL_IDENTITY.registeredName}, of ${HOTEL_ADDRESS_ONE_LINE}. Questions about this notice, and requests about your data, go to ${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail} or ${HOTEL_LEGAL_IDENTITY.phone}.`,
-          ms: `Pengawal data ialah ${HOTEL_LEGAL_IDENTITY.registeredName}, beralamat di ${HOTEL_ADDRESS_ONE_LINE}. Pertanyaan mengenai notis ini, dan permohonan berkenaan data anda, boleh dihantar ke ${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail} atau ${HOTEL_LEGAL_IDENTITY.phone}.`,
-          zh: `个人资料处理者为${HOTEL_LEGAL_IDENTITY.registeredName}，地址：${HOTEL_ADDRESS_ONE_LINE}。有关本通知的查询及涉及您资料的请求，请联系${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail}或${HOTEL_LEGAL_IDENTITY.phone}。`,
-          'zh-TW': `個人資料處理者為${HOTEL_LEGAL_IDENTITY.registeredName}，地址：${HOTEL_ADDRESS_ONE_LINE}。有關本通知的查詢及涉及您資料的請求，請聯絡${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail}或${HOTEL_LEGAL_IDENTITY.phone}。`,
-        },
-      ],
+export const buildPrivacyNotice = (
+  identity: HotelLegalIdentity = HOTEL_LEGAL_IDENTITY
+): LegalDocument => {
+  const addressOneLine = identity.addressLines.join(', ');
+  return {
+    id: 'privacy_notice',
+    version: PRIVACY_NOTICE_VERSION,
+    effectiveDate: '2026-11-18',
+    title: {
+      en: 'Privacy Notice (Personal Data Protection Act 2010)',
+      ms: 'Notis Privasi (Akta Perlindungan Data Peribadi 2010)',
+      zh: '隐私通知（2010年个人资料保护法令）',
+      'zh-TW': '隱私通知（2010年個人資料保護法令）',
     },
-    {
-      id: 'what-we-collect',
-      heading: {
-        en: '2. What personal data we process',
-        ms: '2. Data peribadi yang kami proses',
-        zh: '2. 我们处理的个人资料',
-        'zh-TW': '2. 我們處理的個人資料',
-      },
-      body: [
-        {
-          en: 'We process the following personal data about you. Not all of it applies to every guest — what we hold depends on how you book and what you use.',
-          ms: 'Kami memproses data peribadi berikut mengenai anda. Tidak semuanya terpakai kepada setiap tetamu — apa yang kami simpan bergantung pada cara anda menempah dan perkhidmatan yang anda gunakan.',
-          zh: '我们处理下列与您相关的个人资料。并非所有项目均适用于每位宾客——我们持有的内容取决于您的预订方式及使用的服务。',
-          'zh-TW': '我們處理下列與您相關的個人資料。並非所有項目均適用於每位賓客——我們持有的內容取決於您的預訂方式及使用的服務。',
-        },
-      ],
-      bullets: [
-        {
-          en: 'Identity and contact details: your name, email address, telephone number, postal address, nationality, date of birth, and your declared guest type (local or foreign) which determines Tourism Tax.',
-          ms: 'Butiran identiti dan hubungan: nama, alamat e-mel, nombor telefon, alamat surat-menyurat, kewarganegaraan, tarikh lahir, dan jenis tetamu yang anda isytiharkan (tempatan atau asing) yang menentukan Cukai Pelancongan.',
-          zh: '身份及联络资料：姓名、电子邮箱、电话号码、通讯地址、国籍、出生日期，以及您申报的旅客类型（本地或外国），该类型决定旅游税的适用。',
-          'zh-TW': '身分及聯絡資料：姓名、電子郵箱、電話號碼、通訊地址、國籍、出生日期，以及您申報的旅客類型（本地或外國），該類型決定旅遊稅的適用。',
-        },
-        {
-          en: 'Booking and stay records: your reservation dates, room and rate, special requests, cleaning preference, arrival and departure, and the history of changes to your booking.',
-          ms: 'Rekod tempahan dan penginapan: tarikh tempahan, bilik dan kadar, permintaan khas, pilihan pembersihan, ketibaan dan pelepasan, serta sejarah perubahan pada tempahan anda.',
-          zh: '预订及住宿记录：预订日期、客房与房价、特殊要求、清洁偏好、抵达与退房时间，以及您预订的变更历史。',
-          'zh-TW': '預訂及住宿記錄：預訂日期、客房與房價、特殊要求、清潔偏好、抵達與退房時間，以及您預訂的變更歷史。',
-        },
-        {
-          en: 'Payment records: the amount, currency, method and status of your payment, the reference of a bank transfer, and any payment receipt you upload. We do not store your full card number — card and PayPal payments are processed by PayPal on their own systems.',
-          ms: 'Rekod pembayaran: jumlah, mata wang, kaedah dan status pembayaran anda, rujukan pindahan bank, dan sebarang resit pembayaran yang anda muat naik. Kami tidak menyimpan nombor kad penuh anda — pembayaran kad dan PayPal diproses oleh PayPal pada sistem mereka sendiri.',
-          zh: '付款记录：付款金额、币种、方式与状态、银行转账的参考编号，以及您上传的任何付款凭证。我们不存储您的完整卡号——银行卡及PayPal付款均由PayPal在其自有系统中处理。',
-          'zh-TW': '付款記錄：付款金額、幣種、方式與狀態、銀行轉帳的參考編號，以及您上傳的任何付款憑證。我們不儲存您的完整卡號——銀行卡及PayPal付款均由PayPal在其自有系統中處理。',
-        },
-        {
-          en: 'Identification data, where you complete identity verification: your identity document type and number, its issuing country and expiry, images of that document, a photograph of your face taken for matching, and any proof of address you supply.',
-          ms: 'Data pengenalan, sekiranya anda melengkapkan pengesahan identiti: jenis dan nombor dokumen pengenalan anda, negara pengeluaran dan tarikh luput, imej dokumen tersebut, gambar wajah anda yang diambil untuk tujuan padanan, dan sebarang bukti alamat yang anda berikan.',
-          zh: '身份识别资料（在您完成身份验证的情况下）：身份证件类型与号码、签发国家及有效期、该证件的影像、为比对而拍摄的面部照片，以及您提供的任何住址证明。',
-          'zh-TW': '身分識別資料（在您完成身分驗證的情況下）：身分證件類型與號碼、簽發國家及有效期、該證件的影像、為比對而拍攝的面部照片，以及您提供的任何住址證明。',
-        },
-        {
-          en: 'Account and technical data, if you create an account: your username, password (stored only as a cryptographic hash, never in readable form), login times, and the IP address and browser you used when you gave consent or signed in.',
-          ms: 'Data akaun dan teknikal, sekiranya anda membuka akaun: nama pengguna, kata laluan (disimpan hanya sebagai cincangan kriptografi, tidak pernah dalam bentuk yang boleh dibaca), waktu log masuk, serta alamat IP dan pelayar yang anda gunakan semasa memberi persetujuan atau log masuk.',
-          zh: '账户及技术资料（如您注册账户）：用户名、密码（仅以加密散列形式存储，绝不以可读形式保存）、登录时间，以及您同意条款或登录时所用的IP地址与浏览器。',
-          'zh-TW': '帳戶及技術資料（如您註冊帳戶）：用戶名、密碼（僅以加密散列形式儲存，絕不以可讀形式保存）、登入時間，以及您同意條款或登入時所用的IP位址與瀏覽器。',
-        },
-        {
-          en: 'Correspondence: messages you send us through the guest portal, support chat, or email.',
-          ms: 'Surat-menyurat: mesej yang anda hantar kepada kami melalui portal tetamu, sembang sokongan, atau e-mel.',
-          zh: '往来通信：您通过宾客门户、客服对话或电子邮件发送给我们的信息。',
-          'zh-TW': '往來通信：您透過賓客門戶、客服對話或電子郵件發送給我們的訊息。',
-        },
-      ],
+    summary: {
+      en: `${identity.tradingName} processes personal data so we can take your booking, host your stay, process payments, maintain guest and premises safety, and comply with Malaysian law. This statutory notice is issued under section 7 of the Personal Data Protection Act 2010 (Act 709), as amended by the Personal Data Protection (Amendment) Act 2024 (Act A1727), and explains what we collect, why we process it, and the rights you hold over it.`,
+      ms: `${identity.tradingName} memproses data peribadi supaya kami boleh menerima tempahan anda, menguruskan penginapan anda, memproses pembayaran, menjaga keselamatan tetamu serta premis, dan mematuhi undang-undang Malaysia. Notis berkanun ini dikeluarkan di bawah seksyen 7 Akta Perlindungan Data Peribadi 2010 (Akta 709), sebagaimana dipinda oleh Akta Perlindungan Data Peribadi (Pindaan) 2024 (Akta A1727), dan menerangkan apa yang kami kumpul, tujuan pemprosesannya, serta hak yang anda miliki ke atasnya.`,
+      zh: `${identity.tradingName}处理个人资料，以便承接您的预订、安排您的住宿、处理款项、保障宾客与场所安全并遵守马来西亚法律。本法定通知依据经《2024年个人资料保护（修正）法令》（第A1727号法令）修订的《2010年个人资料保护法令》（第709号法令）第7条发出，说明我们收集的内容、处理目的以及您享有的法定权利。`,
+      'zh-TW': `${identity.tradingName}處理個人資料，以便承接您的預訂、安排您的住宿、處理款項、保障賓客與場所安全並遵守馬來西亞法律。本法定通知依據經《2024年個人資料保護（修正）法令》（第A1727號法令）修訂的《2010年個人資料保護法令》（第709號法令）第7條發出，說明我們收集的內容、處理目的以及您享有的法定權利。`,
     },
-    {
-      id: 'sensitive-data',
-      heading: {
-        en: '3. Sensitive personal data',
-        ms: '3. Data peribadi sensitif',
-        zh: '3. 敏感个人资料',
-        'zh-TW': '3. 敏感個人資料',
+    sections: [
+      {
+        id: 'controller',
+        heading: {
+          en: '1. Data controller and Data Protection Contact',
+          ms: '1. Pengawal data dan Pegawai / Hubungan Perlindungan Data',
+          zh: '1. 资料控制者与个人资料保护联络人',
+          'zh-TW': '1. 資料控制者與個人資料保護聯絡人',
+        },
+        emphasis: 'info',
+        body: [
+          {
+            en: `The data controller (pengawal data) is ${identity.registeredName} (business registration number ${identity.companyRegistrationNumber}), of ${addressOneLine}. In accordance with sections 7(1)(d) and 12A of the Personal Data Protection Act 2010, our Data Protection Contact for privacy enquiries, access, correction, portability or withdrawal requests, and complaints can be reached at ${identity.dataProtectionContactEmail} or by telephone at ${identity.phone} (${identity.receptionHours}).`,
+            ms: `Pengawal data ialah ${identity.registeredName} (nombor pendaftaran perniagaan ${identity.companyRegistrationNumber}), beralamat di ${addressOneLine}. Selaras dengan seksyen 7(1)(d) dan 12A Akta Perlindungan Data Peribadi 2010, Hubungan Perlindungan Data kami bagi pertanyaan privasi, permohonan akses, pembetulan, kemudahalihan atau penarikan balik persetujuan, serta aduan boleh dihubungi melalui ${identity.dataProtectionContactEmail} atau telefon di ${identity.phone} (${identity.receptionHours}).`,
+            zh: `资料控制者（pengawal data）为${identity.registeredName}（商业登记号码：${identity.companyRegistrationNumber}），地址：${addressOneLine}。依据《2010年个人资料保护法令》第7(1)(d)条及第12A条，如您有任何隐私查询、查阅、更正、可携传输、撤回同意请求或投诉，请联系我们的资料保护联络渠道：电子邮箱 ${identity.dataProtectionContactEmail} 或电话 ${identity.phone}（${identity.receptionHours}）。`,
+            'zh-TW': `資料控制者（pengawal data）為${identity.registeredName}（商業登記號碼：${identity.companyRegistrationNumber}），地址：${addressOneLine}。依據《2010年個人資料保護法令》第7(1)(d)條及第12A條，如您有任何隱私查詢、查閱、更正、可攜傳輸、撤回同意請求或投訴，請聯絡我們的資料保護聯絡渠道：電子郵箱 ${identity.dataProtectionContactEmail} 或電話 ${identity.phone}（${identity.receptionHours}）。`,
+          },
+        ],
       },
-      body: [
-        {
-          en: 'Where you complete identity verification, the facial image we ask for is biometric data. Biometric data is treated as sensitive personal data under the Personal Data Protection Act, and we process it only with your separate, explicit consent, which you may refuse. Identity verification is not required in order to book or to stay with us.',
-          ms: 'Sekiranya anda melengkapkan pengesahan identiti, imej wajah yang kami minta adalah data biometrik. Data biometrik dianggap sebagai data peribadi sensitif di bawah Akta Perlindungan Data Peribadi, dan kami memprosesnya hanya dengan persetujuan nyata anda yang berasingan, yang boleh anda tolak. Pengesahan identiti bukan syarat untuk menempah atau menginap bersama kami.',
-          zh: '在您完成身份验证的情况下，我们要求提供的面部影像属于生物识别资料。生物识别资料依《个人资料保护法令》被视为敏感个人资料，我们仅在取得您单独的明确同意后方予处理，您可以拒绝。预订或入住本酒店不以身份验证为条件。',
-          'zh-TW': '在您完成身分驗證的情況下，我們要求提供的面部影像屬於生物識別資料。生物識別資料依《個人資料保護法令》被視為敏感個人資料，我們僅在取得您單獨的明確同意後方予處理，您可以拒絕。預訂或入住本酒店不以身分驗證為條件。',
+      {
+        id: 'what-we-collect',
+        heading: {
+          en: '2. What personal data we process',
+          ms: '2. Data peribadi yang kami proses',
+          zh: '2. 我们处理的个人资料类别',
+          'zh-TW': '2. 我們處理的個人資料類別',
         },
-        {
-          en: 'We use it for one purpose only: to confirm that the person presenting the identity document is the person in it. We do not use it to profile you, and we do not share it for advertising.',
-          ms: 'Kami menggunakannya untuk satu tujuan sahaja: mengesahkan bahawa individu yang mengemukakan dokumen pengenalan adalah individu di dalam dokumen tersebut. Kami tidak menggunakannya untuk pemprofilan, dan kami tidak berkongsi ia untuk tujuan pengiklanan.',
-          zh: '我们仅将其用于一个目的：确认出示身份证件者即证件上的人。我们不会用其进行画像分析，也不会为广告宣传而共享。',
-          'zh-TW': '我們僅將其用於一個目的：確認出示身分證件者即證件上的人。我們不會用其進行畫像分析，也不會為廣告宣傳而共享。',
-        },
-      ],
-    },
-    {
-      id: 'where-it-comes-from',
-      heading: {
-        en: '4. Where the data comes from',
-        ms: '4. Sumber data',
-        zh: '4. 资料来源',
-        'zh-TW': '4. 資料來源',
+        body: [
+          {
+            en: 'What we hold depends on how you book, pay, and stay with us. Across our services we process the following categories of personal data:',
+            ms: 'Data yang kami simpan bergantung pada cara anda menempah, membayar dan menginap bersama kami. Merentasi perkhidmatan kami, kami memproses kategori data peribadi berikut:',
+            zh: '我们所持有的资料取决于您的预订、付款及入住方式。在各项服务中，我们可能处理下列类别的个人资料：',
+            'zh-TW': '我們所持有的資料取決於您的預訂、付款及入住方式。在各項服務中，我們可能處理下列類別的個人資料：',
+          },
+        ],
+        bullets: [
+          {
+            en: 'Identity, contact and tax particulars: full name, preferred name, email address, telephone number, residential or billing address, nationality, gender, date of birth, NRIC or passport details recorded at check-in, declared guest type (Malaysian citizen/PR or foreign tourist for Tourism Tax), and — where you request a validated LHDN e-Invoice — your Tax Identification Number (TIN) or business registration details.',
+            ms: 'Butiran identiti, hubungan dan cukai: nama penuh, nama pilihan, alamat e-mel, nombor telefon, alamat kediaman atau pengebilan, kewarganegaraan, jantina, tarikh lahir, butiran NRIC atau pasport yang direkodkan semasa daftar masuk, jenis tetamu yang diisytiharkan (warganegara/PR Malaysia atau pelancong asing bagi Cukai Pelancongan), dan — sekiranya anda memohon e-Invois LHDN yang disahkan — Nombor Pengenalan Cukai (TIN) atau butiran pendaftaran perniagaan anda.',
+            zh: '身份、联络及税务资料：姓名、称呼、电子邮箱、电话号码、居住或账单地址、国籍、性别、出生日期、入住登记时记录的身份证（NRIC）或护照信息、申报的旅客类型（用于核算旅游税的马来西亚公民/永久居民或外国旅客），以及在您要求开具LHDN验证电子发票时提供的税务识别号（TIN）或商业登记资料。',
+            'zh-TW': '身分、聯絡及稅務資料：姓名、稱呼、電子郵箱、電話號碼、居住或帳單地址、國籍、性別、出生日期、入住登記時記錄的身分證（NRIC）或護照資訊、申報的旅客類型（用於核算旅遊稅的馬來西亞公民/永久居民或外國旅客），以及在您要求開具LHDN驗證電子發票時提供的稅務識別號（TIN）或商業登記資料。',
+          },
+          {
+            en: 'Booking and stay records: reservation numbers, dates, room allocation and rate plan, occupancy, special requests, housekeeping preferences, check-in/check-out timestamps, corporate ledger association (where your stay is company-billed), and booking change history.',
+            ms: 'Rekod tempahan dan penginapan: nombor tempahan, tarikh, peruntukan bilik dan pelan kadar, bilangan penghuni, permintaan khas, pilihan pengemasan bilik, cap masa daftar masuk/keluar, kaitan lejar korporat (jika penginapan dibilkan kepada syarikat), serta sejarah perubahan tempahan.',
+            zh: '预订及住宿记录：预订编号、入住与退房日期、分配客房与房价方案、入住人数、特殊要求、客房清洁偏好、入住/退房时间戳、公司挂账关联信息（如由公司结账）以及预订变更记录。',
+            'zh-TW': '預訂及住宿記錄：預訂編號、入住與退房日期、分配客房與房價方案、入住人數、特殊要求、客房清潔偏好、入住/退房時間戳、公司掛帳關聯資訊（如由公司結帳）以及預訂變更記錄。',
+          },
+          {
+            en: 'Payment and billing records: amount, currency, payment method and status, PayPal or bank-transfer transaction references, uploaded transfer receipts, and issued invoices or credit notes. We never receive or store your full payment card number or CVV — card and PayPal payments are captured directly by PayPal.',
+            ms: 'Rekod pembayaran dan pengebilan: amaun, mata wang, kaedah dan status pembayaran, rujukan transaksi PayPal atau pindahan bank, resit pindahan yang dimuat naik, serta invois atau nota kredit yang dikeluarkan. Kami tidak pernah menerima atau menyimpan nombor penuh kad pembayaran atau kod CVV anda — pembayaran kad dan PayPal diproses terus oleh PayPal.',
+            zh: '付款及账单记录：金额、币种、付款方式与状态、PayPal或银行转账参考编号、上传的转账凭证，以及开具的发票或贷项通知单。我们从不接收或存储您的完整银行卡号或安全码（CVV）——银行卡及PayPal付款均由PayPal直接采集处理。',
+            'zh-TW': '付款及帳單記錄：金額、幣種、付款方式與狀態、PayPal或銀行轉帳參考編號、上傳的轉帳憑證，以及開具的發票或貸項通知單。我們從不接收或儲存您的完整銀行卡號或安全碼（CVV）——銀行卡及PayPal付款均由PayPal直接採集處理。',
+          },
+          {
+            en: 'Online identity verification (eKYC) data, if you choose to use it: identity document metadata and images, optional proof of address, and a live selfie photograph for visual identity matching.',
+            ms: 'Data pengesahan identiti dalam talian (eKYC), jika anda memilih untuk menggunakannya: metadata dan imej dokumen pengenalan, bukti alamat pilihan, serta gambar swafoto wajah bagi tujuan padanan identiti secara visual.',
+            zh: '在线身份验证（eKYC）资料（如您选择使用）：身份证件元数据及影像、可选的住址证明，以及用于人工视觉核对身份的自拍面部照片。',
+            'zh-TW': '線上身分驗證（eKYC）資料（如您選擇使用）：身分證件元數據及影像、可選的住址證明，以及用於人工視覺核對身分的自拍面部照片。',
+          },
+          {
+            en: 'Account, authentication and consent records: username, cryptographic password hash (never plaintext), optional TOTP two-factor or WebAuthn passkey public-key credentials, sign-in timestamps, and the date, version, locale, IP address, and browser user-agent recorded when you grant or withdraw consent.',
+            ms: 'Rekod akaun, pengesahan dan persetujuan: nama pengguna, cincangan kriptografi kata laluan (bukan teks biasa), kelayakan kunci awam pengesahan dua faktor TOTP atau kunci laluan WebAuthn pilihan, masa log masuk, serta tarikh, versi, bahasa, alamat IP dan ejen pengguna pelayar yang direkodkan apabila anda memberi atau menarik balik persetujuan.',
+            zh: '账户、认证及同意记录：用户名、密码加密散列值（绝不保存明文）、可选的TOTP双重验证或WebAuthn通行密钥公钥凭证、登录时间，以及您授予或撤回同意时记录的日期、版本、语言、IP地址与浏览器标识。',
+            'zh-TW': '帳戶、認證及同意記錄：用戶名、密碼加密雜湊值（絕不保存明文）、可選的TOTP雙重驗證或WebAuthn通行金鑰公鑰憑證、登入時間，以及您授予或撤回同意時記錄的日期、版本、語言、IP位址與瀏覽器標識。',
+          },
+          {
+            en: 'On-premises CCTV footage and correspondence: 24-hour closed-circuit television (CCTV) video images recorded without audio in public and common areas of the hotel (entrance canopy, parking bays, lobby, reception, stairways, and corridors — never inside guest rooms or bathrooms) for safety and crime prevention, together with messages sent via support chat, email, or telephone.',
+            ms: 'Rakaman CCTV di premis dan surat-menyurat: imej video televisyen litar tertutup (CCTV) 24 jam tanpa audio yang dirakam di kawasan awam dan guna sama hotel (kanopi pintu masuk, petak parkir, lobi, kaunter penyambut tetamu, tangga dan koridor — tidak sekali-kali di dalam bilik tetamu atau bilik mandi) bagi tujuan keselamatan dan pencegahan jenayah, berserta mesej melalui sembang sokongan, e-mel atau telefon.',
+            zh: '场所闭路电视监控（CCTV）及往来通信：为保障安全与防范犯罪，在酒店公共及共用区域（门前雨棚、停车位、大堂、接待台、楼梯间及走廊——绝不在客房或卫浴内）运行的24小时无录音闭路电视监控画面，以及您通过在线客服、电子邮件或电话与我们的往来沟通记录。',
+            'zh-TW': '場所閉路電視監控（CCTV）及往來通信：為保障安全與防範犯罪，在酒店公共及共用區域（門前雨棚、停車位、大堂、接待台、樓梯間及走廊——絕不在客房或衛浴內）運行的24小時無錄音閉路電視監控畫面，以及您透過線上客服、電子郵件或電話與我們的往來溝通記錄。',
+          },
+          {
+            en: 'Accompanying minors (under 18): We do not knowingly accept online bookings directly from persons under 18. Where personal data of an accompanying minor under 18 is provided for guest registration, you confirm as their parent or legal guardian that you consent to its processing in accordance with Regulation 4 of the Personal Data Protection Regulations 2013.',
+            ms: 'Kanak-kanak bawah umur yang mengiringi (bawah 18 tahun): Kami tidak menerima tempahan dalam talian secara langsung daripada individu berumur di bawah 18 tahun. Sekiranya data peribadi kanak-kanak bawah 18 tahun diberikan bagi tujuan pendaftaran tetamu, anda mengesahkan sebagai ibu bapa atau penjaga sah bahawa anda bersetuju terhadap pemprosesannya selaras dengan Peraturan 4 Peraturan-Peraturan Perlindungan Data Peribadi 2013.',
+            zh: '随行未成年人（未满18周岁）：我们不接受未满18周岁人士直接在线预订。如需为入住登记提供未满18周岁随行未成年人的个人资料，即表示您作为其父母或法定监护人，依《2013年个人资料保护条例》第4条同意我们处理该资料。',
+            'zh-TW': '隨行未成年人（未滿18週歲）：我們不接受未滿18週歲人士直接線上預訂。如需為入住登記提供未滿18週歲隨行未成年人的個人資料，即表示您作為其父母或法定監護人，依《2013年個人資料保護條例》第4條同意我們處理該資料。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'Almost all of the data we hold comes directly from you, when you search, book, pay, check in, or contact us. Where you booked through a travel agent or an online travel platform, your booking and contact details reach us from that platform. Payment confirmations reach us from our payment provider.',
-          ms: 'Hampir keseluruhan data yang kami simpan datang terus daripada anda, semasa anda mencari, menempah, membayar, mendaftar masuk, atau menghubungi kami. Sekiranya anda menempah melalui ejen pelancongan atau platform pelancongan dalam talian, butiran tempahan dan hubungan anda sampai kepada kami daripada platform tersebut. Pengesahan pembayaran sampai kepada kami daripada penyedia pembayaran kami.',
-          zh: '我们持有的资料几乎全部直接来自您——在您查询、预订、付款、办理入住或联系我们时。如您通过旅行社或在线旅游平台预订，您的预订及联络资料由该平台转交给我们。付款确认信息则来自我们的支付服务提供商。',
-          'zh-TW': '我們持有的資料幾乎全部直接來自您——在您查詢、預訂、付款、辦理入住或聯絡我們時。如您透過旅行社或線上旅遊平台預訂，您的預訂及聯絡資料由該平台轉交給我們。付款確認資訊則來自我們的支付服務提供商。',
+      {
+        id: 'sensitive-data',
+        heading: {
+          en: '3. Sensitive personal data (biometric data)',
+          ms: '3. Data peribadi sensitif (data biometrik)',
+          zh: '3. 敏感个人资料（生物识别资料）',
+          'zh-TW': '3. 敏感個人資料（生物識別資料）',
         },
-      ],
-    },
-    {
-      id: 'why-we-use-it',
-      heading: {
-        en: '5. Why we use it',
-        ms: '5. Sebab kami menggunakannya',
-        zh: '5. 使用目的',
-        'zh-TW': '5. 使用目的',
+        body: [
+          {
+            en: 'Under sections 4 and 40 of the Personal Data Protection Act 2010 (as amended by the Personal Data Protection (Amendment) Act 2024), biometric data — including a facial photograph captured for technical or identity verification — is classified as sensitive personal data. We process online eKYC facial images only when you give separate, explicit consent via our Identity Verification Consent Notice, which you are free to decline. Online identity verification is optional and is never required to book or stay with us.',
+            ms: 'Di bawah seksyen 4 dan 40 Akta Perlindungan Data Peribadi 2010 (sebagaimana dipinda oleh Akta Perlindungan Data Peribadi (Pindaan) 2024), data biometrik — termasuk gambar wajah yang diambil bagi pengesahan teknikal atau identiti — diklasifikasikan sebagai data peribadi sensitif. Kami hanya memproses imej wajah eKYC dalam talian apabila anda memberikan persetujuan nyata yang berasingan melalui Notis Persetujuan Pengesahan Identiti kami, yang bebas untuk anda tolak. Pengesahan identiti dalam talian adalah pilihan dan bukan syarat untuk menempah atau menginap.',
+            zh: '依经《2024年个人资料保护（修正）法令》修订的《2010年个人资料保护法令》第4条及第40条，生物识别资料（包括用于技术或身份核验而采集的面部照片）属敏感个人资料。仅在您通过《身份验证同意通知》单独作出明确同意时，我们才会处理在线eKYC面部影像，您有权拒绝。在线身份验证纯属自愿，绝非预订或入住的前提条件。',
+            'zh-TW': '依經《2024年個人資料保護（修正）法令》修訂的《2010年個人資料保護法令》第4條及第40條，生物識別資料（包括用於技術或身分核驗而採集的面部照片）屬敏感個人資料。僅在您透過《身分驗證同意通知》單獨作出明確同意時，我們才會處理線上eKYC面部影像，您有權拒絕。線上身分驗證純屬自願，絕非預訂或入住的前提條件。',
+          },
+          {
+            en: 'Authorised staff inspect submitted images solely to confirm that the person presenting the identity document matches the document holder. We do not run automated biometric profiling, do not use facial images to train artificial-intelligence models, and never share them for marketing.',
+            ms: 'Kakitangan yang diberi kuasa menyemak imej yang dihantar semata-mata untuk mengesahkan bahawa individu yang mengemukakan dokumen pengenalan sepadan dengan pemegang dokumen tersebut. Kami tidak menjalankan pemprofilan biometrik automatik, tidak menggunakan imej wajah untuk melatih model kecerdasan buatan, dan tidak pernah berkongsinya untuk tujuan pemasaran.',
+            zh: '授权员工仅通过人工查验确认出示证件者与证件持有人一致。我们不进行自动化生物特征画像分析，不使用面部影像训练任何人工智能模型，也绝不将其用于营销共享。',
+            'zh-TW': '授權員工僅透過人工查驗確認出示證件者與證件持有人一致。我們不進行自動化生物特徵畫像分析，不使用面部影像訓練任何人工智慧模型，也絕不將其用於行銷共享。',
+          },
+        ],
       },
-      bullets: [
-        {
-          en: 'To take, confirm, change and cancel your booking, and to contact you about it.',
-          ms: 'Untuk menerima, mengesahkan, mengubah dan membatalkan tempahan anda, serta menghubungi anda mengenainya.',
-          zh: '承接、确认、更改及取消您的预订，并就相关事宜与您联系。',
-          'zh-TW': '承接、確認、更改及取消您的預訂，並就相關事宜與您聯絡。',
+      {
+        id: 'where-it-comes-from',
+        heading: {
+          en: '4. Sources of personal data',
+          ms: '4. Sumber data peribadi',
+          zh: '4. 个人资料的来源',
+          'zh-TW': '4. 個人資料的來源',
         },
-        {
-          en: 'To take payment, issue receipts and invoices, and investigate payment disputes.',
-          ms: 'Untuk menerima bayaran, mengeluarkan resit dan invois, serta menyiasat pertikaian pembayaran.',
-          zh: '收取款项、开具收据与发票，以及调查付款争议。',
-          'zh-TW': '收取款項、開具收據與發票，以及調查付款爭議。',
-        },
-        {
-          en: 'To host your stay: allocate a room, meet your requests, and provide services you ask for.',
-          ms: 'Untuk menguruskan penginapan anda: memperuntukkan bilik, memenuhi permintaan anda, dan menyediakan perkhidmatan yang anda minta.',
-          zh: '安排您的住宿：分配客房、满足您的要求并提供您所请求的服务。',
-          'zh-TW': '安排您的住宿：分配客房、滿足您的要求並提供您所請求的服務。',
-        },
-        {
-          en: 'To meet legal obligations: maintaining the guest register required of hotel operators, assessing and remitting Tourism Tax under the Tourism Tax Act 2017, keeping accounting and tax records, and responding to lawful requests from the authorities.',
-          ms: 'Untuk memenuhi kewajipan undang-undang: menyelenggara daftar tetamu yang diwajibkan ke atas pengendali hotel, menaksir dan meremitkan Cukai Pelancongan di bawah Akta Cukai Pelancongan 2017, menyimpan rekod perakaunan dan cukai, serta memenuhi permintaan sah pihak berkuasa.',
-          zh: '履行法定义务：依法保存酒店经营者须备置的住客登记册、依《2017年旅游税法令》核算并缴纳旅游税、保存会计及税务记录，以及回应执法机关的合法要求。',
-          'zh-TW': '履行法定義務：依法保存酒店經營者須備置的住客登記冊、依《2017年旅遊稅法令》核算並繳納旅遊稅、保存會計及稅務記錄，以及回應執法機關的合法要求。',
-        },
-        {
-          en: 'To keep the hotel and our systems secure, prevent fraud, and protect our legal position.',
-          ms: 'Untuk memastikan keselamatan hotel dan sistem kami, mencegah penipuan, dan melindungi kedudukan undang-undang kami.',
-          zh: '保障酒店及我们系统的安全、防范欺诈，并维护我们的合法权益。',
-          'zh-TW': '保障酒店及我們系統的安全、防範欺詐，並維護我們的合法權益。',
-        },
-        {
-          en: 'To operate loyalty and rewards, if you choose to join.',
-          ms: 'Untuk mengendalikan program kesetiaan dan ganjaran, sekiranya anda memilih untuk menyertainya.',
-          zh: '在您选择加入时运营忠诚计划与奖励。',
-          'zh-TW': '在您選擇加入時營運忠誠計劃與獎勵。',
-        },
-        {
-          en: 'To send you offers and news — only where you have separately opted in, and only until you opt out.',
-          ms: 'Untuk menghantar tawaran dan berita kepada anda — hanya sekiranya anda telah bersetuju secara berasingan, dan hanya sehingga anda menarik diri.',
-          zh: '向您发送优惠与消息——仅在您单独同意订阅的前提下，且直至您退订为止。',
-          'zh-TW': '向您發送優惠與消息——僅在您單獨同意訂閱的前提下，且直至您退訂為止。',
-        },
-      ],
-    },
-    {
-      id: 'who-we-share-with',
-      heading: {
-        en: '6. Who we share it with',
-        ms: '6. Pihak yang kami kongsikan data',
-        zh: '6. 资料共享对象',
-        'zh-TW': '6. 資料共享對象',
+        body: [
+          {
+            en: 'Most personal data comes directly from you when you search, book, pay, verify your identity, check in at reception, or contact us. Where a reservation is placed through an online travel agency (OTA), travel agent, or your employer/corporate account, we receive your booking particulars from them. Payment statuses and references come from PayPal or banking channels, and common-area CCTV footage is captured by clearly signed cameras on hotel premises.',
+            ms: 'Kebanyakan data peribadi datang terus daripada anda semasa anda membuat carian, menempah, membayar, mengesahkan identiti, mendaftar masuk di kaunter, atau menghubungi kami. Jika tempahan dibuat melalui agensi pelancongan dalam talian (OTA), ejen pelancongan, atau majikan/akaun korporat anda, kami menerima butiran tempahan daripada pihak tersebut. Status dan rujukan pembayaran diterima daripada PayPal atau saluran perbankan, manakala rakaman CCTV kawasan awam dirakam oleh kamera bertanda jelas di premis hotel.',
+            zh: '大部分个人资料由您在查询、预订、付款、验证身份、前台登记入住或联系我们时直接提供。若您的预订经由在线旅游平台（OTA）、旅行社或您的雇主/公司账户作出，我们自该方接收相关预订信息。付款状态与交易参考号来自PayPal或银行渠道，公共区域监控画面则由场所内设有明显标识的摄像设备采集。',
+            'zh-TW': '大部分個人資料由您在查詢、預訂、付款、驗證身分、前台登記入住或聯絡我們時直接提供。若您的預訂經由線上旅遊平台（OTA）、旅行社或您的僱主/公司帳戶作出，我們自該方接收相關預訂資訊。付款狀態與交易參考號來自PayPal或銀行渠道，公共區域監控畫面則由場所內設有明顯標識的攝像設備採集。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'We do not sell your personal data. We disclose it only to the following classes of third parties, and only so far as each needs it:',
-          ms: 'Kami tidak menjual data peribadi anda. Kami hanya mendedahkannya kepada kelas pihak ketiga berikut, dan hanya setakat yang diperlukan oleh setiap satu:',
-          zh: '我们不出售您的个人资料。我们仅向下列类别的第三方披露，且仅限于其各自所需的范围：',
-          'zh-TW': '我們不出售您的個人資料。我們僅向下列類別的第三方披露，且僅限於其各自所需的範圍：',
+      {
+        id: 'why-we-use-it',
+        heading: {
+          en: '5. Purposes of processing',
+          ms: '5. Tujuan pemprosesan',
+          zh: '5. 处理个人资料的目的',
+          'zh-TW': '5. 處理個人資料的目的',
         },
-      ],
-      bullets: [
-        {
-          en: 'Payment providers, including PayPal, which processes card and PayPal payments on its own systems and under its own privacy terms, and the banks handling transfers.',
-          ms: 'Penyedia pembayaran, termasuk PayPal, yang memproses pembayaran kad dan PayPal pada sistem mereka sendiri dan di bawah terma privasi mereka sendiri, serta bank yang mengendalikan pindahan.',
-          zh: '支付服务提供商，包括PayPal（在其自有系统中并依其自身隐私条款处理银行卡及PayPal付款），以及办理转账的银行。',
-          'zh-TW': '支付服務提供商，包括PayPal（在其自有系統中並依其自身隱私條款處理銀行卡及PayPal付款），以及辦理轉帳的銀行。',
-        },
-        {
-          en: 'Technology suppliers who host, back up and maintain this system on our instructions, and our email delivery provider.',
-          ms: 'Pembekal teknologi yang menghos, membuat sandaran dan menyelenggara sistem ini atas arahan kami, serta penyedia penghantaran e-mel kami.',
-          zh: '按我们指示托管、备份及维护本系统的技术供应商，以及我们的电子邮件发送服务商。',
-          'zh-TW': '按我們指示託管、備份及維護本系統的技術供應商，以及我們的電子郵件發送服務商。',
-        },
-        {
-          en: 'Travel agents and online travel platforms, where your booking was made through them.',
-          ms: 'Ejen pelancongan dan platform pelancongan dalam talian, sekiranya tempahan anda dibuat melalui mereka.',
-          zh: '旅行社及在线旅游平台（如您的预订经由其完成）。',
-          'zh-TW': '旅行社及線上旅遊平台（如您的預訂經由其完成）。',
-        },
-        {
-          en: 'Government agencies and regulators where the law requires it, including tax and tourism authorities, the police, and the Personal Data Protection Commissioner.',
-          ms: 'Agensi kerajaan dan pengawal selia sekiranya dikehendaki oleh undang-undang, termasuk pihak berkuasa cukai dan pelancongan, polis, dan Pesuruhjaya Perlindungan Data Peribadi.',
-          zh: '法律要求时向政府机构及监管机关披露，包括税务与旅游主管机关、警方及个人资料保护专员。',
-          'zh-TW': '法律要求時向政府機構及監管機關披露，包括稅務與旅遊主管機關、警方及個人資料保護專員。',
-        },
-        {
-          en: 'Our professional advisers — accountants, auditors and lawyers — under a duty of confidence.',
-          ms: 'Penasihat profesional kami — akauntan, juruaudit dan peguam — di bawah kewajipan kerahsiaan.',
-          zh: '我们的专业顾问——会计师、审计师及律师——在保密义务约束下。',
-          'zh-TW': '我們的專業顧問——會計師、審計師及律師——在保密義務約束下。',
-        },
-      ],
-    },
-    {
-      id: 'transfer-abroad',
-      heading: {
-        en: '7. Transfers outside Malaysia',
-        ms: '7. Pemindahan ke luar Malaysia',
-        zh: '7. 向马来西亚境外传输',
-        'zh-TW': '7. 向馬來西亞境外傳輸',
+        bullets: [
+          {
+            en: 'To create, confirm, modify, or cancel reservations and communicate transactional updates about your stay.',
+            ms: 'Untuk membuat, mengesahkan, mengubah atau membatalkan tempahan serta menghantar makluman transaksi berkaitan penginapan anda.',
+            zh: '创建、确认、更改或取消预订，并就您的住宿发送交易性通知。',
+            'zh-TW': '建立、確認、更改或取消預訂，並就您的住宿發送交易性通知。',
+          },
+          {
+            en: 'To process payments and refunds, manage corporate city-ledger accounts, issue receipts and LHDN e-Invoices where applicable, and resolve billing or payment disputes.',
+            ms: 'Untuk memproses bayaran dan bayaran balik, mengurus akaun lejar bandar korporat, mengeluarkan resit dan e-Invois LHDN jika berkaitan, serta menyelesaikan pertikaian pengebilan atau pembayaran.',
+            zh: '处理收款与退款、管理企业挂账账户、按规定开具收据及LHDN电子发票，并处理账单或付款争议。',
+            'zh-TW': '處理收款與退款、管理企業掛帳帳戶、按規定開具收據及LHDN電子發票，並處理帳單或付款爭議。',
+          },
+          {
+            en: 'To host your stay: allocate rooms, coordinate housekeeping and maintenance, and fulfil guest requests.',
+            ms: 'Untuk menguruskan penginapan anda: memperuntukkan bilik, menyelaras pengemasan dan penyelenggaraan, serta memenuhi permintaan tetamu.',
+            zh: '安排住宿接待：分配客房、协调客房清洁与维修，并响应宾客需求。',
+            'zh-TW': '安排住宿接待：分配客房、協調客房清潔與維修，並響應賓客需求。',
+          },
+          {
+            en: 'To comply with statutory duties in Malaysia and Sarawak: maintaining the mandatory guest register under the Registration of Guests Act 1965 (Act 381) and Tourism Industry Act 1992 (Act 482), assessing and remitting Tourism Tax (Act 791) and Service Tax (Act 807), retaining tax and accounting records under the Income Tax Act 1967 (Act 53), and responding to lawful requests from enforcement authorities.',
+            ms: 'Untuk mematuhi kewajipan berkanun di Malaysia dan Sarawak: menyelenggara daftar tetamu wajib di bawah Akta Pendaftaran Tetamu 1965 (Akta 381) dan Akta Industri Pelancongan 1992 (Akta 482), menaksir dan meremitkan Cukai Pelancongan (Akta 791) serta Cukai Perkhidmatan (Akta 807), menyimpan rekod cukai dan perakaunan di bawah Akta Cukai Pendapatan 1967 (Akta 53), serta memenuhi permintaan sah pihak berkuasa penguatkuasaan.',
+            zh: '履行马来西亚及砂拉越法定义务：依《1965年住客登记法令》（第381号法令）及《1992年旅游业法令》（第482号法令）备置住客登记册，依《2017年旅游税法令》（第791号法令）及《2018年服务税法令》（第807号法令）核算申报税款，依《1967年所得税法令》（第53号法令）保存财税记录，并配合执法机关的合法调取要求。',
+            'zh-TW': '履行馬來西亞及砂拉越法定義務：依《1965年住客登記法令》（第381號法令）及《1992年旅遊業法令》（第482號法令）備置住客登記冊，依《2017年旅遊稅法令》（第791號法令）及《2018年服務稅法令》（第807號法令）核算申報稅款，依《1967年所得稅法令》（第53號法令）保存財稅記錄，並配合執法機關的合法調取要求。',
+          },
+          {
+            en: 'To safeguard guests, staff, property, and IT systems (including common-area CCTV monitoring, access logging, fraud prevention, and exercising or defending legal claims).',
+            ms: 'Untuk melindungi keselamatan tetamu, kakitangan, harta benda dan sistem IT (termasuk pemantauan CCTV kawasan awam, pengelogan capaian, pencegahan penipuan, serta melaksanakan atau membela tuntutan undang-undang).',
+            zh: '保障宾客、员工、财物及信息系统安全（包括公共区域CCTV监控、访问审计日志、反欺诈，以及主张或抗辩法律权利）。',
+            'zh-TW': '保障賓客、員工、財物及資訊系統安全（包括公共區域CCTV監控、存取審計日誌、反欺詐，以及主張或抗辯法律權利）。',
+          },
+          {
+            en: 'To administer our guest loyalty programme where you hold an account, and — strictly where you have separately opted in — to send promotional offers, announcements, or birthday vouchers until you unsubscribe.',
+            ms: 'Untuk mentadbir program kesetiaan tetamu kami sekiranya anda mempunyai akaun, dan — hanya apabila anda telah memilih masuk secara berasingan — menghantar tawaran promosi, pengumuman atau baucar hari lahir sehingga anda berhenti melanggan.',
+            zh: '在您持有账户时管理宾客忠诚度计划；且仅在您单独选择订阅的前提下，向您发送促销优惠、酒店公告或生日礼券，直至您退订为止。',
+            'zh-TW': '在您持有帳戶時管理賓客忠誠度計劃；且僅在您單獨選擇訂閱的前提下，向您發送促銷優惠、酒店公告或生日禮券，直至您退訂為止。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'Some of the suppliers above, in particular our payment and email providers, process data on servers outside Malaysia. Where personal data leaves Malaysia we take reasonable steps to satisfy ourselves that it will receive protection substantially similar to that required by the Personal Data Protection Act 2010, and that it will be used only for the purposes described here.',
-          ms: 'Sebahagian pembekal di atas, khususnya penyedia pembayaran dan e-mel kami, memproses data pada pelayan di luar Malaysia. Sekiranya data peribadi keluar dari Malaysia, kami mengambil langkah munasabah untuk memastikan ia menerima perlindungan yang secara substansialnya setara dengan yang dikehendaki oleh Akta Perlindungan Data Peribadi 2010, dan bahawa ia digunakan hanya untuk tujuan yang dinyatakan di sini.',
-          zh: '上述部分供应商（尤其是我们的支付与电子邮件服务商）在马来西亚境外的服务器上处理资料。当个人资料传出马来西亚时，我们会采取合理措施确信其获得与《2010年个人资料保护法令》所要求实质上相当的保护，且仅用于本通知所述目的。',
-          'zh-TW': '上述部分供應商（尤其是我們的支付與電子郵件服務商）在馬來西亞境外的伺服器上處理資料。當個人資料傳出馬來西亞時，我們會採取合理措施確信其獲得與《2010年個人資料保護法令》所要求實質上相當的保護，且僅用於本通知所述目的。',
+      {
+        id: 'who-we-share-with',
+        heading: {
+          en: '6. Classes of third parties and data processors',
+          ms: '6. Kelas pihak ketiga dan pemproses data',
+          zh: '6. 披露对象类别与资料处理者',
+          'zh-TW': '6. 披露對象類別與資料處理者',
         },
-      ],
-    },
-    {
-      id: 'is-it-obligatory',
-      heading: {
-        en: '8. Is giving us this data obligatory?',
-        ms: '8. Adakah pemberian data ini diwajibkan?',
-        zh: '8. 提供资料是否为义务？',
-        'zh-TW': '8. 提供資料是否為義務？',
+        body: [
+          {
+            en: 'We never sell your personal data. We disclose relevant personal data strictly on a need-to-know basis to the following classes of third parties:',
+            ms: 'Kami tidak sekali-kali menjual data peribadi anda. Kami hanya mendedahkan data peribadi yang berkaitan mengikut keperluan kepada kelas pihak ketiga berikut:',
+            zh: '我们绝不出售您的个人资料。我们仅在必要范围内向下列类别的第三方披露相关个人资料：',
+            'zh-TW': '我們絕不出售您的個人資料。我們僅在必要範圍內向下列類別的第三方披露相關個人資料：',
+          },
+        ],
+        bullets: [
+          {
+            en: 'Payment and banking institutions: PayPal (acting as an independent controller/processor for card and PayPal transactions under its own privacy statement) and licensed banks handling transfers and refunds.',
+            ms: 'Institusi pembayaran dan perbankan: PayPal (bertindak sebagai pengawal/pemproses bebas bagi transaksi kad dan PayPal di bawah pernyataan privasinya sendiri) dan bank berlesen yang mengendalikan pindahan serta bayaran balik.',
+            zh: '支付与银行机构：PayPal（依其自身隐私声明处理银行卡及PayPal交易）以及办理转账和退款的持牌银行。',
+            'zh-TW': '支付與銀行機構：PayPal（依其自身隱私聲明處理銀行卡及PayPal交易）以及辦理轉帳和退款的持牌銀行。',
+          },
+          {
+            en: 'Data processors (pemproses data): cloud infrastructure, backup, and transactional email delivery providers acting strictly on our instructions. Under section 9 of the amended Personal Data Protection Act 2010, our data processors are also directly bound by statutory security obligations in addition to our contractual safeguards.',
+            ms: 'Pemproses data: penyedia infrastruktur awan, sandaran dan penghantaran e-mel transaksi yang bertindak mengikut arahan kami semata-mata. Di bawah seksyen 9 Akta Perlindungan Data Peribadi 2010 yang dipinda, pemproses data kami turut terikat secara langsung dengan kewajipan keselamatan berkanun selain perlindungan kontrak kami.',
+            zh: '资料处理者（pemproses data）：严格按我们指示提供云托管、备份及交易邮件投递服务的技术供应商。依据修订后的《2010年个人资料保护法令》第9条，该等资料处理者除受我们的合同约束外，亦直接承担法定安全保护义务。',
+            'zh-TW': '資料處理者（pemproses data）：嚴格按我們指示提供雲託管、備份及交易郵件投遞服務的技術供應商。依據修訂後的《2010年個人資料保護法令》第9條，該等資料處理者除受我們的合同約束外，亦直接承擔法定安全保護義務。',
+          },
+          {
+            en: 'Booking channels and corporate accounts: online travel platforms or travel agents through whom you booked, or your employer/company where your stay is charged to a corporate account.',
+            ms: 'Saluran tempahan dan akaun korporat: platform pelancongan dalam talian atau ejen pelancongan yang melaluinya anda menempah, atau majikan/syarikat anda sekiranya penginapan dicaj kepada akaun korporat.',
+            zh: '预订渠道及企业账户：您预订所使用的在线旅游平台或旅行社，或为您承担挂账住宿费用的雇主/公司。',
+            'zh-TW': '預訂渠道及企業帳戶：您預訂所使用的線上旅遊平台或旅行社，或為您承擔掛帳住宿費用的僱主/公司。',
+          },
+          {
+            en: 'Government, tax and enforcement authorities: Royal Malaysia Police (PDRM), Royal Malaysian Customs Department (RMCD), Inland Revenue Board of Malaysia (LHDN), Ministry of Tourism, Arts and Culture (MOTAC), Sibu local authorities, and the Personal Data Protection Commissioner (JPDP), where required or authorised by law.',
+            ms: 'Pihak berkuasa kerajaan, cukai dan penguatkuasaan: Polis Diraja Malaysia (PDRM), Jabatan Kastam Diraja Malaysia (JKDM), Lembaga Hasil Dalam Negeri Malaysia (LHDN), Kementerian Pelancongan, Seni dan Budaya (MOTAC), pihak berkuasa tempatan Sibu, dan Pesuruhjaya Perlindungan Data Peribadi (JPDP), apabila dikehendaki atau dibenarkan oleh undang-undang.',
+            zh: '政府、税务及执法机关：在法律要求或授权时，包括马来西亚皇家警察（PDRM）、马来西亚皇家关税局（RMCD）、马来西亚内陆税收局（LHDN）、旅游、艺术及文化部（MOTAC）、诗巫地方当局及个人资料保护专员（JPDP）。',
+            'zh-TW': '政府、稅務及執法機關：在法律要求或授權時，包括馬來西亞皇家警察（PDRM）、馬來西亞皇家關稅局（RMCD）、馬來西亞內陸稅收局（LHDN）、旅遊、藝術及文化部（MOTAC）、詩巫地方當局及個人資料保護專員（JPDP）。',
+          },
+          {
+            en: 'Professional advisers: external accountants, auditors, insurers, and legal counsel bound by professional confidentiality.',
+            ms: 'Penasihat profesional: akauntan luar, juruaudit, penanggung insurans dan peguam yang terikat dengan kerahsiaan profesional.',
+            zh: '专业顾问：承担职业保密义务的外部会计师、审计师、保险机构及法律顾问。',
+            'zh-TW': '專業顧問：承擔職業保密義務的外部會計師、審計師、保險機構及法律顧問。',
+          },
+        ],
       },
-      emphasis: 'requirement',
-      body: [
-        {
-          en: 'Some of it is. We cannot accept a booking without a name, a contact email, and your declared guest type, because we cannot confirm the stay, reach you, or assess Tourism Tax without them. On arrival, hotel-keeping and tax rules oblige us to record the identification of the guests staying in the room. If you do not provide these, we will not be able to take the booking or complete check-in.',
-          ms: 'Sebahagiannya diwajibkan. Kami tidak dapat menerima tempahan tanpa nama, e-mel hubungan, dan jenis tetamu yang anda isytiharkan, kerana kami tidak dapat mengesahkan penginapan, menghubungi anda, atau menaksir Cukai Pelancongan tanpanya. Semasa ketibaan, peraturan pengurusan hotel dan cukai mewajibkan kami merekodkan pengenalan tetamu yang menginap di dalam bilik. Sekiranya anda tidak memberikannya, kami tidak akan dapat menerima tempahan atau melengkapkan daftar masuk.',
-          zh: '部分资料是必须的。没有姓名、联络邮箱及您申报的旅客类型，我们无法接受预订，因为无法确认住宿、与您联络或核算旅游税。抵达时，酒店管理规则与税务规定要求我们登记入住客房宾客的身份信息。如您不提供上述资料，我们将无法接受预订或办理入住。',
-          'zh-TW': '部分資料是必須的。沒有姓名、聯絡郵箱及您申報的旅客類型，我們無法接受預訂，因為無法確認住宿、與您聯絡或核算旅遊稅。抵達時，酒店管理規則與稅務規定要求我們登記入住客房賓客的身分資訊。如您不提供上述資料，我們將無法接受預訂或辦理入住。',
+      {
+        id: 'transfer-abroad',
+        heading: {
+          en: '7. Cross-border transfers outside Malaysia',
+          ms: '7. Pemindahan rentas sempadan ke luar Malaysia',
+          zh: '7. 向马来西亚境外的跨境传输',
+          'zh-TW': '7. 向馬來西亞境外的跨境傳輸',
         },
-        {
-          en: 'The rest is voluntary. Your telephone number, address, date of birth, special requests, loyalty membership, marketing consent, and online identity verification are all optional, and declining them does not affect your booking or the price you pay.',
-          ms: 'Selebihnya adalah sukarela. Nombor telefon, alamat, tarikh lahir, permintaan khas, keahlian kesetiaan, persetujuan pemasaran, dan pengesahan identiti dalam talian semuanya adalah pilihan, dan penolakan tidak menjejaskan tempahan anda atau harga yang anda bayar.',
-          zh: '其余均属自愿。电话号码、住址、出生日期、特殊要求、忠诚会员资格、营销同意及在线身份验证均为可选，拒绝提供不会影响您的预订或所付价格。',
-          'zh-TW': '其餘均屬自願。電話號碼、住址、出生日期、特殊要求、忠誠會員資格、行銷同意及線上身分驗證均為可選，拒絕提供不會影響您的預訂或所付價格。',
-        },
-      ],
-    },
-    {
-      id: 'your-choices',
-      heading: {
-        en: '9. Choices you can make',
-        ms: '9. Pilihan yang boleh anda buat',
-        zh: '9. 您可以作出的选择',
-        'zh-TW': '9. 您可以作出的選擇',
+        body: [
+          {
+            en: 'Certain service providers — notably PayPal and our email or cloud infrastructure providers — may process data in jurisdictions outside Malaysia. Whenever personal data is transferred outside Malaysia, we comply with section 129 of the Personal Data Protection Act 2010 (as amended in 2024) and JPDP Cross-Border Personal Data Transfer Guidelines: transfers take place only where the receiving jurisdiction has data protection laws substantially similar to Act 709 or ensures an adequate level of protection, where the transfer is necessary to perform your booking or payment transaction, where you have consented, or where we have exercised due diligence and put enforceable contractual and technical safeguards in place.',
+            ms: 'Sesetengah penyedia perkhidmatan — khususnya PayPal serta penyedia infrastruktur e-mel atau awan kami — mungkin memproses data di bidang kuasa di luar Malaysia. Setiap kali data peribadi dipindahkan ke luar Malaysia, kami mematuhi seksyen 129 Akta Perlindungan Data Peribadi 2010 (sebagaimana dipinda pada 2024) dan Garis Panduan Pemindahan Data Peribadi Rentas Sempadan JPDP: pemindahan hanya dibuat apabila bidang kuasa penerima mempunyai undang-undang perlindungan data yang secara substansialnya setara dengan Akta 709 atau menjamin tahap perlindungan yang mencukupi, apabila pemindahan perlu bagi melaksanakan kontrak tempahan atau pembayaran anda, apabila anda telah memberi persetujuan, atau apabila kami telah melaksanakan usaha wajar serta perlindungan kontrak dan teknikal yang boleh dikuatkuasakan.',
+            zh: '部分服务提供商（尤其是PayPal以及电子邮件或云基础设施服务商）可能在马来西亚境外司法管辖区处理资料。凡个人资料传出马来西亚境外的，我们均遵守经2024年修订的《2010年个人资料保护法令》第129条及个人资料保护局（JPDP）跨境传输指南：仅在接收地具备与第709号法令实质相当的法律或提供充分保护水平、为履行您的预订或付款交易合同所必需、经您同意，或我们已履行尽职调查并落实可执行合同与技术保障措施的情况下进行。',
+            'zh-TW': '部分服務提供商（尤其是PayPal以及電子郵件或雲基礎設施服務商）可能在馬來西亞境外司法管轄區處理資料。凡個人資料傳出馬來西亞境外的，我們均遵守經2024年修訂的《2010年個人資料保護法令》第129條及個人資料保護局（JPDP）跨境傳輸指南：僅在接收地具備與第709號法令實質相當的法律或提供充分保護水平、為履行您的預訂或付款交易合同所必需、經您同意，或我們已履行盡職調查並落實可執行合同與技術保障措施的情況下進行。',
+          },
+        ],
       },
-      bullets: [
-        {
-          en: 'You may withdraw your consent to marketing at any time, from your account settings, by using the unsubscribe link in any marketing email, or by contacting us. We will stop sending it.',
-          ms: 'Anda boleh menarik balik persetujuan pemasaran pada bila-bila masa, melalui tetapan akaun anda, menggunakan pautan berhenti melanggan dalam mana-mana e-mel pemasaran, atau dengan menghubungi kami. Kami akan berhenti menghantarnya.',
-          zh: '您可随时撤回营销同意：在账户设置中操作、使用任一营销邮件中的退订链接，或直接联系我们。我们将停止发送。',
-          'zh-TW': '您可隨時撤回行銷同意：在帳戶設定中操作、使用任一行銷郵件中的退訂連結，或直接聯絡我們。我們將停止發送。',
+      {
+        id: 'is-it-obligatory',
+        heading: {
+          en: '8. Obligatory versus voluntary data',
+          ms: '8. Data wajib berbanding sukarela',
+          zh: '8. 必须提供与自愿提供的资料',
+          'zh-TW': '8. 必須提供與自願提供的資料',
         },
-        {
-          en: 'You may withdraw your consent to identity verification and ask us to delete the images we hold, unless we are required to keep them by law.',
-          ms: 'Anda boleh menarik balik persetujuan pengesahan identiti dan meminta kami memadamkan imej yang kami simpan, melainkan kami dikehendaki menyimpannya oleh undang-undang.',
-          zh: '您可撤回对身份验证的同意，并要求我们删除所持有的影像，但法律规定必须留存的情形除外。',
-          'zh-TW': '您可撤回對身分驗證的同意，並要求我們刪除所持有的影像，但法律規定必須留存的情形除外。',
-        },
-        {
-          en: 'Withdrawing consent does not affect processing already carried out, and we may still need to process data to complete a booking you have made or to meet a legal duty.',
-          ms: 'Penarikan balik persetujuan tidak menjejaskan pemprosesan yang telah dilakukan, dan kami mungkin masih perlu memproses data untuk melengkapkan tempahan yang telah anda buat atau memenuhi kewajipan undang-undang.',
-          zh: '撤回同意不影响已进行的处理；为完成您已作出的预订或履行法定义务，我们可能仍需处理相关资料。',
-          'zh-TW': '撤回同意不影響已進行的處理；為完成您已作出的預訂或履行法定義務，我們可能仍需處理相關資料。',
-        },
-      ],
-    },
-    {
-      id: 'your-rights',
-      heading: {
-        en: '10. Your rights, and how to complain',
-        ms: '10. Hak anda, dan cara membuat aduan',
-        zh: '10. 您的权利与投诉方式',
-        'zh-TW': '10. 您的權利與投訴方式',
+        emphasis: 'requirement',
+        body: [
+          {
+            en: 'Providing your name, contact email, stay dates, and declared guest type is obligatory to make an online booking; on arrival, providing full name, nationality, address, and NRIC/passport identification is obligatory under the Registration of Guests Act 1965 and the Tourism Tax Act 2017 (and taxpayer particulars are obligatory if you request a validated LHDN e-Invoice). If you do not supply obligatory data, we cannot accept your reservation, complete check-in, or issue a validated tax e-Invoice.',
+            ms: 'Pemberian nama, e-mel hubungan, tarikh penginapan dan jenis tetamu yang diisytiharkan adalah wajib untuk membuat tempahan dalam talian; semasa ketibaan, pemberian nama penuh, kewarganegaraan, alamat dan pengenalan NRIC/pasport adalah wajib di bawah Akta Pendaftaran Tetamu 1965 dan Akta Cukai Pelancongan 2017 (dan butiran pembayar cukai adalah wajib jika anda memohon e-Invois LHDN yang disahkan). Sekiranya anda tidak memberikan data wajib tersebut, kami tidak dapat menerima tempahan anda, melengkapkan daftar masuk, atau mengeluarkan e-Invois cukai yang disahkan.',
+            zh: '在线预订必须提供姓名、联络邮箱、入住退房日期及旅客类型申报；到店入住时，依《1965年住客登记法令》及《2017年旅游税法令》必须提供全名、国籍、住址及身份证/护照信息（如您要求开具经验证的LHDN电子发票，亦须提供相应纳税人资料）。若您未能提供上述必须资料，我们将无法受理预订、办理入住或开具验证电子发票。',
+            'zh-TW': '線上預訂必須提供姓名、聯絡郵箱、入住退房日期及旅客類型申報；到店入住時，依《1965年住客登記法令》及《2017年旅遊稅法令》必須提供全名、國籍、住址及身分證/護照資訊（如您要求開具經驗證的LHDN電子發票，亦須提供相應納稅人資料）。若您未能提供上述必須資料，我們將無法受理預訂、辦理入住或開具驗證電子發票。',
+          },
+          {
+            en: 'All other data — including special requests, loyalty participation, promotional email subscriptions, and online eKYC identity verification — is voluntary. Declining optional items never affects your right to book, check in at reception, or pay our published rates.',
+            ms: 'Semua data lain — termasuk permintaan khas, penyertaan kesetiaan, langganan e-mel promosi dan pengesahan identiti eKYC dalam talian — adalah sukarela. Menolak perkara pilihan tidak sekali-kali menjejaskan hak anda untuk menempah, mendaftar masuk di kaunter, atau menikmati kadar harga yang diterbitkan.',
+            zh: '其余所有资料（包括特殊要求、忠诚计划参与、促销邮件订阅及在线eKYC身份验证）均属自愿提供。拒绝提供可选项目绝不会影响您预订、在前台办理入住或享受公布房价的权利。',
+            'zh-TW': '其餘所有資料（包括特殊要求、忠誠計劃參與、促銷郵件訂閱及線上eKYC身分驗證）均屬自願提供。拒絕提供可選項目絕不會影響您預訂、在前台辦理入住或享受公佈房價的權利。',
+          },
+        ],
       },
-      emphasis: 'info',
-      body: [
-        {
-          en: 'Under the Personal Data Protection Act 2010 you have the right to ask us for a copy of the personal data we hold about you, to have inaccurate data corrected, to limit how we process it, to withdraw consent, and — following the 2024 amendments to the Act — to ask us to transmit your data to another data controller where that is technically feasible.',
-          ms: 'Di bawah Akta Perlindungan Data Peribadi 2010, anda berhak meminta salinan data peribadi yang kami simpan mengenai anda, membetulkan data yang tidak tepat, menghadkan cara kami memprosesnya, menarik balik persetujuan, dan — berikutan pindaan 2024 kepada Akta tersebut — meminta kami memindahkan data anda kepada pengawal data lain sekiranya ia boleh dilaksanakan dari segi teknikal.',
-          zh: '依《2010年个人资料保护法令》，您有权要求我们提供所持有的您的个人资料副本、更正不准确的资料、限制我们的处理方式、撤回同意，并且——依该法令2024年修正案——在技术可行的情况下要求我们将您的资料传输给另一资料处理者。',
-          'zh-TW': '依《2010年個人資料保護法令》，您有權要求我們提供所持有的您的個人資料副本、更正不準確的資料、限制我們的處理方式、撤回同意，並且——依該法令2024年修正案——在技術可行的情況下要求我們將您的資料傳輸給另一資料處理者。',
+      {
+        id: 'your-choices',
+        heading: {
+          en: '9. Choices to limit processing and withdraw consent',
+          ms: '9. Pilihan untuk menghadkan pemprosesan dan menarik balik persetujuan',
+          zh: '9. 限制处理与撤回同意的选择',
+          'zh-TW': '9. 限制處理與撤回同意的選擇',
         },
-        {
-          en: `Send any of these requests to ${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail}. We will respond within the period allowed by the Act. A fee prescribed by the Act may apply to a data access request.`,
-          ms: `Hantar sebarang permohonan ini ke ${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail}. Kami akan membalas dalam tempoh yang dibenarkan oleh Akta. Fi yang ditetapkan oleh Akta boleh dikenakan bagi permohonan akses data.`,
-          zh: `请将上述任何请求发送至${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail}。我们将在法令允许的期限内回复。查阅资料请求可能需缴付法令规定的费用。`,
-          'zh-TW': `請將上述任何請求發送至${HOTEL_LEGAL_IDENTITY.dataProtectionContactEmail}。我們將在法令允許的期限內回覆。查閱資料請求可能需繳付法令規定的費用。`,
-        },
-        {
-          en: 'If you are not satisfied with how we have handled your data, you may complain to us first, and you may also complain to the Personal Data Protection Commissioner, Malaysia (Jabatan Perlindungan Data Peribadi).',
-          ms: 'Sekiranya anda tidak berpuas hati dengan cara kami mengendalikan data anda, anda boleh membuat aduan kepada kami terlebih dahulu, dan anda juga boleh membuat aduan kepada Pesuruhjaya Perlindungan Data Peribadi, Malaysia (Jabatan Perlindungan Data Peribadi).',
-          zh: '如您对我们处理您资料的方式不满意，可先向我们投诉，亦可向马来西亚个人资料保护专员（Jabatan Perlindungan Data Peribadi）投诉。',
-          'zh-TW': '如您對我們處理您資料的方式不滿意，可先向我們投訴，亦可向馬來西亞個人資料保護專員（Jabatan Perlindungan Data Peribadi）投訴。',
-        },
-      ],
-    },
-    {
-      id: 'retention',
-      heading: {
-        en: '11. How long we keep it',
-        ms: '11. Tempoh penyimpanan',
-        zh: '11. 保留期限',
-        'zh-TW': '11. 保留期限',
+        bullets: [
+          {
+            en: 'Direct marketing (section 43): You may opt out of promotional emails, announcements, or birthday vouchers at any time via your guest portal preferences, the one-click unsubscribe link in every marketing email, or by writing to us.',
+            ms: 'Pemasaran langsung (seksyen 43): Anda boleh memilih keluar daripada e-mel promosi, pengumuman atau baucar hari lahir pada bila-bila masa melalui tetapan portal tetamu anda, pautan berhenti melanggan satu klik dalam setiap e-mel pemasaran, atau dengan menulis kepada kami.',
+            zh: '直接营销（第43条）：您可随时通过宾客门户偏好设置、每封营销邮件中的一键退订链接或联系我们，停止接收促销优惠、公告或生日礼券邮件。',
+            'zh-TW': '直接行銷（第43條）：您可隨時透過賓客門戶偏好設置、每封行銷郵件中的一鍵退訂連結或聯絡我們，停止接收促銷優惠、公告或生日禮券郵件。',
+          },
+          {
+            en: 'Withdrawal of consent (section 42): You may by written notice withdraw your consent to optional processing — including online eKYC biometric verification — and ask us to delete uploaded eKYC images unless statutory retention applies.',
+            ms: 'Penarikan balik persetujuan (seksyen 42): Anda boleh melalui notis bertulis menarik balik persetujuan anda terhadap pemprosesan pilihan — termasuk pengesahan biometrik eKYC dalam talian — dan meminta kami memadamkan imej eKYC yang dimuat naik melainkan penyimpanan berkanun terpakai.',
+            zh: '撤回同意（第42条）：您可通过书面通知撤回对可选处理项目（包括在线eKYC生物识别核验）的同意，并要求删除已上传的eKYC影像（法律规定必须保留的情形除外）。',
+            'zh-TW': '撤回同意（第42條）：您可透過書面通知撤回對可選處理項目（包括線上eKYC生物識別核驗）的同意，並要求刪除已上傳的eKYC影像（法律規定必須保留的情形除外）。',
+          },
+          {
+            en: 'Withdrawal does not affect the lawfulness of processing carried out before withdrawal, nor processing required to perform an existing booking contract or comply with a statutory obligation.',
+            ms: 'Penarikan balik tidak menjejaskan kesahan pemprosesan yang telah dijalankan sebelum penarikan balik, mahupun pemprosesan yang diperlukan untuk melaksanakan kontrak tempahan sedia ada atau mematuhi kewajipan berkanun.',
+            zh: '撤回同意不影响撤回前已依法进行的处理，亦不影响为履行既有预订合同或遵守法定义务所必需的处理。',
+            'zh-TW': '撤回同意不影響撤回前已依法進行的處理，亦不影響為履行既有預訂合同或遵守法定義務所必需的處理。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'We keep personal data only for as long as the purpose it was collected for requires, and then for as long as the law obliges us to. Booking, payment and accounting records are kept for the period required by Malaysian tax and companies legislation. Identity verification images are kept only for as long as needed to verify you and to meet the guest-register obligation, and are then deleted. Marketing consent records are kept for as long as you remain subscribed, plus a period afterwards to evidence that consent existed.',
-          ms: 'Kami menyimpan data peribadi hanya selama yang diperlukan oleh tujuan pengumpulannya, dan selepas itu selama yang diwajibkan oleh undang-undang. Rekod tempahan, pembayaran dan perakaunan disimpan bagi tempoh yang dikehendaki oleh perundangan cukai dan syarikat Malaysia. Imej pengesahan identiti disimpan hanya selama yang diperlukan untuk mengesahkan anda dan memenuhi kewajipan daftar tetamu, dan kemudian dipadamkan. Rekod persetujuan pemasaran disimpan selama anda kekal melanggan, serta suatu tempoh selepas itu bagi membuktikan persetujuan tersebut wujud.',
-          zh: '我们仅在收集目的所需期限内及法律义务要求的期限内保存个人资料。预订、付款及会计记录按马来西亚税务及公司法规要求的期限保存。身份验证影像仅在核实您的身份及履行住客登记义务所需期间保存，随后删除。营销同意记录在您的订阅存续期间及其后一段时间内保存，以证明该同意曾经存在。',
-          'zh-TW': '我們僅在收集目的所需期限內及法律義務要求的期限內保存個人資料。預訂、付款及會計記錄按馬來西亞稅務及公司法規要求的期限保存。身分驗證影像僅在核實您的身分及履行住客登記義務所需期間保存，隨後刪除。行銷同意記錄在您的訂閱存續期間及其後一段時間內保存，以證明該同意曾經存在。',
+      {
+        id: 'your-rights',
+        heading: {
+          en: '10. Your statutory rights (access, correction, portability) and complaints',
+          ms: '10. Hak berkanun anda (akses, pembetulan, kemudahalihan) dan aduan',
+          zh: '10. 您的法定权利（查阅、更正、可携权）与投诉途径',
+          'zh-TW': '10. 您的法定權利（查閱、更正、可攜權）與投訴途徑',
         },
-      ],
-    },
-    {
-      id: 'security',
-      heading: {
-        en: '12. How we protect it, and what happens if something goes wrong',
-        ms: '12. Cara kami melindunginya, dan tindakan jika berlaku insiden',
-        zh: '12. 保护措施与事故应对',
-        'zh-TW': '12. 保護措施與事故應對',
+        emphasis: 'info',
+        body: [
+          {
+            en: 'Under the Personal Data Protection Act 2010 (as amended by Act A1727), you have the right to: (a) request access to and a copy of your personal data (section 30); (b) request correction of inaccurate, incomplete, misleading, or outdated personal data (section 34); (c) withdraw consent (section 42) or prevent processing likely to cause unwarranted substantial damage or distress (section 38); and (d) request data portability — transmitting personal data you provided to another data controller in a structured, commonly used electronic format where technically feasible and compatible (section 43A).',
+            ms: 'Di bawah Akta Perlindungan Data Peribadi 2010 (sebagaimana dipinda oleh Akta A1727), anda berhak untuk: (a) memohon akses dan salinan data peribadi anda (seksyen 30); (b) memohon pembetulan data peribadi yang tidak tepat, tidak lengkap, mengelirukan atau tidak terkini (seksyen 34); (c) menarik balik persetujuan (seksyen 42) atau menghalang pemprosesan yang berkemungkinan menyebabkan kerosakan atau tekanan ketara yang tidak wajar (seksyen 38); dan (d) memohon kemudahalihan data — menghantar data peribadi yang anda berikan kepada pengawal data lain dalam format elektronik berstruktur yang lazim digunakan sekiranya boleh dilaksanakan dari segi teknikal dan keserasian (seksyen 43A).',
+            zh: '依据经第A1727号法令修订的《2010年个人资料保护法令》，您享有以下法定权利：（a）要求查阅并获取您的个人资料副本（第30条）；（b）要求更正不准确、不完整、具误导性或过时的个人资料（第34条）；（c）撤回同意（第42条）或要求停止可能造成不当重大损害或困扰的处理（第38条）；以及（d）行使资料可携权——在技术可行且格式兼容的前提下，要求将您提供的个人资料以结构化、常用的电子格式传输给另一资料控制者（第43A条）。',
+            'zh-TW': '依據經第A1727號法令修訂的《2010年個人資料保護法令》，您享有以下法定權利：（a）要求查閱並獲取您的個人資料副本（第30條）；（b）要求更正不準確、不完整、具誤導性或過時的個人資料（第34條）；（c）撤回同意（第42條）或要求停止可能造成不當重大損害或困擾的處理（第38條）；以及（d）行使資料可攜權——在技術可行且格式相容的前提下，要求將您提供的個人資料以結構化、常用的電子格式傳輸給另一資料控制者（第43A條）。',
+          },
+          {
+            en: `Submit requests to our Data Protection Contact at ${identity.dataProtectionContactEmail}. We verify requester identity before disclosing data and respond within twenty-one (21) days of receiving a complete request (or notify you in writing if up to fourteen (14) additional days are required, as permitted by sections 31 and 35 of the Act). Any fee for a data access request will not exceed the maximum prescribed under the Personal Data Protection (Fees) Regulations.`,
+            ms: `Hantar permohonan kepada Hubungan Perlindungan Data kami di ${identity.dataProtectionContactEmail}. Kami mengesahkan identiti pemohon sebelum mendedahkan data dan memberi maklum balas dalam tempoh dua puluh satu (21) hari dari tarikh penerimaan permohonan lengkap (atau memaklumkan anda secara bertulis sekiranya sehingga empat belas (14) hari tambahan diperlukan, sebagaimana dibenarkan di bawah seksyen 31 dan 35 Akta). Sebarang fi bagi permohonan akses data tidak akan melebihi had maksimum yang ditetapkan di bawah Peraturan-Peraturan Perlindungan Data Peribadi (Fi).`,
+            zh: `请将相关请求发送至我们的资料保护联络邮箱 ${identity.dataProtectionContactEmail}。我们将在核实申请人身份后，自收到完整请求之日起二十一（21）日内予以答复（如依该法令第31条及第35条需延长最多十四（14）日的，我们将书面通知您）。查阅资料请求如需收费，绝不超过《个人资料保护（费用）条例》规定的最高限额。`,
+            'zh-TW': `請將相關請求發送至我們的資料保護聯絡郵箱 ${identity.dataProtectionContactEmail}。我們將在核實申請人身分後，自收到完整請求之日起二十一（21）日內予以答覆（如依該法令第31條及第35條需延長最多十四（14）日的，我們將書面通知您）。查閱資料請求如需收費，絕不超過《個人資料保護（費用）條例》規定的最高限額。`,
+          },
+          {
+            en: 'If you remain dissatisfied with how we handle your personal data, you may lodge a complaint with the Personal Data Protection Commissioner (Pesuruhjaya Perlindungan Data Peribadi / Jabatan Perlindungan Data Peribadi Malaysia — JPDP, www.pdp.gov.my).',
+            ms: 'Sekiranya anda masih tidak berpuas hati dengan cara kami mengendalikan data peribadi anda, anda boleh mengemukakan aduan kepada Pesuruhjaya Perlindungan Data Peribadi (Jabatan Perlindungan Data Peribadi Malaysia — JPDP, www.pdp.gov.my).',
+            zh: '如您对我们处理个人资料的方式仍不满意，可向马来西亚个人资料保护专员（Jabatan Perlindungan Data Peribadi Malaysia — JPDP，网址：www.pdp.gov.my）提出投诉。',
+            'zh-TW': '如您對我們處理個人資料的方式仍不滿意，可向馬來西亞個人資料保護專員（Jabatan Perlindungan Data Peribadi Malaysia — JPDP，網址：www.pdp.gov.my）提出投訴。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'We take practical steps to protect your data: encrypted connections, access limited to staff whose role requires it, recorded audit trails of who viewed or changed a record, hashed passwords, and optional two-factor authentication on accounts.',
-          ms: 'Kami mengambil langkah praktikal untuk melindungi data anda: sambungan tersulit, akses terhad kepada kakitangan yang memerlukannya mengikut peranan, jejak audit yang merekodkan siapa yang melihat atau mengubah rekod, kata laluan tercincang, dan pengesahan dua faktor sebagai pilihan pada akaun.',
-          zh: '我们采取切实可行的措施保护您的资料：加密连接、仅限岗位职责所需的员工访问、记录谁在何时查阅或修改了资料的审计轨迹、散列存储密码，以及可选的账户双重验证。',
-          'zh-TW': '我們採取切實可行的措施保護您的資料：加密連接、僅限崗位職責所需的員工存取、記錄誰在何時查閱或修改了資料的審計軌跡、散列儲存密碼，以及可選的帳戶雙重驗證。',
+      {
+        id: 'retention',
+        heading: {
+          en: '11. Data retention (section 10)',
+          ms: '11. Penyimpanan data (seksyen 10)',
+          zh: '11. 资料保留期限（第10条）',
+          'zh-TW': '11. 資料保留期限（第10條）',
         },
-        {
-          en: 'If a breach of personal data occurs that causes or is likely to cause significant harm, we will notify the Personal Data Protection Commissioner, and will notify you where the Act requires it.',
-          ms: 'Sekiranya berlaku pelanggaran data peribadi yang menyebabkan atau berkemungkinan menyebabkan kemudaratan yang ketara, kami akan memaklumkan Pesuruhjaya Perlindungan Data Peribadi, dan akan memaklumkan anda sekiranya dikehendaki oleh Akta.',
-          zh: '如发生造成或可能造成重大损害的个人资料泄露事件，我们将通知个人资料保护专员，并在法令要求时通知您本人。',
-          'zh-TW': '如發生造成或可能造成重大損害的個人資料洩露事件，我們將通知個人資料保護專員，並在法令要求時通知您本人。',
-        },
-      ],
-    },
-    {
-      id: 'cookies',
-      heading: {
-        en: '13. Cookies and local storage',
-        ms: '13. Kuki dan storan setempat',
-        zh: '13. Cookies与本地存储',
-        'zh-TW': '13. Cookies與本地儲存',
+        body: [
+          {
+            en: 'In accordance with the Retention Principle under section 10 of the Act, personal data is kept no longer than necessary for its purpose and applicable statutory duties: financial, tax, invoice, and booking ledger records are retained for seven (7) years under section 82 of the Income Tax Act 1967 and Malaysian business-record laws; statutory guest-register entries are kept for the period required under the Registration of Guests Act 1965; eKYC identity and selfie images are held in restricted storage for verification and stay-related legal compliance and are purged upon valid post-stay withdrawal/erasure request or retention review while keeping only the pass/fail verification outcome; common-area CCTV recordings overwrite automatically on a short rolling cycle unless preserved for an active security or police investigation; and expired or revoked sign-in sessions are purged automatically.',
+            ms: 'Selaras dengan Prinsip Penyimpanan di bawah seksyen 10 Akta, data peribadi tidak disimpan lebih lama daripada yang diperlukan bagi tujuannya dan kewajipan berkanun yang berkaitan: rekod kewangan, cukai, invois dan lejar tempahan disimpan selama tujuh (7) tahun di bawah seksyen 82 Akta Cukai Pendapatan 1967 dan undang-undang rekod perniagaan Malaysia; catatan daftar tetamu berkanun disimpan bagi tempoh yang dikehendaki di bawah Akta Pendaftaran Tetamu 1965; imej dokumen dan swafoto eKYC disimpan dalam storan terhad bagi pengesahan serta pematuhan undang-undang penginapan dan dipadamkan atas permohonan penarikan balik/pemadaman selepas penginapan yang sah atau semakan penyimpanan dengan hanya mengekalkan keputusan lulus/gagal; rakaman CCTV kawasan awam ditulis ganti secara automatik mengikut kitaran pendek melainkan disimpan bagi siasatan keselamatan atau polis yang aktif; dan sesi log masuk yang tamat tempoh atau dibatalkan dipadamkan secara automatik.',
+            zh: '依据该法令第10条保留原则，个人资料的保存时间不超过实现其收集目的及履行法定义务所需的期限：财务、税务、发票及预订账册记录依《1967年所得税法令》第82条及马来西亚商业档案法规保存七（7）年；法定住客登记记录按《1965年住客登记法令》要求期限保存；eKYC证件及自拍影像保存在受限存储区以供核验及住宿相关法定合规之用，并在收到有效的离店后撤回/删除申请或经保留期审查后清除影像文件（仅保留通过/未通过的审核结论）；公共区域CCTV监控录像按短期循环自动覆盖（因正在进行的安全事件或警方调查而依法保全者除外）；过期或已注销的登录会话则自动清理。',
+            'zh-TW': '依據該法令第10條保留原則，個人資料的保存時間不超過實現其收集目的及履行法定義務所需的期限：財務、稅務、發票及預訂帳冊記錄依《1967年所得稅法令》第82條及馬來西亞商業檔案法規保存七（7）年；法定住客登記記錄按《1965年住客登記法令》要求期限保存；eKYC證件與自拍影像保存在受限儲存區以供核驗及住宿相關法定合規之用，並在收到有效的離店後撤回/刪除申請或經保留期審查後清除影像文件（僅保留通過/未通過的審核結論）；公共區域CCTV監控錄像按短期循環自動覆蓋（因正在進行的安全事件或警方調查而依法保全者除外）；過期或已註銷的登入工作階段則自動清理。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'This site stores a small amount of data in your browser so that it works: keeping you signed in, holding your booking session, and remembering interface preferences such as your chosen language. These are necessary for the service you asked for. We do not use advertising or cross-site tracking cookies.',
-          ms: 'Laman ini menyimpan sedikit data dalam pelayar anda supaya ia berfungsi: mengekalkan log masuk anda, menyimpan sesi tempahan anda, dan mengingati keutamaan antara muka seperti bahasa pilihan anda. Ini diperlukan untuk perkhidmatan yang anda minta. Kami tidak menggunakan kuki pengiklanan atau penjejakan merentas laman.',
-          zh: '本网站在您的浏览器中存储少量数据以维持正常运作：保持您的登录状态、保留您的预订会话，以及记住界面偏好（如您选择的语言）。这些是您所请求服务的必要组成。我们不使用广告或跨站追踪Cookie。',
-          'zh-TW': '本網站在您的瀏覽器中儲存少量資料以維持正常運作：保持您的登入狀態、保留您的預訂工作階段，以及記住介面偏好（如您選擇的語言）。這些是您所請求服務的必要組成。我們不使用廣告或跨站追蹤Cookie。',
+      {
+        id: 'security',
+        heading: {
+          en: '12. Security safeguards and data breach notification (sections 9 and 12B)',
+          ms: '12. Perlindungan keselamatan dan pemberitahuan pelanggaran data (seksyen 9 dan 12B)',
+          zh: '12. 安全保障措施与资料泄露通知（第9条及第12B条）',
+          'zh-TW': '12. 安全保障措施與資料洩露通知（第9條及第12B條）',
         },
-      ],
-    },
-    {
-      id: 'changes',
-      heading: {
-        en: '14. Changes to this notice',
-        ms: '14. Perubahan pada notis ini',
-        zh: '14. 本通知的变更',
-        'zh-TW': '14. 本通知的變更',
+        body: [
+          {
+            en: 'We protect personal data through technical and organisational controls under section 9 of the Act: TLS-encrypted transport, strict role-based access control (RBAC) for staff, append-only audit logs recording record access and changes, cryptographic password hashing, HttpOnly session tokens, and optional TOTP two-factor authentication and WebAuthn passkeys.',
+            ms: 'Kami melindungi data peribadi melalui kawalan teknikal dan organisasi di bawah seksyen 9 Akta: penghantaran tersulit TLS, kawalan capaian berasaskan peranan (RBAC) yang ketat untuk kakitangan, log audit tambah-sahaja yang merekodkan capaian dan perubahan rekod, cincangan kata laluan kriptografi, token sesi HttpOnly, serta pengesahan dua faktor TOTP dan kunci laluan WebAuthn pilihan.',
+            zh: '我们依该法令第9条采取技术与组织安全控制保护个人资料：TLS传输加密、严格的员工基于角色访问控制（RBAC）、防篡改追加式访问与变更审计日志、密码加密散列存储、HttpOnly会话令牌，以及可选的TOTP双重验证与WebAuthn通行密钥。',
+            'zh-TW': '我們依該法令第9條採取技術與組織安全控制保護個人資料：TLS傳輸加密、嚴格的員工基於角色存取控制（RBAC）、防篡改追加式存取與變更審計日誌、密碼加密雜湊儲存、HttpOnly工作階段權杖，以及可選的TOTP雙重驗證與WebAuthn通行金鑰。',
+          },
+          {
+            en: 'In compliance with section 12B of the Personal Data Protection Act 2010 and JPDP Data Breach Notification Guidelines, if we have reason to believe a personal data breach has occurred that causes or is likely to cause significant harm, we will notify the Personal Data Protection Commissioner as soon as practicable and within seventy-two (72) hours, and will notify affected individuals without unnecessary delay (within seven (7) days of notifying the Commissioner) with guidance on protective steps.',
+            ms: 'Mematuhi seksyen 12B Akta Perlindungan Data Peribadi 2010 dan Garis Panduan Pemberitahuan Pelanggaran Data JPDP, sekiranya kami mempunyai alasan untuk mempercayai telah berlaku pelanggaran data peribadi yang menyebabkan atau berkemungkinan menyebabkan kemudaratan ketara, kami akan memaklumkan Pesuruhjaya Perlindungan Data Peribadi secepat yang dapat dilaksanakan dan dalam tempoh tujuh puluh dua (72) jam, serta memaklumkan individu yang terjejas tanpa kelengahan yang tidak perlu (dalam tempoh tujuh (7) hari selepas memaklumkan Pesuruhjaya) berserta panduan langkah perlindungan.',
+            zh: '依据《2010年个人资料保护法令》第12B条及JPDP个人资料泄露通知指南，若我们有理由相信发生了造成或可能造成重大损害的个人资料泄露事件，我们将尽快且在七十二（72）小时内向个人资料保护专员报告，并在无不当延误的情况下（向专员报告后七（7）日内）通知受影响的个人并提供防护建议。',
+            'zh-TW': '依據《2010年個人資料保護法令》第12B條及JPDP個人資料洩露通知指南，若我們有理由相信發生了造成或可能造成重大損害的個人資料洩露事件，我們將盡快且在七十二（72）小時內向個人資料保護專員報告，並在無不當延誤的情況下（向專員報告後七（7）日內）通知受影響的個人並提供防護建議。',
+          },
+        ],
       },
-      body: [
-        {
-          en: 'If we change this notice we will publish the new version here with a new version number and effective date. Where a change materially affects how we use data you have already given us, we will ask for your consent again.',
-          ms: 'Sekiranya kami mengubah notis ini, kami akan menerbitkan versi baharu di sini dengan nombor versi dan tarikh berkuat kuasa yang baharu. Sekiranya perubahan tersebut menjejaskan secara material cara kami menggunakan data yang telah anda berikan, kami akan meminta persetujuan anda semula.',
-          zh: '如本通知有变更，我们将在此发布新版本，并注明新的版本号与生效日期。如变更对您已提供资料的使用方式有实质影响，我们将再次征得您的同意。',
-          'zh-TW': '如本通知有變更，我們將在此發布新版本，並註明新的版本號與生效日期。如變更對您已提供資料的使用方式有實質影響，我們將再次徵得您的同意。',
+      {
+        id: 'cookies',
+        heading: {
+          en: '13. Cookies and browser storage',
+          ms: '13. Kuki dan storan pelayar',
+          zh: '13. Cookies与浏览器存储',
+          'zh-TW': '13. Cookies與瀏覽器儲存',
         },
-      ],
-    },
-  ],
+        body: [
+          {
+            en: 'We use strictly necessary cookies and local browser storage to maintain your sign-in session, secure your active booking flow, and remember interface preferences such as language and display theme. We do not use third-party advertising trackers or cross-site behavioural profiling cookies. See our Cookie Usage page for full details.',
+            ms: 'Kami menggunakan kuki yang amat diperlukan serta storan pelayar setempat untuk mengekalkan sesi log masuk anda, melindungi aliran tempahan aktif anda, dan mengingati keutamaan antara muka seperti bahasa serta tema paparan. Kami tidak menggunakan penjejak pengiklanan pihak ketiga atau kuki pemprofilan tingkah laku merentas laman. Lihat halaman Penggunaan Kuki kami untuk butiran penuh.',
+            zh: '我们使用严格必要的Cookie和浏览器本地存储以维持您的登录会话、保障预订流程安全并记住语言及显示主题等界面偏好。我们不使用第三方广告追踪器或跨站行为画像Cookie。详情请参阅《Cookie 使用说明》页面。',
+            'zh-TW': '我們使用嚴格必要的Cookie和瀏覽器本地儲存以維持您的登入工作階段、保障預訂流程安全並記住語言及顯示主題等介面偏好。我們不使用第三方廣告追蹤器或跨站行為畫像Cookie。詳情請參閱《Cookie 使用說明》頁面。',
+          },
+        ],
+      },
+      {
+        id: 'changes',
+        heading: {
+          en: '14. Updates to this notice',
+          ms: '14. Kemas kini pada notis ini',
+          zh: '14. 本通知的更新',
+          'zh-TW': '14. 本通知的更新',
+        },
+        body: [
+          {
+            en: 'Whenever we update this Privacy Notice we publish the revised text here with a new version date. Where an update materially expands how we process personal data you have already supplied, we will notify you and obtain fresh consent where required by the Act.',
+            ms: 'Setiap kali kami mengemas kini Notis Privasi ini, kami menerbitkan teks semakan di sini dengan tarikh versi baharu. Sekiranya sesuatu kemas kini memperluas secara material cara kami memproses data peribadi yang telah anda berikan, kami akan memaklumkan anda dan mendapatkan persetujuan baharu apabila dikehendaki oleh Akta.',
+            zh: '每当我们更新本《隐私通知》时，均会在此发布修订文本并标明新的版本日期。若更新内容实质性扩大了对您已提供个人资料的处理范围，我们将通知您并在法令要求时重新征得您的同意。',
+            'zh-TW': '每當我們更新本《隱私通知》時，均會在此發布修訂文本並標明新的版本日期。若更新內容實質性擴大了對您已提供個人資料的處理範圍，我們將通知您並在法令要求時重新徵得您的同意。',
+          },
+        ],
+      },
+    ],
+  };
 };
+
+export const privacyNotice: LegalDocument = buildPrivacyNotice();

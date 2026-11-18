@@ -21,7 +21,7 @@ contract mapping, web client). Those records are deleted; recover them with
 | `GuestService` | `hotel.guests.v1` | 12 | `guests` |
 
 RPC counts come from `grep -c '^\s*rpc ' proto/hotel/*/v1/*_service.proto`.
-Everything else, including the remaining REST surface (368 paths in
+Everything else, including the remaining REST surface (399 paths in
 `docs/api/openapi.json`), is REST only.
 
 Maintenance lives in the housekeeping package because the two work queues
@@ -195,9 +195,9 @@ Phase 0 audit guidance for the contexts not yet migrated:
 | Proposed package | Modules it would absorb |
 |---|---|
 | `hotel.iam.v1` | users, rbac, teams, profile (non-2FA parts) |
-| `hotel.reservations.v1` | bookings (complimentary, guest credits, rate/market codes), night_audit |
+| `hotel.reservations.v1` | bookings, booking_groups (complimentary, guest credits, rate/market codes), night_audit |
 | `hotel.rates.v1` | rates, promotions, revenue (rate calendar), booking_channels (config) |
-| `hotel.billing.v1` | payments, ledgers, invoices, payment_retry (admin parts) |
+| `hotel.billing.v1` | payments (incl. `/api/invoices*`), ledgers, payment_retry (admin parts) |
 | `hotel.guestportal.v1` | guest_portal, guest_booking, portal-side loyalty/support/promotions |
 | `hotel.ops.v1` | analytics, insights, audit, search, system, settings, communications, data_transfer (non-upload), ekyc (admin review) |
 

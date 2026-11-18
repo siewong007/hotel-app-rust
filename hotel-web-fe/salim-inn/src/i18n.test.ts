@@ -79,7 +79,9 @@ describe('copy bundles', () => {
     const doc = new DOMParser().parseFromString(indexHtml, 'text/html');
     const footer = doc.querySelector('.site-footer');
     expect(footer?.querySelector('a[href="#about-us"]')?.textContent).toBe('About Us');
+    expect(footer?.querySelector('a[href="/legal/terms"]')?.textContent).toBe('Booking Terms');
     expect(footer?.querySelector('a[href="/legal/privacy"]')?.textContent).toBe('Privacy Policy');
+    expect(footer?.querySelector('a[href="/legal/payment-terms"]')?.textContent).toBe('Payment Terms');
     expect(footer?.querySelector('a[href="/legal/cookies"]')?.textContent).toBe('Cookie Usage');
     expect(doc.querySelector('#about-us h2')?.textContent).toBe('A welcoming base in Sibu');
     expect(doc.querySelector('#about-us')?.closest('#story')).toBeNull();

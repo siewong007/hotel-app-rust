@@ -28,14 +28,16 @@ Backend needs no install step — `cargo` fetches on first build.
 
 ## Environment
 
-Two example files, both fully read by something:
+Three example files, each scoped to its consumer:
 
 - `.env.example` (root) — what `docker compose` reads: `POSTGRES_*`, ports,
   `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, image tags.
 - `hotel-app-be/.env.example` — the backend-process reference:
   `DATABASE_URL`, `JWT_SECRET` (≥32 chars), `ALLOWED_ORIGINS`, `SMTP_*`,
   `TOTP_ENCRYPTION_KEY`, `PASSKEY_RP_ID`, `GOOGLE_CLIENT_ID`, `TURNSTILE_*`,
-  pool tuning.
+  `SESSION_*` retention overrides, pool tuning.
+- `hotel-web-fe/.env.example` — optional build-time frontend variables
+  (`VITE_API_URL`, `VITE_GOOGLE_CLIENT_ID`, `VITE_TURNSTILE_SITE_KEY`).
 
 Copy → `.env` and fill in. `docker compose` aborts on blank `:?` secrets.
 
@@ -194,8 +196,8 @@ Deploy itself is scripted in `deploy/deploy.sh` (+ `docs/guides/deployment.md`).
 
   ```bash
   mkdir -p /tmp/pgtools
-  printf '#!/bin/sh\nexec docker exec -i hotel-db psql "$@"\n' > /tmp/pgtools/psql
-  printf '#!/bin/sh\nexec docker exec -i hotel-db pg_dump "$@"\n' > /tmp/pgtools/pg_dump
+  printf '#!/bin/sh\nexec docker compose exec -T postgres psql "$@"\n' > /tmp/pgtools/psql
+  printf '#!/bin/sh\nexec docker compose exec -T postgres pg_dump "$@"\n' > /tmp/pgtools/pg_dump
   chmod +x /tmp/pgtools/*
   PATH=/tmp/pgtools:$PATH cargo test --all-features --test postgres_patch_lifecycle
   ```

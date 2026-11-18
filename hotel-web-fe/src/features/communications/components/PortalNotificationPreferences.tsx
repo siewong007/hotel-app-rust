@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogoLoader } from '../../../components';
 import { PortalCommunicationsApi } from '../api';
 import { type NotificationTopic } from '../types';
+import { MARKETING_CONSENT_VERSION } from '../../legal/content';
 import { portalSessionScope } from '../../promotions/utils';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';
 import { guestErrorMessage } from '../../guestPortal/utils/feedback';
@@ -48,7 +49,10 @@ export default function PortalNotificationPreferences({ token }: { token: string
 
   const update = useMutation({
     mutationFn: (change: { topic: NotificationTopic; subscribed: boolean }) =>
-      PortalCommunicationsApi.updatePreferences({ subscriptions: [change] }, token),
+      PortalCommunicationsApi.updatePreferences(
+        { subscriptions: [change], policy_version: MARKETING_CONSENT_VERSION },
+        token,
+      ),
     onMutate: async (change) => {
       setError(null);
       setSavedMessage(null);

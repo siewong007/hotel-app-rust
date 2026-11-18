@@ -164,7 +164,7 @@ describe('GuestPaymentPanel', () => {
     expect(await screen.findByText('Pending payment confirmation by our team.')).toBeTruthy();
     expect(mocks.dashboardSubmitBankTransfer).toHaveBeenCalledWith(
       7,
-      [{ document: 'payment_terms', version: '2026-09-09', granted: true, locale: 'en' }],
+      [{ document: 'payment_terms', version: '2026-11-18', granted: true, locale: 'en' }],
       'portal-token',
     );
     expect(mocks.dashboardUploadReceipt).not.toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe('GuestPaymentPanel', () => {
     expect(await screen.findByText('Payment received — your booking is confirmed.')).toBeTruthy();
     expect(mocks.portalSubmitBankTransfer).toHaveBeenCalledWith(
       'booking-token',
-      [{ document: 'payment_terms', version: '2026-09-09', granted: true, locale: 'en' }],
+      [{ document: 'payment_terms', version: '2026-11-18', granted: true, locale: 'en' }],
     );
     expect(mocks.dashboardSubmitBankTransfer).not.toHaveBeenCalled();
   });
@@ -310,7 +310,7 @@ describe('GuestPaymentPanel', () => {
     await screen.findByText('Payment received — your booking is confirmed.');
     expect(mocks.dashboardCreatePaypalOrder).toHaveBeenCalledWith(
       7,
-      [{ document: 'payment_terms', version: '2026-09-09', granted: true, locale: 'en' }],
+      [{ document: 'payment_terms', version: '2026-11-18', granted: true, locale: 'en' }],
       'portal-token',
     );
     expect(mocks.dashboardCapturePaypalOrder).toHaveBeenCalledWith(7, 'ORDER-1', 60, 'portal-token');
@@ -333,7 +333,7 @@ describe('GuestPaymentPanel', () => {
     await screen.findByText('Payment received — your booking is confirmed.');
     expect(mocks.dashboardCreateGroupPaypalOrder).toHaveBeenCalledWith(
       12,
-      [{ document: 'payment_terms', version: '2026-09-09', granted: true, locale: 'en' }],
+      [{ document: 'payment_terms', version: '2026-11-18', granted: true, locale: 'en' }],
       'portal-token',
     );
     expect(mocks.dashboardCaptureGroupPaypalOrder).toHaveBeenCalledWith(12, 'GRP-1', 81, 'portal-token');

@@ -61,7 +61,7 @@ export class Chapters {
     }
 
     const footer = document.querySelector('.footer-address')!;
-    footer.textContent = `${SITE.name} · ${SITE.address.line1}, ${SITE.address.line2}, ${SITE.address.postcode} ${SITE.address.city}, ${SITE.address.state} · ${SITE.phoneDisplay}`;
+    footer.textContent = `${SITE.name} (${SITE.businessNumber}) · ${SITE.address.line1}, ${SITE.address.line2}, ${SITE.address.postcode} ${SITE.address.city}, ${SITE.address.state} · ${SITE.phoneDisplay} · ${SITE.email}`;
     document.querySelector('.footer-osm')!.textContent = copy.footer.osm;
     const rate = document.querySelector('.mobile-cta__rate')!;
     rate.innerHTML = fill(copy.mobileCta.rate, { min: minRate });

@@ -77,7 +77,7 @@ grew `vip` / `blacklisted` / `has_open_support` list filters plus a `segment`
 filter (`returning` = ≥2 `checked_out`/`completed` stays, `in_house`,
 `upcoming`, `inactive` = no completed stay in 365 days — booking-derived
 EXISTS/COUNT subqueries, unknown values ignored) in
-`repositories/guest.rs::find_paginated`. `has_open_support`
+`modules/guests/repository.rs::find_paginated`. `has_open_support`
 (`support_conversations.status <> 'closed'`) also rides each list row so
 unfiltered lists can badge open requests. `GET /guests/{id}/profile` remains
 the 360 aggregate.

@@ -3,11 +3,12 @@
 The desktop app manages its own backup lifecycle — no cron, no manual pg_dump.
 
 These managed pairs are a different artifact from the `hotel-backup` v1
-**JSON** export on the same `/data-transfer` page: the JSON format carries
-business data only and restores through the staged data-transfer pipeline
-(see [data-transfer.md](data-transfer.md)). A managed pair is a full
-logical dump of the bundled PostgreSQL plus its upload trees — the recovery
-point for the whole desktop install.
+**JSON** export on the same `/data-transfer` page: the standard/full/backup
+JSON scopes carry business data only (while the super-admin `system` scope
+carries encrypted DB state, without uploaded binary files) and restore through
+the staged data-transfer pipeline (see [data-transfer.md](data-transfer.md)). A
+managed pair is a full logical dump of the bundled PostgreSQL plus its upload
+trees — the recovery point for the whole desktop install.
 
 ## What a backup is
 

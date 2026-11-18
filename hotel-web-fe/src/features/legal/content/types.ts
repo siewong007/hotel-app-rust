@@ -33,8 +33,8 @@ export interface LocalizedText {
 /**
  * Identifies a consentable document. These values are the wire contract with
  * the backend: they must stay in step with `ConsentDocument` in
- * `hotel-app-be/src/models/consent.rs` and with the `document_type` CHECK
- * constraint on `public.consent_records`.
+ * `hotel-app-be/src/modules/consent/models.rs` and with the `document_type`
+ * CHECK constraint on `public.consent_records`.
  */
 export type LegalDocumentId =
   | 'terms_of_service'

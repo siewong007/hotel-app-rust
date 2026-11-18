@@ -57,12 +57,13 @@ src/modules/<domain>/
   mod.rs  routes.rs  handlers.rs  service.rs  repository.rs  queries.rs  models.rs  validation.rs
 ```
 
-Thirty-nine directories live in `modules/<domain>/` — thirty-eight are merged into
-the router; `consent` is an internal module with no routes. Extra domain files are
+Forty directories live in `modules/<domain>/` — thirty-eight are merged into
+the router; `consent` and `booking_groups` are internal modules with no routes. Extra domain files are
 allowed when a domain needs them (e.g. `bookings/{lifecycle,credits,complimentary,
-checkin_advisory,queries,list,helpers,emails,auto_checkin,unpaid_hold_scheduler}.rs`,
-`payments/{paypal_client,receipt_scheduler}.rs`, `guest_portal/session_repository.rs`,
-`data_transfer/{jobs,step_up}.rs`, `promotions/pricing.rs`).
+checkin_advisory,queries,list,helpers,emails,auto_checkin,unpaid_hold_scheduler,
+group_create,group_actions,new_reservations,summary}.rs`,
+`payments/{paypal_client,receipt_scheduler,settlement_lock}.rs`, `guest_portal/session_repository.rs`,
+`data_transfer/{jobs,step_up,crypto}.rs`, `promotions/pricing.rs`).
 
 The flat-by-layer directories no longer hold domain code. What remains there is
 deliberately global: `routes/mod.rs` (router composition + shared extractors),

@@ -20,7 +20,7 @@ This guide covers deploying the hotel management system in various environments.
 
 ```bash
 git clone https://github.com/siewong007/hotel-app-rust.git
-cd hotel-app
+cd hotel-app-rust
 cp .env.example .env
 # Edit .env — at minimum set JWT_SECRET and POSTGRES_PASSWORD
 docker compose up -d
@@ -277,8 +277,9 @@ Shared across replicas:
   the matching entry on every replica immediately. TTL is the correctness
   floor if a notification is missed.
 - **Scheduler leadership** — night audit, payment receipts, unpaid-hold
-  release, the email worker, the communications scheduler, and the bucket
-  prune each run under a `pg_advisory_lock` (`core::leader::spawn_exclusive`).
+  release, the email worker, the communications scheduler, and the hourly
+  session-retention + rate-limit bucket prune loop each run under a
+  `pg_advisory_lock` (`core::leader::spawn_exclusive`).
   Exactly one replica drives each loop; if it dies the lock releases with the
   session and another replica takes over within ~30s.
 - **Staff realtime** — `DataChangeHub` publishes `hotel_data_changed`
@@ -292,8 +293,9 @@ Still per-replica by design — **sticky sessions required**:
   confirm through the same replica.
 - WebSocket connections terminate on one replica; loyalty/support hub events
   only reach co-located connections.
-- `/metrics`, the PayPal token cache, the Google JWKS cache, and the uptime
-  probe are per-instance (scrape every replica for metrics).
+- In-process health counters (`GET /api/system/health`; there is no Prometheus
+  `/metrics` endpoint), the PayPal token cache, the Google JWKS cache, and the
+  uptime probe are per-instance.
 
 With Caddy in front of several upstreams, pin by client IP so the
 local-disk pieces above keep working:
@@ -311,7 +313,8 @@ Scale-out checklist:
       for imports and expected for websockets.
 - [ ] Keep `TRUST_PROXY_HEADERS=true` so rate limits key on the real client
       IP, not the load balancer's.
-- [ ] Scrape `/metrics` per replica — there is no aggregated view.
+- [ ] Poll `/health` (and authenticated `GET /api/system/health` if monitoring
+      in-process counters) per replica — there is no aggregated `/metrics` view.
 - [ ] Rolling restarts are safe: the worst case is a ~30s scheduler hand-off
       while the dead replica's advisory locks drain.
 
@@ -354,10 +357,11 @@ HOTEL_LOG_DIR=./logs           # Log directory
 
 ## Environment Configuration
 
-Two example files with distinct scopes: the repository-root `.env.example` is what
-`docker compose` reads (credentials, ports, TLS, image tags), and
+Three example files with distinct scopes: the repository-root `.env.example` is what
+`docker compose` reads (credentials, ports, TLS, image tags),
 `hotel-app-be/.env.example` is the full backend-process reference for running the API
-directly. Every variable in either file is read by something — neither carries
+directly, and `hotel-web-fe/.env.example` lists optional build-time `VITE_*` frontend
+variables. Every variable in these files is read by something — none carry
 aspirational settings.
 
 ### Required and Security Variables
@@ -424,7 +428,7 @@ is the canonical reference for how it works.
 **The catalog was reset, then reopened.** The original 22-patch lineage
 (revisions 1.2–1.23) was folded into the V1 baseline and `manifest.tsv` was
 reset to empty; generation 1 then reopened at version 2 and has grown one
-converge-style patch at a time since (versions 2–22 on 2026-10-12; the
+converge-style patch at a time since (versions 2–31 as of 2026-11-18; the
 `data_transfer:*` permission patch among them widens the `valid_action`
 check constraint, so it must run before any code that checks the new
 permissions; see `patches/manifest.tsv` for the full entry list — it is the
@@ -481,8 +485,8 @@ psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 -c \
   "SELECT generation || '.' || version || ' ' || name FROM public.hotel_schema_revisions WHERE generation = 1 ORDER BY version;"
 ```
 
-Expect `1.1` (the baseline) through the highest version in the manifest —
-currently `1.1`–`1.8`.
+Expect `1.1` (the baseline) through the highest version in `patches/manifest.tsv`
+— currently `1.1`–`1.31`.
 
 #### One-time reset: stale pre-fold patch lineage
 
@@ -731,8 +735,8 @@ encrypted upload to object storage) for real disaster recovery.
 Manual/ad-hoc backups, or scheduled backups for non-deploy environments:
 
 ```bash
-docker exec hotel-db pg_dump -U hotel_admin hotel_management > backup.sql   # manual
-0 2 * * * docker exec hotel-db pg_dump -U hotel_admin hotel_management > /backups/hotel_$(date +\%Y\%m\%d).sql   # host cron, daily 02:00
+docker compose exec -T postgres pg_dump -U hotel_admin hotel_management > backup.sql   # manual (local compose; prod container is saliminn-db)
+0 2 * * * docker exec saliminn-db pg_dump -U hotel_admin hotel_management > /backups/hotel_$(date +\%Y\%m\%d).sql   # host cron, daily 02:00
 ```
 
 ### Log Rotation

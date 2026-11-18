@@ -30,8 +30,8 @@ const SKIP_NOTIFICATION_HEADERS = { [SKIP_API_NOTIFICATION_HEADER]: 'true' };
 
 /** The two consents the API requires on every registration. */
 const REQUIRED_CONSENTS = [
-  { document: 'terms_of_service' as const, version: '2026-09-13', granted: true, locale: 'en' as const },
-  { document: 'privacy_notice' as const, version: '2026-09-09', granted: true, locale: 'en' as const },
+  { document: 'terms_of_service' as const, version: '2026-11-18', granted: true, locale: 'en' as const },
+  { document: 'privacy_notice' as const, version: '2026-11-18', granted: true, locale: 'en' as const },
 ];
 
 function mockJsonResponse(payload: unknown) {

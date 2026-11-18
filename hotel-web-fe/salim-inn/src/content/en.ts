@@ -107,7 +107,16 @@ export interface Copy {
   };
   faq: { eyebrow: string; title: string; blurb: string; items: { q: string; a: string }[] };
   cta: { title: string; book: string; call: string };
-  footer: { osm: string; rights: string; linksLabel: string; aboutUs: string; privacyPolicy: string; cookieUsage: string };
+  footer: {
+    osm: string;
+    rights: string;
+    linksLabel: string;
+    aboutUs: string;
+    bookingTerms: string;
+    privacyPolicy: string;
+    paymentTerms: string;
+    cookieUsage: string;
+  };
   /** `rate` takes `{{min}}` and may contain <strong>. */
   mobileCta: { rate: string };
   /** The front desk's facts: the registration card (chapter 5) and the booking panel. */
@@ -524,7 +533,9 @@ export const en: Copy = {
     rights: `© ${new Date().getFullYear()} Salim Inn, Sibu`,
     linksLabel: 'Site information',
     aboutUs: 'About Us',
+    bookingTerms: 'Booking Terms',
     privacyPolicy: 'Privacy Policy',
+    paymentTerms: 'Payment Terms',
     cookieUsage: 'Cookie Usage',
   },
   mobileCta: {
