@@ -1,0 +1,22 @@
+# Optional pre-commit framework configuration mirroring `.githooks/pre-commit`.
+# Native Git hook activation (zero extra tooling required): `make install-hooks`.
+repos:
+  - repo: local
+    hooks:
+      - id: rustfmt-staged
+        name: Check Rust formatting (edition 2024)
+        entry: rustfmt --edition 2024 --check
+        language: system
+        types: [rust]
+      - id: frontend-eslint-staged
+        name: Lint staged frontend files
+        entry: bash -c 'cd hotel-web-fe && bun x eslint --max-warnings=0 "${@#hotel-web-fe/}"' --
+        language: system
+        files: ^hotel-web-fe/src/.*\.(ts|tsx|js|mjs)$
+        exclude: ^hotel-web-fe/src/(routeTree\.gen\.ts|gen/)
+      - id: check-doc-links
+        name: Check relative Markdown documentation links
+        entry: python3 scripts/check-doc-links.py
+        language: system
+        types: [markdown]
+        pass_filenames: false

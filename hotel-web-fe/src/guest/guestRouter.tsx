@@ -11,6 +11,7 @@ const rootRoute = createRootRoute({
 });
 
 function lazyDefault(
+  // Guest route loaders resolve heterogeneous page props; route wrappers supply the expected props per route.
   loader: () => Promise<{ default: ComponentType<any> }>,
 ) {
   // lazyRoute, not bare lazy(): a stale deploy chunk must trigger the
@@ -20,6 +21,7 @@ function lazyDefault(
 
 function page(
   path: string,
+  // Route components registered via page() require no props at render time despite varying default export signatures.
   loader: () => Promise<{ default: ComponentType<any> }>,
   unauth = false,
 ) {
@@ -56,10 +58,10 @@ const unsubscribeRoute = createRoute({
 });
 
 const PortalDashboardPage = lazyRoute(
-  () => import('../features/guestPortal/components/PortalDashboardPage'),
+  () => import('../features/guest-portal/components/PortalDashboardPage'),
 );
 const PortalBookingPage = lazyRoute(
-  () => import('../features/guestPortal/booking/PortalBookingPage'),
+  () => import('../features/guest-portal/booking/PortalBookingPage'),
 );
 
 // The booking/dashboard switch must read the reactive router location, not

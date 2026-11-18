@@ -57,7 +57,9 @@ export function useNavigate(): CompatNavigateFn {
         return;
       }
       tsNavigate({
+        // Dynamic URL strings accepted by the compat shim cannot satisfy TanStack's static route union.
         to: target.pathname as any,
+        // Query parameters parsed from arbitrary URLs have dynamic key/value shapes.
         search: Object.fromEntries(target.searchParams.entries()) as any,
         hash: target.hash.replace(/^#/, ''),
         replace: options?.replace,
@@ -117,6 +119,7 @@ export function useSearchParams(): [URLSearchParams, (next: SetURLSearchParamsIn
         to: loc.pathname,
         search: () => Object.fromEntries(nextParams.entries()),
         replace: options?.replace,
+        // Cast required because loc.pathname is a runtime string outside TanStack's generated route map.
       } as any);
       // Fallback for browsers/queries that prefer raw string (rarely hit since tsNavigate handles it).
       void search;
@@ -142,6 +145,7 @@ export const Link = React.forwardRef<HTMLAnchorElement, CompatLinkProps>(functio
 ) {
   return (
     <TanstackLink
+      // TanStack Link's polymorphic ref type does not accept a plain HTMLAnchorElement ref without widening.
       ref={ref as any}
       // String paths work at runtime even though the generic types prefer typed routes.
       to={to as any}
@@ -167,5 +171,6 @@ export const Navigate: React.FC<CompatNavigateProps> = ({ to, replace }) => {
     }
     return null;
   }
+  // Dynamic string destinations outside TanStack's static route union require widening.
   return <TanstackNavigate to={to as any} replace={replace} />;
 };

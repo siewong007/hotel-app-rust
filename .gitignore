@@ -25,6 +25,8 @@ build/
 .vite/
 **/.vite/
 .next/
+.vitest/
+**/.vitest/
 coverage/
 **/coverage/
 npm-debug.log*

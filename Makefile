@@ -9,19 +9,19 @@ export BASELINE_DATABASE_URL
 override TARGET_DATABASE_URL := $(value TARGET_DATABASE_URL)
 export TARGET_DATABASE_URL
 
-.PHONY: help setup-all setup-be setup-fe setup-desktop \
+.PHONY: help setup-all setup-be setup-fe setup-desktop install-hooks \
         dev-be dev-fe dev-desktop \
-        build-be build-fe build-desktop \
-        check-be check-fe check-desktop check-all \
-        lint-be lint-fe lint-desktop lint-all \
-        test-be test-be-pg test-be-unit test-fe test-all \
+        build build-all build-be build-fe build-desktop \
+        typecheck check-be check-fe check-desktop check-all \
+        lint lint-be lint-fe lint-desktop lint-all \
+        test test-be test-be-pg test-be-unit test-fe test-all \
         docker-up docker-up-pg19-tuned docker-down docker-build \
         db-baseline db-seed db-setup db-patch require-database-url db-reset db-pg19-tune db-pg19-tune-rollback db-pg19-benchmark \
         db-schema-drift require-schema-drift-urls \
         db-repack db-repack-full \
         prepare-desktop docs docs-check db-mirror-check \
         sync-proto proto-mirror-check \
-        fmt fmt-all fmt-check fmt-check-be fmt-check-desktop \
+        format fmt fmt-all fmt-check fmt-check-be fmt-check-desktop \
         clean clean-all
 
 help: ## Show this help
@@ -40,6 +40,9 @@ setup-fe: ## Install frontend dependencies
 
 setup-desktop: ## Install desktop dependencies
 	cd hotel-desktop && $(BUN) install && cd src-tauri && cargo fetch
+
+install-hooks: ## Configure Git to run repository pre-commit hooks
+	git config core.hooksPath .githooks
 
 # ─── Development ──────────────────────────────────────────────────────────────
 
@@ -63,6 +66,10 @@ build-fe: ## Build frontend production
 build-desktop: ## Build desktop production
 	cd hotel-desktop && $(BUN) run build
 
+build-all: build-be build-fe ## Build backend and frontend production artifacts
+
+build: build-all ## Alias for build-all
+
 # ─── Type Checking ────────────────────────────────────────────────────────────
 
 check-be: ## Check backend compilation
@@ -76,6 +83,8 @@ check-desktop: ## Check desktop compilation
 
 check-all: check-be check-fe check-desktop ## Typecheck all projects
 
+typecheck: check-all ## Alias for check-all
+
 # ─── Linting ──────────────────────────────────────────────────────────────────
 
 lint-be: ## Lint backend
@@ -88,6 +97,8 @@ lint-desktop: ## Lint desktop
 	cd hotel-desktop/src-tauri && cargo clippy -- -D warnings
 
 lint-all: fmt-check lint-be lint-fe lint-desktop ## Lint all projects (includes the rustfmt check CI runs)
+
+lint: lint-all ## Alias for lint-all
 
 # ─── Formatting ───────────────────────────────────────────────────────────────
 
@@ -109,6 +120,8 @@ fmt-check: fmt-check-be fmt-check-desktop ## Check all Rust formatting without w
 
 fmt: fmt-all ## Alias for fmt-all
 
+format: fmt-all ## Alias for fmt-all
+
 # ─── Testing ──────────────────────────────────────────────────────────────────
 
 test-be: require-database-url ## Run all backend tests (requires scratch DATABASE_URL)
@@ -124,6 +137,8 @@ test-fe: ## Run frontend tests
 
 test-all: require-database-url ## Run backend and frontend tests (requires scratch DATABASE_URL)
 	$(MAKE) test-be test-fe
+
+test: test-all ## Alias for test-all
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
 

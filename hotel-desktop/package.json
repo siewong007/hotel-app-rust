@@ -2,6 +2,9 @@
   "name": "hotel-desktop",
   "version": "0.3.0",
   "description": "Hotel Management System desktop application with an embedded PostgreSQL database.",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "scripts": {
     "tauri": "bun scripts/tauri-cli.mjs",
     "dev": "bun scripts/desktop-prepare.mjs --dev && bun scripts/tauri-cli.mjs dev",

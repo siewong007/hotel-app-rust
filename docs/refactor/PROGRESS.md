@@ -1,11 +1,11 @@
 # Refactor Progress Log (`refactor/standards`)
 
 - **Branch**: `refactor/standards` (branched from `146cf7bec`)
-- **Current Phase**: Phase 1 (Tooling and standards) — applying desktop Clippy fix
+- **Current Phase**: Phase 1 complete — starting Phase 2
 
 ## Phase Tracker
 - [x] **Phase 0**: Understand the project & publish [`AUDIT.md`](AUDIT.md)
-- [ ] **Phase 1**: Tooling and standards
+- [x] **Phase 1**: Tooling and standards (`.editorconfig`, `.bun-version`, `package.json` `engines`, `.gitignore` `.vitest/` ignores, `.githooks/pre-commit`, `.pre-commit-config.yaml`, unified `Makefile` aliases, `any`-cast rationale comments, desktop Clippy fix)
 - [ ] **Phase 2**: Structure and naming
 - [ ] **Phase 3**: Code quality
 - [ ] **Phase 4**: Security, privacy and performance
@@ -17,6 +17,7 @@
 
 ## Decisions
 - Preserve 6 pre-existing untracked files from concurrent sessions (`0032_*`, `0033_*` SQL patches in backend + desktop mirror, `backup_completeness_check.rs`, `role_hierarchy.rs`) untouched and unstaged.
+- Per [`AGENTS.md`](../../AGENTS.md) (avoid unnecessary dependencies and mechanical repo-wide formatting churn), use zero-dependency `.githooks/pre-commit` (`make install-hooks`) + `.pre-commit-config.yaml` and existing `rustfmt` / ESLint 10 instead of adding Prettier or Husky dependencies across 1,100+ untouched TS files.
 - Keep `CLAUDE.md` within its hard 150-line budget and keep `CLAUDE.md` + `AGENTS.md` consistent.
 - Leave ask-first items (database schema changes, auth/RBAC logic, CI workflow edits, major dependency upgrades, new external SaaS dependencies like Sentry/Playwright, and PDPA retention period policy) unbuilt and listed as open questions for owner sign-off.
 

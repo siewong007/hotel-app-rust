@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+BUN_BIN="${BUN:-$(command -v bun 2>/dev/null || printf '%s' "$HOME/.bun/bin/bun")}"
+
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+RUST_FILES=()
+FE_LINT_FILES=()
+HAS_MD=0
+
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  case "$file" in
+    *.rs)
+      RUST_FILES+=("$REPO_ROOT/$file")
+      ;;
+    hotel-web-fe/src/routeTree.gen.ts|hotel-web-fe/src/gen/*)
+      ;;
+    hotel-web-fe/src/*.ts|hotel-web-fe/src/*.tsx|hotel-web-fe/src/*.js|hotel-web-fe/src/*.mjs)
+      FE_LINT_FILES+=("${file#hotel-web-fe/}")
+      ;;
+    *.md)
+      HAS_MD=1
+      ;;
+  esac
+done <<EOF
+$STAGED_FILES
+EOF
+
+if [ "${#RUST_FILES[@]}" -gt 0 ]; then
+  for rs_file in "${RUST_FILES[@]}"; do
+    rustfmt --edition 2024 --check "$rs_file"
+  done
+fi
+
+if [ "${#FE_LINT_FILES[@]}" -gt 0 ]; then
+  (cd "$REPO_ROOT/hotel-web-fe" && "$BUN_BIN" x eslint --max-warnings=0 "${FE_LINT_FILES[@]}")
+fi
+
+if [ "$HAS_MD" -eq 1 ]; then
+  (cd "$REPO_ROOT" && python3 scripts/check-doc-links.py)
+fi
