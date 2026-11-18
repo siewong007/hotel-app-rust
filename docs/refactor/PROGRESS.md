@@ -1,7 +1,7 @@
 # Refactor Progress Log (`refactor/standards`)
 
 - **Branch**: `refactor/standards` (branched from `146cf7bec`)
-- **Current Phase**: Phase 5 in progress (Phase 5A completed, moving to Phase 5B)
+- **Current Phase**: Phase 5 complete — moving to Phase 6 (Final checks, docs & master merge)
 
 ## Phase Tracker
 - [x] **Phase 0**: Understand the project & publish [`AUDIT.md`](AUDIT.md)
@@ -10,7 +10,7 @@
 - [x] **Phase 3**: Code quality (enforced service-layer API boundary across `BookingGroupSection`, `EkycManagementPage`, `CustomerLedgerPage`; extracted `features/bookings/api.ts`, `BookingGroupDialogs.tsx`, `UrgentTransferDialogs.tsx`; migrated `useCellEditorDraft` and `UpdateCheckoutDateDialog` to `useResetOnChange`)
 - [x] **Phase 4**: Security, privacy and performance (gated Web Vitals console logging to `import.meta.env.DEV`, documented all `VITE_*` vars in [`hotel-web-fe/.env.example`](../../hotel-web-fe/.env.example), synced Tauri ACL schemas, audited Cargo/Bun dependencies)
 - [x] **Phase 5A**: App & UX essentials (added accessible localized `<OfflineBanner />` with `useOnlineStatus` hook, wired into `RootLayout` and `GuestRootLayout` across all 4 locales `en`, `ms`, `zh`, `zh-TW`; added PII-scrubbing `reportClientError` utility and integrated into `ErrorBoundary` emitting `app:client-error` telemetry)
-- [ ] **Phase 5B**: Verification & happy-path test suite
+- [x] **Phase 5B**: Verification & happy-path test suite (added [`hotel-web-fe/src/test/coreFlows.happyPath.test.tsx`](../../hotel-web-fe/src/test/coreFlows.happyPath.test.tsx) testing happy path integration across anonymous guest booking, guest portal token verification, staff booking lifecycle & group folio settlement, and staff eKYC compliance & loyalty statistics)
 - [ ] **Phase 6**: Final check & documentation sync
 
 ## Bug Fixes (`fix:` commits)
