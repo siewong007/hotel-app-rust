@@ -1,14 +1,15 @@
 # Refactor Progress Log (`refactor/standards`)
 
 - **Branch**: `refactor/standards` (branched from `146cf7bec`)
-- **Current Phase**: Phase 3 complete — starting Phase 4
+- **Current Phase**: Phase 4 complete — starting Phase 5
 
 ## Phase Tracker
 - [x] **Phase 0**: Understand the project & publish [`AUDIT.md`](AUDIT.md)
 - [x] **Phase 1**: Tooling and standards (`.editorconfig`, `.bun-version`, `package.json` `engines`, `.gitignore` `.vitest/` ignores, `.githooks/pre-commit`, `.pre-commit-config.yaml`, unified `Makefile` aliases, `any`-cast rationale comments, desktop Clippy fix)
 - [x] **Phase 2**: Structure and naming (standardized frontend feature directories `guest-portal`, `guest-relations`, `online-inventory`, `payment-recovery` + updated imports, `eslint.config.js`, comments, and docs)
 - [x] **Phase 3**: Code quality (enforced service-layer API boundary across `BookingGroupSection`, `EkycManagementPage`, `CustomerLedgerPage`; extracted `features/bookings/api.ts`, `BookingGroupDialogs.tsx`, `UrgentTransferDialogs.tsx`; migrated `useCellEditorDraft` and `UpdateCheckoutDateDialog` to `useResetOnChange`)
-- [ ] **Phase 4**: Security, privacy and performance
+- [x] **Phase 4**: Security, privacy and performance (gated Web Vitals console logging to `import.meta.env.DEV`, documented all `VITE_*` vars in [`hotel-web-fe/.env.example`](../../hotel-web-fe/.env.example), synced Tauri ACL schemas, audited Cargo/Bun dependencies)
+- [ ] **Phase 5**: Fill the gaps
 - [ ] **Phase 4**: Security, privacy and performance
 - [ ] **Phase 5**: Fill the gaps
 - [ ] **Phase 6**: Final check & documentation sync
