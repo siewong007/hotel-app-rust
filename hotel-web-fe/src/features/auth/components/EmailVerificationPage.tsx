@@ -11,7 +11,7 @@ import {
 import { CheckCircle as CheckCircleIcon, Error as ErrorIcon, Email as EmailIcon } from '@mui/icons-material';
 import { AuthService } from '../../../api';
 import { LogoLoader } from '../../../components';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 
 const EmailVerificationPage: React.FC = () => {

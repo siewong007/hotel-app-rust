@@ -1,7 +1,7 @@
 import { Box, Container, Stack, Typography } from '@mui/material';
 import { useTranslation } from '../../../i18n';
 import { PromotionCatalog } from '../components/PromotionCatalog';
-import { GuestPortalThemeProvider } from '../../guestPortal/theme/GuestPortalThemeProvider';
+import { GuestPortalThemeProvider } from '../../guest-portal/theme/GuestPortalThemeProvider';
 
 // Chrome (nav, account, support) comes from GuestPortalShell — this page only
 // carries a slim title block plus the catalog.

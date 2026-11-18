@@ -13,8 +13,8 @@ import {
 import { GuestPortalService } from '../../../api';
 import { LogoLoader } from '../../../components';
 import { Booking, Guest } from '../../../types';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
-import { captureBookingAccessToken } from '../../guestPortal/api/bookingAccessTokenStore';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
+import { captureBookingAccessToken } from '../../guest-portal/api/bookingAccessTokenStore';
 import { dateFormatter, useTranslation } from '../../../i18n';
 
 export const GuestCheckInVerify: React.FC = () => {

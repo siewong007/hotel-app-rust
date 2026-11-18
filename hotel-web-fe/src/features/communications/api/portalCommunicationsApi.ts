@@ -1,6 +1,6 @@
 import { api } from '../../../api/client';
 import { SKIP_API_NOTIFICATION_HEADER } from '../../../utils/apiNotifications';
-import { getPortalToken } from '../../guestPortal/api/portalTokenStore';
+import { getPortalToken } from '../../guest-portal/api/portalTokenStore';
 import type { PreferencesResponse, PreferenceUpdateInput } from '../types';
 import { t } from '../../../i18n';
 

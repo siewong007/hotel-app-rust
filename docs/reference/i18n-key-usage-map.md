@@ -15,17 +15,17 @@ candidates — see `i18n-coverage-inventory.md`.
 |---|---|
 | `?:adjustmentTypes.${…}` | `src/features/rates/components/RatePlanDialog.tsx`<br>`src/features/rates/components/RatePlanTable.tsx` |
 | `?:admin.actions.${…}` | `src/features/ekyc/components/EkycManagementPage.tsx` |
-| `?:bulk.days.${…}` | `src/features/onlineInventory/components/BulkEditPanel.tsx` |
-| `?:categories.${…}` | `src/features/guestRelations/components/OpenSupportDialog.tsx`<br>`src/features/help/components/ArticleCard.tsx`<br>`src/features/help/components/CategoryCard.tsx`<br>`src/features/help/components/HelpBreadcrumbs.tsx`<br>`src/features/help/components/HelpSearchBar.tsx`<br>`src/features/help/pages/HelpArticlePage.tsx`<br>`src/features/help/pages/HelpCenterPage.tsx`<br>`src/features/support/components/SupportStatusChip.tsx` |
-| `?:communication.channels.${…}` | `src/features/guestRelations/components/tabs/CommunicationTab.tsx` |
+| `?:bulk.days.${…}` | `src/features/online-inventory/components/BulkEditPanel.tsx` |
+| `?:categories.${…}` | `src/features/guest-relations/components/OpenSupportDialog.tsx`<br>`src/features/help/components/ArticleCard.tsx`<br>`src/features/help/components/CategoryCard.tsx`<br>`src/features/help/components/HelpBreadcrumbs.tsx`<br>`src/features/help/components/HelpSearchBar.tsx`<br>`src/features/help/pages/HelpArticlePage.tsx`<br>`src/features/help/pages/HelpCenterPage.tsx`<br>`src/features/support/components/SupportStatusChip.tsx` |
+| `?:communication.channels.${…}` | `src/features/guest-relations/components/tabs/CommunicationTab.tsx` |
 | `?:config.roomStatus.${…}` | `src/features/rooms/components/RoomConfigurationPage.tsx` |
-| `?:consent.topics.${…}` | `src/features/guestRelations/components/GuestConsentDialog.tsx`<br>`src/features/guestRelations/components/tabs/CommunicationTab.tsx` |
-| `?:csv.${…}` | `src/features/guestRelations/utils.ts` |
-| `?:dashboard.identity.documents.${…}` | `src/features/guestPortal/components/dashboard/IdentitySection.tsx` |
-| `?:dashboard.identity.idTypes.${…}` | `src/features/guestPortal/components/dashboard/IdentitySection.tsx` |
-| `?:dashboard.identity.status.${…}` | `src/features/guestPortal/components/dashboard/IdentitySection.tsx` |
-| `?:dashboard.pagination.${…}` | `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx` |
-| `?:dashboard.profile.fields.${…}` | `src/features/guestPortal/components/dashboard/ProfileSection.tsx` |
+| `?:consent.topics.${…}` | `src/features/guest-relations/components/GuestConsentDialog.tsx`<br>`src/features/guest-relations/components/tabs/CommunicationTab.tsx` |
+| `?:csv.${…}` | `src/features/guest-relations/utils.ts` |
+| `?:dashboard.identity.documents.${…}` | `src/features/guest-portal/components/dashboard/IdentitySection.tsx` |
+| `?:dashboard.identity.idTypes.${…}` | `src/features/guest-portal/components/dashboard/IdentitySection.tsx` |
+| `?:dashboard.identity.status.${…}` | `src/features/guest-portal/components/dashboard/IdentitySection.tsx` |
+| `?:dashboard.pagination.${…}` | `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx` |
+| `?:dashboard.profile.fields.${…}` | `src/features/guest-portal/components/dashboard/ProfileSection.tsx` |
 | `?:days.${…}` | `src/features/rates/components/RatePlanDialog.tsx`<br>`src/features/rates/components/RatePlanTable.tsx` |
 | `?:deposit.chip.${…}` | `src/features/invoices/components/CheckoutInvoiceModal.tsx`<br>`src/features/invoices/components/DepositSection.tsx` |
 | `?:deposit.forfeit.reasons.${…}` | `src/features/invoices/components/DepositSection.tsx` |
@@ -35,14 +35,14 @@ candidates — see `i18n-coverage-inventory.md`.
 | `?:history.exportTypes.${…}` | `src/features/admin/components/DataTransferPage.tsx` |
 | `?:history.modes.${…}` | `src/features/admin/components/data-transfer/TransferHistoryList.tsx` |
 | `?:history.status.${…}` | `src/features/admin/components/data-transfer/TransferHistoryList.tsx` |
-| `?:idTypes.${…}` | `src/features/ekyc/components/EkycCreateDialog.tsx`<br>`src/features/ekyc/components/EkycManagementPage.tsx`<br>`src/features/ekyc/components/EkycRegistrationPage.tsx`<br>`src/features/guestRelations/components/tabs/OverviewTab.tsx` |
-| `?:interactions.types.${…}` | `src/features/guestRelations/components/InteractionForm.tsx`<br>`src/features/guestRelations/components/tabs/InteractionsTab.tsx`<br>`src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx` |
+| `?:idTypes.${…}` | `src/features/ekyc/components/EkycCreateDialog.tsx`<br>`src/features/ekyc/components/EkycManagementPage.tsx`<br>`src/features/ekyc/components/EkycRegistrationPage.tsx`<br>`src/features/guest-relations/components/tabs/OverviewTab.tsx` |
+| `?:interactions.types.${…}` | `src/features/guest-relations/components/InteractionForm.tsx`<br>`src/features/guest-relations/components/tabs/InteractionsTab.tsx`<br>`src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx` |
 | `?:ledger.paymentMethod.${…}` | `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx` |
 | `?:mobile.${…}` | `src/components/layout/MobileQuickActions.tsx` |
-| `?:nav.${…}` | `src/features/guestPortal/components/GuestPortalShell.tsx` |
+| `?:nav.${…}` | `src/features/guest-portal/components/GuestPortalShell.tsx` |
 | `?:palette.scopes.${…}` | `src/components/layout/CommandPalette.tsx` |
 | `?:planTypes.${…}` | `src/features/rates/components/RatePlanDialog.tsx`<br>`src/features/rates/components/RatePlanTable.tsx` |
-| `?:preferenceCategories.${…}` | `src/features/guestRelations/components/tabs/OverviewTab.tsx`<br>`src/features/guestRelations/components/tabs/PreferencesTab.tsx` |
+| `?:preferenceCategories.${…}` | `src/features/guest-relations/components/tabs/OverviewTab.tsx`<br>`src/features/guest-relations/components/tabs/PreferencesTab.tsx` |
 | `?:quickTasks.${…}` | `src/features/help/components/QuickTaskGrid.tsx` |
 | `?:rbac.categories.${…}` | `src/features/admin/components/rbac/constants.ts` |
 | `?:rbac.verb.${…}` | `src/features/admin/components/rbac/constants.ts` |
@@ -54,7 +54,7 @@ candidates — see `i18n-coverage-inventory.md`.
 | `?:steps.${…}` | `src/features/ekyc/components/EkycRegistrationPage.tsx` |
 | `?:system.jobs.names.${…}` | `src/features/admin/system/JobsTable.tsx` |
 | `?:tabs.${…}` | `src/features/promotions/pages/PromotionManagementPage.tsx` |
-| `?:tourismType.${…}` | `src/features/guestRelations/components/tabs/OverviewTab.tsx` |
+| `?:tourismType.${…}` | `src/features/guest-relations/components/tabs/OverviewTab.tsx` |
 | `?:troubleshootingLinks.${…}` | `src/features/help/components/TroubleshootingStrip.tsx` |
 | `?:twoFactor.${…}` | `src/features/auth/components/LoginPage.tsx` |
 | `admin:audit.export.${…}` | `src/api/audit.service.ts` |
@@ -62,7 +62,7 @@ candidates — see `i18n-coverage-inventory.md`.
 | `finance:ledger.paymentMethod.${…}` | `src/features/admin/components/PaymentApprovalsPage.tsx` |
 | `loyalty:categories.${…}` | `src/features/loyalty/utils.ts` |
 | `status:promotion.${…}` | `src/features/promotions/pages/PromotionManagementPage.tsx` |
-| `support:categories.${…}` | `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx` |
+| `support:categories.${…}` | `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx` |
 
 ## Map
 
@@ -1353,26 +1353,26 @@ candidates — see `i18n-coverage-inventory.md`.
 
 - `common:actions.actions` — `src/components/common/ActionsMenu.tsx`
 - `common:actions.add` — `src/features/admin/components/CustomerLedger/components/CompanyListPane.tsx`, `src/features/rates/components/RoomRatesEditor.tsx`, `src/features/user/components/settings/SystemConfigurationCard.tsx`
-- `common:actions.apply` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/onlineInventory/components/CellEditorPopover.tsx`, `src/features/onlineInventory/components/CellEditorSheet.tsx`
+- `common:actions.apply` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/online-inventory/components/CellEditorPopover.tsx`, `src/features/online-inventory/components/CellEditorSheet.tsx`
 - `common:actions.archive` — `src/features/promotions/components/PromotionAdminTable.tsx`, `src/features/promotions/pages/PromotionManagementPage.tsx`
 - `common:actions.assign` — *(dynamic or unreferenced)*
 - `common:actions.back` — `src/features/bookings/components/GuestCheckInForm.tsx`, `src/features/bookings/components/guestCheckIn/ClaimAccountStep.tsx`, `src/features/bookings/components/guestCheckIn/PreCheckInDetailsStep.tsx`, `src/features/ekyc/components/EkycRegistrationPage.tsx`, `src/features/invoices/components/DepositSection.tsx`, `src/features/legal/components/LegalDocumentPage.tsx`
-- `common:actions.cancel` — `src/components/common/ConfirmDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyFormDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreditNoteDialog.tsx`, `src/features/admin/components/CustomerLedger/components/DeleteCompanyDialog.tsx`, `src/features/admin/components/CustomerLedger/components/DuplicateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/EditLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`, `src/features/admin/components/CustomerLedger/components/VoidLedgerDialog.tsx`, `src/features/admin/components/NightAuditPage.tsx`, `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/admin/components/complimentary/BookingComplimentaryDialogs.tsx`, `src/features/admin/components/complimentary/CreditDialogs.tsx`, `src/features/admin/components/data-transfer/ExportPanel.tsx`, `src/features/admin/components/data-transfer/ImportWizard.tsx`, `src/features/admin/components/data-transfer/StepUpDialog.tsx`, `src/features/admin/components/rbac/PermissionsTab/PermissionsTab.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/admin/components/rbac/RolesTab/RolesTab.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/auth/components/TwoFactorSetup.tsx`, `src/features/bookings/components/Bookings/dialogs/EditBookingDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/PaymentDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/ReactivateDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/ReleaseDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/VoidDialog.tsx`, `src/features/bookings/components/EnhancedCheckInModal.tsx`, `src/features/bookings/components/GuestCheckInVerify.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/dashboard/components/ReceptionistDashboard.tsx`, `src/features/ekyc/components/EkycCreateDialog.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/ekyc/components/EkycRegistrationPage.tsx`, `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`, `src/features/guestPortal/components/PortalSupportTab.tsx`, `src/features/guestPortal/components/dashboard/DevicesSection.tsx`, `src/features/guestPortal/components/dashboard/ProfileSection.tsx`, `src/features/guestPortal/components/dashboard/SecuritySection.tsx`, `src/features/guestRelations/components/GuestConsentDialog.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`, `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`, `src/features/guestRelations/components/InteractionForm.tsx`, `src/features/guestRelations/components/OpenSupportDialog.tsx`, `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`, `src/features/housekeeping/components/NewTaskDialog.tsx`, `src/features/housekeeping/components/NewTicketDialog.tsx`, `src/features/housekeeping/components/RoomStatusUpdateDialog.tsx`, `src/features/housekeeping/components/TaskEditDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/loyalty/components/LoyaltyDashboard.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`, `src/features/onlineInventory/components/CellEditorPopover.tsx`, `src/features/onlineInventory/components/CellEditorSheet.tsx`, `src/features/onlineInventory/components/ReviewChangesDialog.tsx`, `src/features/promotions/components/PromotionEditorDialog.tsx`, `src/features/promotions/components/VoucherIssueDialog.tsx`, `src/features/rates/components/BulkRateDialog.tsx`, `src/features/rates/components/RatePlanDialog.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/rooms/components/RoomEventDialog.tsx`, `src/features/rooms/components/RoomManagement/components/BookingNotesDialog.tsx`, `src/features/rooms/components/RoomManagement/components/ChangeRoomDialog.tsx`, `src/features/rooms/components/RoomManagement/components/MarkComplimentaryDialog.tsx`, `src/features/rooms/components/RoomManagement/components/ReservedCheckInDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomNotesDialog.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingModalFooter.tsx`, `src/features/rooms/components/UpdateCheckoutDateDialog.tsx`, `src/features/support/components/SupportConversationDetail.tsx`, `src/features/user/components/AccountDeactivation.tsx`, `src/features/user/components/profile/PasskeysTab.tsx`, `src/features/user/components/profile/ProfileTab.tsx`, `src/features/user/components/profile/SecurityTab.tsx`
+- `common:actions.cancel` — `src/components/common/ConfirmDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyFormDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreditNoteDialog.tsx`, `src/features/admin/components/CustomerLedger/components/DeleteCompanyDialog.tsx`, `src/features/admin/components/CustomerLedger/components/DuplicateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/EditLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`, `src/features/admin/components/CustomerLedger/components/VoidLedgerDialog.tsx`, `src/features/admin/components/NightAuditPage.tsx`, `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/admin/components/complimentary/BookingComplimentaryDialogs.tsx`, `src/features/admin/components/complimentary/CreditDialogs.tsx`, `src/features/admin/components/data-transfer/ExportPanel.tsx`, `src/features/admin/components/data-transfer/ImportWizard.tsx`, `src/features/admin/components/data-transfer/StepUpDialog.tsx`, `src/features/admin/components/rbac/PermissionsTab/PermissionsTab.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/admin/components/rbac/RolesTab/RolesTab.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/auth/components/TwoFactorSetup.tsx`, `src/features/bookings/components/Bookings/dialogs/EditBookingDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/PaymentDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/ReactivateDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/ReleaseDialog.tsx`, `src/features/bookings/components/Bookings/dialogs/VoidDialog.tsx`, `src/features/bookings/components/EnhancedCheckInModal.tsx`, `src/features/bookings/components/GuestCheckInVerify.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/dashboard/components/ReceptionistDashboard.tsx`, `src/features/ekyc/components/EkycCreateDialog.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/ekyc/components/EkycRegistrationPage.tsx`, `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`, `src/features/guest-portal/components/PortalSupportTab.tsx`, `src/features/guest-portal/components/dashboard/DevicesSection.tsx`, `src/features/guest-portal/components/dashboard/ProfileSection.tsx`, `src/features/guest-portal/components/dashboard/SecuritySection.tsx`, `src/features/guest-relations/components/GuestConsentDialog.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`, `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`, `src/features/guest-relations/components/InteractionForm.tsx`, `src/features/guest-relations/components/OpenSupportDialog.tsx`, `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`, `src/features/housekeeping/components/NewTaskDialog.tsx`, `src/features/housekeeping/components/NewTicketDialog.tsx`, `src/features/housekeeping/components/RoomStatusUpdateDialog.tsx`, `src/features/housekeeping/components/TaskEditDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/loyalty/components/LoyaltyDashboard.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`, `src/features/online-inventory/components/CellEditorPopover.tsx`, `src/features/online-inventory/components/CellEditorSheet.tsx`, `src/features/online-inventory/components/ReviewChangesDialog.tsx`, `src/features/promotions/components/PromotionEditorDialog.tsx`, `src/features/promotions/components/VoucherIssueDialog.tsx`, `src/features/rates/components/BulkRateDialog.tsx`, `src/features/rates/components/RatePlanDialog.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/rooms/components/RoomEventDialog.tsx`, `src/features/rooms/components/RoomManagement/components/BookingNotesDialog.tsx`, `src/features/rooms/components/RoomManagement/components/ChangeRoomDialog.tsx`, `src/features/rooms/components/RoomManagement/components/MarkComplimentaryDialog.tsx`, `src/features/rooms/components/RoomManagement/components/ReservedCheckInDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomNotesDialog.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingModalFooter.tsx`, `src/features/rooms/components/UpdateCheckoutDateDialog.tsx`, `src/features/support/components/SupportConversationDetail.tsx`, `src/features/user/components/AccountDeactivation.tsx`, `src/features/user/components/profile/PasskeysTab.tsx`, `src/features/user/components/profile/ProfileTab.tsx`, `src/features/user/components/profile/SecurityTab.tsx`
 - `common:actions.clear` — `src/features/admin/components/AuditLogPage.tsx`
-- `common:actions.close` — `src/components/common/BottomSheet.tsx`, `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`, `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/auth/components/TwoFactorSetup.tsx`, `src/features/bookings/components/Bookings/dialogs/WorkflowDialog.tsx`, `src/features/bookings/components/GuestCheckInConfirmation.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`, `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`, `src/features/guestRelations/components/GuestCreditsDialog.tsx`, `src/features/housekeeping/components/TicketDetailDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/rooms/components/RoomManagement/RoomManagementPage.tsx`, `src/features/rooms/components/RoomManagement/components/GuestDetailsDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomDetailsDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomHistoryDialog.tsx`, `src/features/rooms/components/RoomManagement/components/UpcomingBookingsDialog.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingModalHeader.tsx`, `src/features/segments/components/SegmentEditorDialog.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
+- `common:actions.close` — `src/components/common/BottomSheet.tsx`, `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`, `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/auth/components/TwoFactorSetup.tsx`, `src/features/bookings/components/Bookings/dialogs/WorkflowDialog.tsx`, `src/features/bookings/components/GuestCheckInConfirmation.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`, `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`, `src/features/guest-relations/components/GuestCreditsDialog.tsx`, `src/features/housekeeping/components/TicketDetailDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/rooms/components/RoomManagement/RoomManagementPage.tsx`, `src/features/rooms/components/RoomManagement/components/GuestDetailsDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomDetailsDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomHistoryDialog.tsx`, `src/features/rooms/components/RoomManagement/components/UpcomingBookingsDialog.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingModalHeader.tsx`, `src/features/segments/components/SegmentEditorDialog.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
 - `common:actions.collapse` — `src/components/common/CollapsibleSection.tsx`
 - `common:actions.confirm` — `src/components/common/ConfirmDialog.tsx`, `src/features/admin/components/data-transfer/ExportPanel.tsx`
 - `common:actions.continue` — `src/features/user/components/profile/SecurityTab.tsx`
 - `common:actions.copy` — *(dynamic or unreferenced)*
 - `common:actions.create` — `src/features/admin/components/CustomerLedger/CustomerLedgerPage.tsx`, `src/features/admin/components/rbac/PermissionsTab/PermissionsTab.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/admin/components/rbac/RolesTab/RolesTab.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/loyalty/components/LoyaltyDashboard.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`
-- `common:actions.delete` — `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/admin/components/rbac/RolesTab/RolesTab.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/guestRelations/components/tabs/InteractionsTab.tsx`, `src/features/loyalty/components/LoyaltyDashboard.tsx`, `src/features/rates/pages/RatesPage.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
+- `common:actions.delete` — `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/admin/components/rbac/RolesTab/RolesTab.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/guest-relations/components/tabs/InteractionsTab.tsx`, `src/features/loyalty/components/LoyaltyDashboard.tsx`, `src/features/rates/pages/RatesPage.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
 - `common:actions.disable` — *(dynamic or unreferenced)*
 - `common:actions.discardChanges` — `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/user/components/SettingsPage.tsx`
 - `common:actions.dismiss` — *(dynamic or unreferenced)*
-- `common:actions.done` — `src/features/onlineInventory/components/GridToolbar.tsx`, `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
+- `common:actions.done` — `src/features/online-inventory/components/GridToolbar.tsx`, `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
 - `common:actions.download` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/PaymentApprovalsPage.tsx`
 - `common:actions.duplicate` — `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`
-- `common:actions.edit` — `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/tabs/InteractionsTab.tsx`, `src/features/housekeeping/components/RoomDetailDrawer.tsx`, `src/features/promotions/components/PromotionAdminTable.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
+- `common:actions.edit` — `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/tabs/InteractionsTab.tsx`, `src/features/housekeeping/components/RoomDetailDrawer.tsx`, `src/features/promotions/components/PromotionAdminTable.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
 - `common:actions.enable` — *(dynamic or unreferenced)*
 - `common:actions.expand` — `src/components/common/CollapsibleSection.tsx`
 - `common:actions.export` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/admin/components/DataTransferPage.tsx`, `src/features/admin/components/data-transfer/TransferHistoryList.tsx`, `src/features/dashboard/components/reports/ReportsAnalytics.tsx`, `src/features/dashboard/components/reports/drawers.tsx`
@@ -1388,16 +1388,16 @@ candidates — see `i18n-coverage-inventory.md`.
 - `common:actions.ok` — *(dynamic or unreferenced)*
 - `common:actions.openFilters` — `src/components/common/SearchAndFilters.tsx`
 - `common:actions.print` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/dashboard/components/reports/ReportsAnalytics.tsx`
-- `common:actions.refresh` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/admin/components/ComplimentaryManagementPage.tsx`, `src/features/admin/components/CustomerLedger/CustomerLedgerPage.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/onlineInventory/components/GridToolbar.tsx`
+- `common:actions.refresh` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/admin/components/ComplimentaryManagementPage.tsx`, `src/features/admin/components/CustomerLedger/CustomerLedgerPage.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/online-inventory/components/GridToolbar.tsx`
 - `common:actions.remove` — `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/rooms/components/UnifiedBooking/UnifiedBookingModal.tsx`
-- `common:actions.reset` — `src/components/common/FilterSheet.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/onlineInventory/components/CellEditorSheet.tsx`, `src/features/support/components/SupportManagementPage.tsx`
+- `common:actions.reset` — `src/components/common/FilterSheet.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/online-inventory/components/CellEditorSheet.tsx`, `src/features/support/components/SupportManagementPage.tsx`
 - `common:actions.restore` — *(dynamic or unreferenced)*
-- `common:actions.retry` — `src/components/common/ErrorBoundary.tsx`, `src/features/communications/components/PortalNotificationPreferences.tsx`, `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/GuestPaymentPanel.tsx`, `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`, `src/features/guestPortal/components/PortalSupportTab.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`, `src/features/guestRelations/components/tabs/CommunicationTab.tsx`, `src/features/guestRelations/components/tabs/InteractionsTab.tsx`, `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`, `src/features/guestRelations/components/tabs/PreferencesTab.tsx`, `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`, `src/features/promotions/components/PromotionCatalog.tsx`, `src/features/promotions/components/VoucherDetailsDrawer.tsx`, `src/features/promotions/components/VoucherWallet.tsx`, `src/features/promotions/pages/PromotionManagementPage.tsx`, `src/features/revenue/pages/RevenueOverviewPage.tsx`
+- `common:actions.retry` — `src/components/common/ErrorBoundary.tsx`, `src/features/communications/components/PortalNotificationPreferences.tsx`, `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/GuestPaymentPanel.tsx`, `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`, `src/features/guest-portal/components/PortalSupportTab.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`, `src/features/guest-relations/components/tabs/CommunicationTab.tsx`, `src/features/guest-relations/components/tabs/InteractionsTab.tsx`, `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`, `src/features/guest-relations/components/tabs/PreferencesTab.tsx`, `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`, `src/features/promotions/components/PromotionCatalog.tsx`, `src/features/promotions/components/VoucherDetailsDrawer.tsx`, `src/features/promotions/components/VoucherWallet.tsx`, `src/features/promotions/pages/PromotionManagementPage.tsx`, `src/features/revenue/pages/RevenueOverviewPage.tsx`
 - `common:actions.save` — `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`, `src/features/rooms/components/RoomManagement/components/RoomNotesDialog.tsx`, `src/features/segments/components/SegmentEditorDialog.tsx`, `src/features/user/components/profile/PasskeysTab.tsx`, `src/features/user/components/profile/ProfileTab.tsx`
 - `common:actions.search` — `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
 - `common:actions.sections` — `src/components/common/ResponsiveTabs.tsx`
 - `common:actions.seeAll` — *(dynamic or unreferenced)*
-- `common:actions.select` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/onlineInventory/components/GridToolbar.tsx`
+- `common:actions.select` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/online-inventory/components/GridToolbar.tsx`
 - `common:actions.selectAll` — `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`
 - `common:actions.send` — `src/features/communications/pages/CommunicationsPage.tsx`
 - `common:actions.showLess` — *(dynamic or unreferenced)*
@@ -1407,7 +1407,7 @@ candidates — see `i18n-coverage-inventory.md`.
 - `common:actions.update` — `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/loyalty/components/LoyaltyDashboard.tsx`
 - `common:actions.upload` — *(dynamic or unreferenced)*
 - `common:actions.view` — `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`
-- `common:actions.viewAll` — `src/components/layout/NotificationCenter.tsx`, `src/features/dashboard/components/reports/ReportsAnalytics.tsx`, `src/features/guestRelations/components/OverviewSectionCard.tsx`
+- `common:actions.viewAll` — `src/components/layout/NotificationCenter.tsx`, `src/features/dashboard/components/reports/ReportsAnalytics.tsx`, `src/features/guest-relations/components/OverviewSectionCard.tsx`
 - `common:actions.viewDetails` — *(dynamic or unreferenced)*
 - `common:actions.void` — `src/features/housekeeping/components/RoomDetailDrawer.tsx`
 - `common:actions.yes` — `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/loyalty/components/LoyaltyPortal.tsx`, `src/features/rooms/components/RoomManagement/components/RoomHistoryDialog.tsx`
@@ -1425,9 +1425,9 @@ candidates — see `i18n-coverage-inventory.md`.
 - `common:count.items_one` — *(dynamic or unreferenced)*
 - `common:count.items_other` — *(dynamic or unreferenced)*
 - `common:count.items_zero` — *(dynamic or unreferenced)*
-- `common:count.nights_one` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`, `src/features/rooms/components/UnifiedBooking/components/StaySection.tsx`
-- `common:count.nights_other` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`, `src/features/rooms/components/UnifiedBooking/components/StaySection.tsx`
-- `common:count.nights_zero` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`, `src/features/rooms/components/UnifiedBooking/components/StaySection.tsx`
+- `common:count.nights_one` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`, `src/features/rooms/components/UnifiedBooking/components/StaySection.tsx`
+- `common:count.nights_other` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`, `src/features/rooms/components/UnifiedBooking/components/StaySection.tsx`
+- `common:count.nights_zero` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`, `src/features/rooms/components/UnifiedBooking/components/StaySection.tsx`
 - `common:count.rooms_one` — `src/features/rooms/components/UnifiedBooking/components/BookingModalHeader.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`
 - `common:count.rooms_other` — `src/features/rooms/components/UnifiedBooking/components/BookingModalHeader.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`
 - `common:count.rooms_zero` — `src/features/rooms/components/UnifiedBooking/components/BookingModalHeader.tsx`, `src/features/rooms/components/UnifiedBooking/components/BookingSummaryAside.tsx`
@@ -1453,19 +1453,19 @@ candidates — see `i18n-coverage-inventory.md`.
 - `common:desktop.versionCurrent` — `src/desktop/DesktopServiceGate.tsx`
 - `common:desktop.versionOlder` — `src/desktop/DesktopServiceGate.tsx`
 - `common:desktop.waitingAddress` — `src/desktop/DesktopServiceGate.tsx`
-- `common:field.actions` — `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/guestRelations/components/GuestDetailDrawer.tsx`
+- `common:field.actions` — `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/guest-relations/components/GuestDetailDrawer.tsx`
 - `common:field.address` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyInfoTab.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/invoices/components/CheckoutInvoicePrintView.tsx`, `src/features/rooms/components/RoomManagement/components/GuestDetailsDialog.tsx`, `src/features/user/components/SettingsPage.tsx`
 - `common:field.all` — `src/features/admin/components/CustomerLedger/components/CompanyListPane.tsx`, `src/features/admin/components/CustomerLedger/components/LedgerEntriesTab.tsx`, `src/features/dashboard/components/reports/ReportsAnalytics.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/housekeeping/components/MaintenanceTab.tsx`, `src/features/notifications/components/DeliveryTabs.tsx`, `src/features/segments/pages/SegmentsPage.tsx`
 - `common:field.amount` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/LedgerEntriesTab.tsx`, `src/features/admin/components/CustomerLedger/components/VoidLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/customerLedgerPrint.ts`, `src/features/admin/components/PaymentApprovalsPage.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/invoices/components/CheckoutInvoicePrintView.tsx`
 - `common:field.createdAt` — `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`
 - `common:field.date` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/customerLedgerPrint.ts`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/invoices/components/CheckoutInvoicePrintView.tsx`
 - `common:field.description` — `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/EditLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/LedgerEntriesTab.tsx`, `src/features/admin/components/CustomerLedger/components/VoidLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/customerLedgerPrint.ts`, `src/features/admin/components/rbac/PermissionsTab/PermissionsTab.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/admin/components/rbac/RolesTab/RolesTab.tsx`, `src/features/housekeeping/components/NewTicketDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/invoices/components/CheckoutInvoicePrintView.tsx`, `src/features/rates/components/RatePlanDialog.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/segments/components/SegmentEditorDialog.tsx`
-- `common:field.details` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
+- `common:field.details` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
 - `common:field.email` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyInfoTab.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/components/DeleteCompanyDialog.tsx`, `src/features/admin/components/CustomerLedger/customerLedgerPrint.ts`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/rooms/components/RoomManagement/components/GuestDetailsDialog.tsx`, `src/features/user/components/profile/ProfileTab.tsx`
 - `common:field.from` — `src/features/admin/components/AuditLogPage.tsx`
 - `common:field.fullName` — `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/user/components/profile/ProfileTab.tsx`
 - `common:field.name` — `src/features/communications/pages/CommunicationsPage.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/invoices/components/CheckoutInvoicePrintView.tsx`, `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/segments/components/SegmentEditorDialog.tsx`
-- `common:field.none` — `src/features/admin/components/CustomerLedger/components/DeleteCompanyDialog.tsx`, `src/features/guestRelations/components/InteractionForm.tsx`
+- `common:field.none` — `src/features/admin/components/CustomerLedger/components/DeleteCompanyDialog.tsx`, `src/features/guest-relations/components/InteractionForm.tsx`
 - `common:field.notes` — `src/features/admin/components/CustomerLedger/components/CompanyFormDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CompanyInvoiceDialog.tsx`, `src/features/admin/components/CustomerLedger/components/CreateLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/EditLedgerDialog.tsx`, `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`, `src/features/admin/components/CustomerLedger/customerLedgerPrint.ts`, `src/features/housekeeping/components/NewTaskDialog.tsx`, `src/features/housekeeping/components/TaskEditDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/rooms/components/UnifiedBooking/components/NotesSection.tsx`
 - `common:field.optional` — `src/features/rooms/components/RoomConfigurationPage.tsx`, `src/features/rooms/components/UnifiedBooking/components/NotesSection.tsx`
 - `common:field.perNight` — *(dynamic or unreferenced)*
@@ -1492,7 +1492,7 @@ candidates — see `i18n-coverage-inventory.md`.
 - `common:pagination.pageOf` — `src/components/data-table/DataTable.tsx`
 - `common:pagination.previous` — `src/components/data-table/DataTable.tsx`, `src/features/admin/components/AuditLogPage.tsx`
 - `common:pagination.rowsPerPage` — `src/features/admin/components/AuditLogPage.tsx`
-- `common:pagination.showing` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guestRelations/pages/GuestRelationsPage.tsx`
+- `common:pagination.showing` — `src/features/admin/components/AuditLogPage.tsx`, `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guest-relations/pages/GuestRelationsPage.tsx`
 - `common:state.deleting` — `src/features/admin/components/CustomerLedger/components/DeleteCompanyDialog.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`
 - `common:state.empty` — *(dynamic or unreferenced)*
 - `common:state.error` — `src/components/common/ErrorBoundary.tsx`
@@ -1500,8 +1500,8 @@ candidates — see `i18n-coverage-inventory.md`.
 - `common:state.noData` — *(dynamic or unreferenced)*
 - `common:state.noResults` — *(dynamic or unreferenced)*
 - `common:state.processing` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/admin/components/CustomerLedger/components/RecordPaymentDialog.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/rooms/components/RoomManagement/components/MarkComplimentaryDialog.tsx`, `src/features/rooms/components/RoomManagement/components/ReservedCheckInDialog.tsx`, `src/features/rooms/components/UnifiedBooking/UnifiedBookingModal.tsx`
-- `common:state.retry` — `src/components/charts/states.tsx`, `src/features/admin/components/CustomerLedger/CustomerLedgerPage.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/guestRelations/pages/GuestProfilePage.tsx`, `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/housekeeping/components/HousekeepingPage.tsx`, `src/features/housekeeping/components/MaintenanceTab.tsx`, `src/features/housekeeping/components/TasksView.tsx`, `src/features/rates/pages/RatesPage.tsx`, `src/features/rooms/components/RoomManagement/RoomManagementPage.tsx`
-- `common:state.saving` — `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/bookings/components/Bookings/BookingDetailDrawer.tsx`, `src/features/guestRelations/components/GuestConsentDialog.tsx`, `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/InteractionForm.tsx`, `src/features/guestRelations/components/tabs/PreferencesTab.tsx`, `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/rooms/components/RoomManagement/components/BookingNotesDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomNotesDialog.tsx`, `src/features/user/components/SettingsPage.tsx`
+- `common:state.retry` — `src/components/charts/states.tsx`, `src/features/admin/components/CustomerLedger/CustomerLedgerPage.tsx`, `src/features/admin/components/rbac/RBACManagementPage.tsx`, `src/features/ekyc/components/EkycManagementPage.tsx`, `src/features/guest-relations/pages/GuestProfilePage.tsx`, `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/housekeeping/components/HousekeepingPage.tsx`, `src/features/housekeeping/components/MaintenanceTab.tsx`, `src/features/housekeeping/components/TasksView.tsx`, `src/features/rates/pages/RatesPage.tsx`, `src/features/rooms/components/RoomManagement/RoomManagementPage.tsx`
+- `common:state.saving` — `src/features/admin/components/rbac/RolesTab/RoleEditDrawer.tsx`, `src/features/admin/components/rbac/UsersTab/UsersTab.tsx`, `src/features/bookings/components/Bookings/BookingDetailDrawer.tsx`, `src/features/guest-relations/components/GuestConsentDialog.tsx`, `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/InteractionForm.tsx`, `src/features/guest-relations/components/tabs/PreferencesTab.tsx`, `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`, `src/features/invoices/components/CheckoutInvoiceModal.tsx`, `src/features/rooms/components/RoomManagement/components/BookingNotesDialog.tsx`, `src/features/rooms/components/RoomManagement/components/RoomNotesDialog.tsx`, `src/features/user/components/SettingsPage.tsx`
 - `common:state.searching` — `src/components/layout/CommandPalette.tsx`
 - `common:state.unavailable` — *(dynamic or unreferenced)*
 - `common:table.empty` — `src/components/data-table/DataTable.tsx`
@@ -1561,7 +1561,7 @@ candidates — see `i18n-coverage-inventory.md`.
 - `communications:deliveries.attemptsWithError_other` — `src/features/communications/pages/CommunicationsPage.tsx`
 - `communications:deliveries.attempts_one` — `src/features/communications/pages/CommunicationsPage.tsx`
 - `communications:deliveries.attempts_other` — `src/features/communications/pages/CommunicationsPage.tsx`
-- `communications:errors.portalSignInRequired` — `src/features/communications/api/portalCommunicationsApi.ts`, `src/features/guestPortal/booking/api.ts`, `src/features/promotions/api/portalPromotionsApi.ts`
+- `communications:errors.portalSignInRequired` — `src/features/communications/api/portalCommunicationsApi.ts`, `src/features/guest-portal/booking/api.ts`, `src/features/promotions/api/portalPromotionsApi.ts`
 - `communications:errors.requestFailed` — `src/features/communications/pages/CommunicationsPage.tsx`
 - `communications:fields.allowedVariables` — `src/features/communications/pages/CommunicationsPage.tsx`
 - `communications:fields.bodyHtml` — `src/features/communications/pages/CommunicationsPage.tsx`
@@ -2883,120 +2883,120 @@ candidates — see `i18n-coverage-inventory.md`.
 
 ### `guestPortal`
 
-- `guestPortal:account.guest` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:account.signOut` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:account.title` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:actions.book` — `src/features/guestPortal/components/GuestPortalShell.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:actions.bookStay` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:actions.exploreHotel` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:actions.more` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:actions.signIn` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:book.adults` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.anonymousLead` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.anonymousTrail` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.availabilityChangedBody` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.availabilityChangedTitle` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.backToAccount` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.backToHotel` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.cancellationSummary` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.changeRoom` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.checkingAccount` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/PortalDashboardPage.tsx`
-- `guestPortal:book.children` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.childrenSuffix` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.chooseRoom` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.complimentaryNights` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmFreeStay` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.amountPaid` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.bookAnother` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.confirmedTitle` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.emailNote` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.keepBookingPost` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.keepBookingPre` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.payTitle` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.receiptBody` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.receiptTitle` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmation.stayDates` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.confirmingPrice` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.consentRequired` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.continueToPayment` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.coveredInFull` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.creditsAtLimit` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.creditsAvailable` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.creditsHint_one` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.creditsHint_other` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.dailyCleaning` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.detailsHint` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.discount` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.email` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.emailHint` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.adultsRange` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.checkInHorizon` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.checkInPast` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.checkOutOrder` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.childrenRange` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.createFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.creditsFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.email` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.invalidDates` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.nickname` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.nicknameTaken` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.noRooms` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.quoteFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.refreshPriceFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.searchFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.stayLength` — `src/features/guestPortal/booking/utils.ts`
-- `guestPortal:book.errors.tourismType` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.voucherFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.errors.vouchersLoadFailed` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.foreignTourist` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.guestType` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.holdWindow` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.localTourist` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.nickname` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.nicknameHint` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.nightsOfStay` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.noVoucher` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.notEligible` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.openingPortal` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/PortalDashboardPage.tsx`
-- `guestPortal:book.payAfterSubmit` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.phone` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.priceSummary` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.retry` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/PortalDashboardPage.tsx`
-- `guestPortal:book.reviewStay` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.roomImageAlt` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.roomsLeft_one` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.roomsLeft_other` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.search` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.searchHeading` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.searchHint` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.select` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.signIn` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.signInAgain` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/PortalDashboardPage.tsx`
-- `guestPortal:book.specialRequests` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.staySummary` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.stayTotal` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.steps.choose` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.steps.payment` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.steps.review` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.steps.search` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.subtitle` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.subtotal` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.tax` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.title` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.total` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.upToGuests` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.useComplimentary` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.viewAvailable` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.voucher` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.voucherApplied` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.voucherLocksCancellation` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.voucherNonCancellable` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:book.yourDetails` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:booking.bookingNumber` — `src/features/guestPortal/booking/PortalBookingPage.tsx`
-- `guestPortal:booking.checkIn` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:booking.checkOut` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:booking.status` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:booking.total` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:account.guest` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:account.signOut` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:account.title` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:actions.book` — `src/features/guest-portal/components/GuestPortalShell.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:actions.bookStay` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:actions.exploreHotel` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:actions.more` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:actions.signIn` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:book.adults` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.anonymousLead` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.anonymousTrail` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.availabilityChangedBody` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.availabilityChangedTitle` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.backToAccount` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.backToHotel` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.cancellationSummary` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.changeRoom` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.checkingAccount` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/PortalDashboardPage.tsx`
+- `guestPortal:book.children` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.childrenSuffix` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.chooseRoom` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.complimentaryNights` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmFreeStay` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.amountPaid` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.bookAnother` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.confirmedTitle` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.emailNote` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.keepBookingPost` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.keepBookingPre` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.payTitle` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.receiptBody` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.receiptTitle` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmation.stayDates` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.confirmingPrice` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.consentRequired` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.continueToPayment` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.coveredInFull` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.creditsAtLimit` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.creditsAvailable` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.creditsHint_one` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.creditsHint_other` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.dailyCleaning` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.detailsHint` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.discount` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.email` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.emailHint` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.adultsRange` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.checkInHorizon` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.checkInPast` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.checkOutOrder` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.childrenRange` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.createFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.creditsFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.email` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.invalidDates` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.nickname` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.nicknameTaken` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.noRooms` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.quoteFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.refreshPriceFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.searchFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.stayLength` — `src/features/guest-portal/booking/utils.ts`
+- `guestPortal:book.errors.tourismType` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.voucherFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.errors.vouchersLoadFailed` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.foreignTourist` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.guestType` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.holdWindow` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.localTourist` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.nickname` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.nicknameHint` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.nightsOfStay` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.noVoucher` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.notEligible` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.openingPortal` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/PortalDashboardPage.tsx`
+- `guestPortal:book.payAfterSubmit` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.phone` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.priceSummary` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.retry` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/PortalDashboardPage.tsx`
+- `guestPortal:book.reviewStay` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.roomImageAlt` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.roomsLeft_one` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.roomsLeft_other` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.search` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.searchHeading` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.searchHint` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.select` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.signIn` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.signInAgain` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/PortalDashboardPage.tsx`
+- `guestPortal:book.specialRequests` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.staySummary` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.stayTotal` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.steps.choose` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.steps.payment` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.steps.review` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.steps.search` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.subtitle` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.subtotal` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.tax` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.title` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.total` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.upToGuests` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.useComplimentary` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.viewAvailable` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.voucher` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.voucherApplied` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.voucherLocksCancellation` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.voucherNonCancellable` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:book.yourDetails` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:booking.bookingNumber` — `src/features/guest-portal/booking/PortalBookingPage.tsx`
+- `guestPortal:booking.checkIn` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:booking.checkOut` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:booking.status` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:booking.total` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
 - `guestPortal:checkin.account.confirmPassword` — `src/features/bookings/components/guestCheckIn/ClaimAccountStep.tsx`
 - `guestPortal:checkin.account.creating` — `src/features/bookings/components/guestCheckIn/ClaimAccountStep.tsx`
 - `guestPortal:checkin.account.email` — `src/features/bookings/components/guestCheckIn/ClaimAccountStep.tsx`
@@ -3112,102 +3112,102 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:checkin.verify.stayInfo` — `src/features/bookings/components/GuestCheckInVerify.tsx`
 - `guestPortal:checkin.verify.subtitle` — `src/features/bookings/components/GuestCheckInVerify.tsx`
 - `guestPortal:checkin.verify.title` — `src/features/bookings/components/GuestCheckInVerify.tsx`
-- `guestPortal:dashboard.bookings.cancelBooking` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.cancelTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.charactersRemaining_one` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.charactersRemaining_other` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.customReasonLabel` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.keepBooking` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.paidNotice` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.reasonLabel` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.reasons.changeOfPlans` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.reasons.disruption` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.reasons.mistake` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.reasons.other` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.reasons.otherAccommodation` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.requestTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.submitRequest` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.submitting` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelDialog.unpaidNotice` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelFailed` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelRequested` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancellationPending` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancellationUnavailableFallback` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.cancelled` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.colAction` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.colBooking` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.amount` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.bookingStatus` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.confirmedBody` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.offlinePending` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.paid` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.paymentMethod` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.paymentRejected` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.printReceipt` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.receiptId` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.receiptRequiredBody` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.receiptRequiredTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.receiptTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.receiptUploadedBody` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.receiptUploadedTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.stay` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.total` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.uploadButton` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.uploadChoose` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.uploadFailed` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.uploadHint` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.uploadTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.details.uploading` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.empty` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.emptySearch` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.loadError` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.receiptRequiredBody` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.receiptRequiredChip` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.receiptRequiredTitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.requestCancellation` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.searchLabel` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.searchPlaceholder` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.tableCaption` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.tableLabel` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.uploadReceipt` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.bookings.viewDetails` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.acrossRoomTypes_one` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.acrossRoomTypes_other` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.empty` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.howTo` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.loadError` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.loading` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.nightsAvailable` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.roomTypeEntry_one` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.roomTypeEntry_other` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.credits.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.devices.aria` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.confirmBody` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.confirmButton` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.confirmTitle` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.description` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.empty` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.ip` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.loadFailed` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.loading` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.signOut` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.signOutFailed` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.signedOut` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.thisDevice` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.devices.title` — `src/features/guestPortal/components/dashboard/DevicesSection.tsx`
-- `guestPortal:dashboard.identity.description` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.bookings.cancelBooking` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.cancelTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.charactersRemaining_one` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.charactersRemaining_other` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.customReasonLabel` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.keepBooking` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.paidNotice` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.reasonLabel` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.reasons.changeOfPlans` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.reasons.disruption` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.reasons.mistake` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.reasons.other` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.reasons.otherAccommodation` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.requestTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.submitRequest` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.submitting` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelDialog.unpaidNotice` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelFailed` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelRequested` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancellationPending` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancellationUnavailableFallback` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.cancelled` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.colAction` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.colBooking` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.amount` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.bookingStatus` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.confirmedBody` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.offlinePending` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.paid` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.paymentMethod` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.paymentRejected` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.printReceipt` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.receiptId` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.receiptRequiredBody` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.receiptRequiredTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.receiptTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.receiptUploadedBody` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.receiptUploadedTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.stay` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.total` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.uploadButton` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.uploadChoose` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.uploadFailed` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.uploadHint` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.uploadTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.details.uploading` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.empty` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.emptySearch` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.loadError` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.receiptRequiredBody` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.receiptRequiredChip` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.receiptRequiredTitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.requestCancellation` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.searchLabel` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.searchPlaceholder` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.tableCaption` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.tableLabel` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.uploadReceipt` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.bookings.viewDetails` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.acrossRoomTypes_one` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.acrossRoomTypes_other` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.empty` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.howTo` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.loadError` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.loading` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.nightsAvailable` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.roomTypeEntry_one` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.roomTypeEntry_other` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.credits.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.devices.aria` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.confirmBody` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.confirmButton` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.confirmTitle` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.description` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.empty` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.ip` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.loadFailed` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.loading` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.signOut` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.signOutFailed` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.signedOut` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.thisDevice` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.devices.title` — `src/features/guest-portal/components/dashboard/DevicesSection.tsx`
+- `guestPortal:dashboard.identity.description` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
 - `guestPortal:dashboard.identity.documents.id_back` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.documents.id_front` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.documents.proof` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.documents.selfie` — *(dynamic or unreferenced)*
-- `guestPortal:dashboard.identity.documentsHint` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.documentsTitle` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.documentsHint` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.documentsTitle` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
 - `guestPortal:dashboard.identity.errorLabels.currentAddress` — `src/features/ekyc/utils/ekycFieldRules.ts`
 - `guestPortal:dashboard.identity.errorLabels.dateOfBirth` — `src/features/ekyc/utils/ekycFieldRules.ts`
 - `guestPortal:dashboard.identity.errorLabels.email` — `src/features/ekyc/utils/ekycFieldRules.ts`
@@ -3223,24 +3223,24 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:dashboard.identity.errorLabels.selfie` — `src/features/ekyc/utils/ekycFieldRules.ts`
 - `guestPortal:dashboard.identity.errors.expiryFuture` — `src/features/ekyc/utils/ekycFieldRules.ts`
 - `guestPortal:dashboard.identity.errors.required` — `src/features/ekyc/utils/ekycFieldRules.ts`
-- `guestPortal:dashboard.identity.eyebrow` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.currentAddress` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.dateOfBirth` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.email` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.fullName` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.idExpiryDate` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.idIssuingCountry` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.idNumber` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.idType` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.nationality` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.fields.phone` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.eyebrow` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.currentAddress` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.dateOfBirth` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.email` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.fullName` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.idExpiryDate` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.idIssuingCountry` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.idNumber` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.idType` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.nationality` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.fields.phone` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
 - `guestPortal:dashboard.identity.idTypes.driving_license` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.idTypes.national_id` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.idTypes.passport` — *(dynamic or unreferenced)*
-- `guestPortal:dashboard.identity.incompleteFields` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.loadFailed` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.loading` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.resubmitTitle` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.incompleteFields` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.loadFailed` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.loading` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.resubmitTitle` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
 - `guestPortal:dashboard.identity.status.additional_information_required.help` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.status.additional_information_required.label` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.status.approved.help` — *(dynamic or unreferenced)*
@@ -3255,92 +3255,92 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:dashboard.identity.status.verified.label` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.status.void.help` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.identity.status.void.label` — *(dynamic or unreferenced)*
-- `guestPortal:dashboard.identity.submit` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.submitFailed` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.submittedAt` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.submitting` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.title` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.uploadFailed` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.identity.uploaded` — `src/features/guestPortal/components/dashboard/IdentitySection.tsx`
-- `guestPortal:dashboard.loading` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.nameFallback` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.offers.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.offers.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.offers.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.loading` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.nextStay` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.nextStayBooking` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.noStay` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.noStayHint` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.notEnrolled` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.partialError` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.planVisit` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.planVisitHint` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.pointsAvailable` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.pointsBalance` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.subtitle` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.viewOffers` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.viewPoints` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.viewStays` — `src/features/guestPortal/booking/PortalBookingPage.tsx`, `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.overview.welcome` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.pagination.displayedRows` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.pagination.displayedRowsMore` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.identity.submit` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.submitFailed` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.submittedAt` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.submitting` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.title` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.uploadFailed` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.identity.uploaded` — `src/features/guest-portal/components/dashboard/IdentitySection.tsx`
+- `guestPortal:dashboard.loading` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.nameFallback` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.offers.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.offers.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.offers.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.loading` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.nextStay` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.nextStayBooking` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.noStay` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.noStayHint` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.notEnrolled` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.partialError` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.planVisit` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.planVisitHint` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.pointsAvailable` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.pointsBalance` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.subtitle` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.viewOffers` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.viewPoints` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.viewStays` — `src/features/guest-portal/booking/PortalBookingPage.tsx`, `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.overview.welcome` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.pagination.displayedRows` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.pagination.displayedRowsMore` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
 - `guestPortal:dashboard.pagination.pageFirst` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.pagination.pageLast` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.pagination.pageNext` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.pagination.pagePrevious` — *(dynamic or unreferenced)*
-- `guestPortal:dashboard.pagination.rowsPerPage` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.amountDue` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.awaitingPayment` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.bookingLabel` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.colAmount` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.colBooking` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.colDate` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.colMethod` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.colReference` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.colType` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.empty` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.kindInvoice` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.kindPayment` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.loadError` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.tableCaption` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.tableLabel` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.payments.transactionFallback` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.activityLine` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.balanceAfter` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.contextAdjustedBy` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.points.contextAdjustedByStaff` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.points.contextBooking` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.points.contextFromBooking` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.points.contextWithReason` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.points.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.empty` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.levelStatus` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.lifetimePoints` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.loadError` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.notEnrolled` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.pointsAvailable` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.recentActivity` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.tierMember` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.points.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.preferences.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.preferences.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.preferences.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.profile.contactAria` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.contactSubtitle` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.contactTitle` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.description` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.displayName` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.edit` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.email` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.errors.firstNameRequired` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.errors.lastNameRequired` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.eyebrow` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.pagination.rowsPerPage` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.amountDue` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.awaitingPayment` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.bookingLabel` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.colAmount` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.colBooking` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.colDate` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.colMethod` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.colReference` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.colType` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.empty` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.kindInvoice` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.kindPayment` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.loadError` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.tableCaption` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.tableLabel` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.payments.transactionFallback` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.activityLine` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.balanceAfter` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.contextAdjustedBy` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.points.contextAdjustedByStaff` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.points.contextBooking` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.points.contextFromBooking` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.points.contextWithReason` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.points.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.empty` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.levelStatus` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.lifetimePoints` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.loadError` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.notEnrolled` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.pointsAvailable` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.recentActivity` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.tierMember` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.points.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.preferences.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.preferences.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.preferences.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.profile.contactAria` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.contactSubtitle` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.contactTitle` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.description` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.displayName` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.edit` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.email` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.errors.firstNameRequired` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.errors.lastNameRequired` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.eyebrow` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
 - `guestPortal:dashboard.profile.fields.address_line1` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.profile.fields.alt_phone` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.profile.fields.city` — *(dynamic or unreferenced)*
@@ -3352,134 +3352,134 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:dashboard.profile.fields.postal_code` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.profile.fields.state_province` — *(dynamic or unreferenced)*
 - `guestPortal:dashboard.profile.fields.title` — *(dynamic or unreferenced)*
-- `guestPortal:dashboard.profile.icNumber` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.identityAria` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.identitySubtitle` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.identityTitle` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.incompleteFields` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.incompleteGeneric` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.incompleteReason` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.incompleteTitle` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.loadFailed` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.loading` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.missingFields.first_name` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.missingFields.last_name` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.missingFields.phone` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.save` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.saveFailed` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.saved` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.saving` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
-- `guestPortal:dashboard.profile.title` — `src/features/guestPortal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.icNumber` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.identityAria` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.identitySubtitle` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.identityTitle` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.incompleteFields` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.incompleteGeneric` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.incompleteReason` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.incompleteTitle` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.loadFailed` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.loading` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.missingFields.first_name` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.missingFields.last_name` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.missingFields.phone` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.save` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.saveFailed` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.saved` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.saving` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
+- `guestPortal:dashboard.profile.title` — `src/features/guest-portal/components/dashboard/ProfileSection.tsx`
 - `guestPortal:dashboard.sections.offers` — `src/features/promotions/pages/OffersPage.tsx`
-- `guestPortal:dashboard.security.authenticator.checking` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.codeLabel` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.codeMismatch` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.codeStep` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.copyKeyAria` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.description` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.disableBody` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.disableCodeLabel` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.disableTitle` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.disabled` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.enabled` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.enabledBody` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.keepOn` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.keyCopied` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.manualKey` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.off` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.on` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.preparing` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.qrTitle` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.recoveryNote` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.scanStep` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.setup` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.setupFailed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.setupHint` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.setupTitle` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.title` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.turnOff` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.authenticator.turnOn` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.copyBlocked` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.description` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.eyebrow` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.loadFailed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.loading` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.accountNameMissing` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.add` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.addFailed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.added` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.addedLastUsed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.addedNeverUsed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.atLimit` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.cancelRenameAria` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.codeLabel` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.confirmRemoveBody` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.confirmRemoveButton` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.confirmRemoveTitle` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.continue` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.defaultName` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.description` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.empty` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.loadFailed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.loading` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.nameLabel` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.namePlaceholder` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.nameRequired` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.none` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.orAuthenticator` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.passwordLabel` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.removeAria` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.removeFailed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.removed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.renameAria` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.renameFailed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.renamed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.saveNameAria` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.saved` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.stepUpBody` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.stepUpTitle` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.thisDevice` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.title` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.unnamed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.unsupported` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.passkeys.waiting` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.allUsed` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.codeLabel` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.codeMismatch` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.description` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.dialogBody` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.dialogTitle` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.generate` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.generateButton` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.generating` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.issueDateMissing` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.issued` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.issuedOn` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.issuedUnknown` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.left` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.low_one` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.low_other` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.notEnabledBody` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.notSetUp` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recovery.title` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recoveryDialog.body` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recoveryDialog.copied` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recoveryDialog.copyAll` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recoveryDialog.done` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.recoveryDialog.title` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.security.title` — `src/features/guestPortal/components/dashboard/SecuritySection.tsx`
-- `guestPortal:dashboard.statusCancelled` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.statusUnavailable` — `src/features/guestPortal/components/dashboard/dashboardUtils.ts`
-- `guestPortal:dashboard.support.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.support.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.support.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.vouchers.description` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.vouchers.eyebrow` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:dashboard.vouchers.title` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.security.authenticator.checking` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.codeLabel` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.codeMismatch` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.codeStep` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.copyKeyAria` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.description` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.disableBody` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.disableCodeLabel` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.disableTitle` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.disabled` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.enabled` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.enabledBody` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.keepOn` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.keyCopied` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.manualKey` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.off` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.on` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.preparing` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.qrTitle` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.recoveryNote` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.scanStep` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.setup` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.setupFailed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.setupHint` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.setupTitle` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.title` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.turnOff` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.authenticator.turnOn` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.copyBlocked` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.description` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.eyebrow` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.loadFailed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.loading` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.accountNameMissing` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.add` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.addFailed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.added` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.addedLastUsed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.addedNeverUsed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.atLimit` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.cancelRenameAria` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.codeLabel` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.confirmRemoveBody` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.confirmRemoveButton` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.confirmRemoveTitle` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.continue` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.defaultName` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.description` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.empty` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.loadFailed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.loading` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.nameLabel` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.namePlaceholder` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.nameRequired` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.none` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.orAuthenticator` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.passwordLabel` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.removeAria` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.removeFailed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.removed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.renameAria` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.renameFailed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.renamed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.saveNameAria` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.saved` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.stepUpBody` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.stepUpTitle` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.thisDevice` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.title` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.unnamed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.unsupported` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.passkeys.waiting` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.allUsed` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.codeLabel` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.codeMismatch` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.description` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.dialogBody` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.dialogTitle` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.generate` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.generateButton` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.generating` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.issueDateMissing` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.issued` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.issuedOn` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.issuedUnknown` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.left` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.low_one` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.low_other` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.notEnabledBody` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.notSetUp` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recovery.title` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recoveryDialog.body` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recoveryDialog.copied` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recoveryDialog.copyAll` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recoveryDialog.done` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.recoveryDialog.title` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.security.title` — `src/features/guest-portal/components/dashboard/SecuritySection.tsx`
+- `guestPortal:dashboard.statusCancelled` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.statusUnavailable` — `src/features/guest-portal/components/dashboard/dashboardUtils.ts`
+- `guestPortal:dashboard.support.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.support.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.support.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.vouchers.description` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.vouchers.eyebrow` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:dashboard.vouchers.title` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
 - `guestPortal:errorBoundary.detail` — `src/guest/GuestRootLayout.tsx`, `src/router/RootLayout.tsx`
 - `guestPortal:errorBoundary.title` — `src/guest/GuestRootLayout.tsx`
-- `guestPortal:groups.account` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:groups.rewards` — `src/features/guestPortal/components/GuestPortalShell.tsx`
+- `guestPortal:groups.account` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:groups.rewards` — `src/features/guest-portal/components/GuestPortalShell.tsx`
 - `guestPortal:nav.credits` — *(dynamic or unreferenced)*
 - `guestPortal:nav.identity` — *(dynamic or unreferenced)*
 - `guestPortal:nav.offers` — *(dynamic or unreferenced)*
@@ -3487,33 +3487,33 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:nav.points-history` — *(dynamic or unreferenced)*
 - `guestPortal:nav.preferences` — *(dynamic or unreferenced)*
 - `guestPortal:nav.profile` — *(dynamic or unreferenced)*
-- `guestPortal:nav.rewards` — `src/features/guestPortal/components/GuestPortalShell.tsx`
+- `guestPortal:nav.rewards` — `src/features/guest-portal/components/GuestPortalShell.tsx`
 - `guestPortal:nav.security` — *(dynamic or unreferenced)*
 - `guestPortal:nav.stays` — *(dynamic or unreferenced)*
 - `guestPortal:nav.vouchers` — *(dynamic or unreferenced)*
-- `guestPortal:notifications.actionNeeded` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.actionNeededTooltip` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.badgeLabel_one` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.badgeLabel_other` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.caughtUp` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.done` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.empty` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.pendingSummary_one` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.pendingSummary_other` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.receiptBody` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.receiptRequired` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.receiptTooLarge` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.refreshFailed` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadButton` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadChoose` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadFailed` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadHint` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadLeadPre` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadSelectAria` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadTitle` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploadedBody` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.uploading` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:notifications.viewRequest` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.actionNeeded` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.actionNeededTooltip` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.badgeLabel_one` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.badgeLabel_other` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.caughtUp` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.done` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.empty` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.pendingSummary_one` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.pendingSummary_other` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.receiptBody` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.receiptRequired` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.receiptTooLarge` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.refreshFailed` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadButton` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadChoose` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadFailed` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadHint` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadLeadPre` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadSelectAria` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadTitle` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploadedBody` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.uploading` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:notifications.viewRequest` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
 - `guestPortal:offers.alreadyClaimed` — `src/features/promotions/components/PromotionCard.tsx`
 - `guestPortal:offers.anyTime` — `src/features/promotions/components/PromotionCard.tsx`
 - `guestPortal:offers.claimBy` — `src/features/promotions/components/PromotionCard.tsx`
@@ -3538,33 +3538,33 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:offers.stayDates` — `src/features/promotions/components/PromotionCard.tsx`
 - `guestPortal:offers.terms` — `src/features/promotions/components/PromotionCard.tsx`
 - `guestPortal:offers.termsNote` — `src/features/promotions/pages/OffersPage.tsx`
-- `guestPortal:payment.acceptTermsFirst` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.amountDue` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.attachReceipt` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankDetailsHeading` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankDetailsUnavailable` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankFieldAccountName` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankFieldAccountNumber` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankFieldBank` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankSubmitFailed` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.bankTransferLabel` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.chooseMethod` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.configLoadFailed` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.inFlight` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.loading` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.paidViaBank` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.paypalCaptureFailed` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.paypalLabel` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.paypalOrderMissing` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.paypalProcessFailed` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.paypalStartFailed` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.receiptHint` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.receiptSelected` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.successConfirmed` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payment.successPending` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`
-- `guestPortal:payments.pendingLoadFailed` — `src/features/guestPortal/components/dashboard/PortalDashboardSections.tsx`
-- `guestPortal:preferences.appearance` — `src/features/guestPortal/components/dashboard/AppearancePreferenceCard.tsx`
-- `guestPortal:preferences.appearanceHint` — `src/features/guestPortal/components/dashboard/AppearancePreferenceCard.tsx`
+- `guestPortal:payment.acceptTermsFirst` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.amountDue` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.attachReceipt` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankDetailsHeading` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankDetailsUnavailable` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankFieldAccountName` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankFieldAccountNumber` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankFieldBank` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankSubmitFailed` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.bankTransferLabel` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.chooseMethod` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.configLoadFailed` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.inFlight` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.loading` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.paidViaBank` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.paypalCaptureFailed` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.paypalLabel` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.paypalOrderMissing` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.paypalProcessFailed` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.paypalStartFailed` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.receiptHint` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.receiptSelected` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.successConfirmed` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payment.successPending` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`
+- `guestPortal:payments.pendingLoadFailed` — `src/features/guest-portal/components/dashboard/PortalDashboardSections.tsx`
+- `guestPortal:preferences.appearance` — `src/features/guest-portal/components/dashboard/AppearancePreferenceCard.tsx`
+- `guestPortal:preferences.appearanceHint` — `src/features/guest-portal/components/dashboard/AppearancePreferenceCard.tsx`
 - `guestPortal:preferences.disabled` — `src/features/communications/components/PortalNotificationPreferences.tsx`
 - `guestPortal:preferences.enabled` — `src/features/communications/components/PortalNotificationPreferences.tsx`
 - `guestPortal:preferences.loadFailed` — `src/features/communications/components/PortalNotificationPreferences.tsx`
@@ -3573,98 +3573,98 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guestPortal:preferences.savedDisabled` — `src/features/communications/components/PortalNotificationPreferences.tsx`
 - `guestPortal:preferences.savedEnabled` — `src/features/communications/components/PortalNotificationPreferences.tsx`
 - `guestPortal:preferences.subtitle` — `src/features/communications/components/PortalNotificationPreferences.tsx`
-- `guestPortal:preferences.themeDark` — `src/features/guestPortal/components/dashboard/AppearancePreferenceCard.tsx`
-- `guestPortal:preferences.themeLight` — `src/features/guestPortal/components/dashboard/AppearancePreferenceCard.tsx`
-- `guestPortal:preferences.themeSystem` — `src/features/guestPortal/components/dashboard/AppearancePreferenceCard.tsx`
+- `guestPortal:preferences.themeDark` — `src/features/guest-portal/components/dashboard/AppearancePreferenceCard.tsx`
+- `guestPortal:preferences.themeLight` — `src/features/guest-portal/components/dashboard/AppearancePreferenceCard.tsx`
+- `guestPortal:preferences.themeSystem` — `src/features/guest-portal/components/dashboard/AppearancePreferenceCard.tsx`
 - `guestPortal:preferences.title` — `src/features/communications/components/PortalNotificationPreferences.tsx`
 - `guestPortal:preferences.toggleAria` — `src/features/communications/components/PortalNotificationPreferences.tsx`
 - `guestPortal:preferences.topics.announcement` — `src/features/communications/components/PortalNotificationPreferences.tsx`, `src/features/communications/pages/UnsubscribePage.tsx`
 - `guestPortal:preferences.topics.birthday_voucher` — `src/features/communications/components/PortalNotificationPreferences.tsx`, `src/features/communications/pages/UnsubscribePage.tsx`
 - `guestPortal:preferences.topics.promotion` — `src/features/communications/components/PortalNotificationPreferences.tsx`, `src/features/communications/pages/UnsubscribePage.tsx`
-- `guestPortal:recoverPayment.alreadySubmitted` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.amountDue` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.bankTransfer` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.bankTransferHint` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.expires` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.failed` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.loading` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.or` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.paypal` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`, `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.paypalFailed` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.paypalUnavailable` — `src/features/guestPortal/components/GuestPaymentPanel.tsx`, `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.reference` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.singleUse` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.submitted` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.submittedBody` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.submitting` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.subtitle` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.title` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.unavailableBody` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.unavailableTitle` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.uploadChoose` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.uploadFailed` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.uploadHeading` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.uploadHint` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.uploaded` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:recoverPayment.uploading` — `src/features/paymentRecovery/PaymentRecoveryPage.tsx`
-- `guestPortal:shell.homeAria` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:shell.mobileNavAria` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:shell.navAria` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:shell.notifications` — `src/features/guestPortal/components/GuestPortalNotificationBell.tsx`
-- `guestPortal:shell.skipToContent` — `src/features/guestPortal/components/GuestPortalShell.tsx`
-- `guestPortal:support.backToConversations` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.categories.billing` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.categories.booking` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.categories.loyalty` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.categories.other` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.categories.stay` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.categories.technical` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.closedNotice` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.contactSupport` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.conversationsHeading` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.detailLoadFailed` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.dialogAria` — `src/features/guestPortal/components/PortalSupportWidget.tsx`
-- `guestPortal:support.disabledNotice` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.emergencyNotice` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.emptyBody` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.emptyTitle` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.hotelSupport` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.listAria` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.listLoadFailed` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.messagesAria` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.new` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newConversation` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.categoryLabel` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.createFailed` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.emptyMessage` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.messageLabel` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.messagePlaceholder` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.safetyNote` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.send` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.newDialog.title` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.reopen` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.reopenFailed` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.reopenHint` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.replyLabel` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.replyPlaceholder` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.resolution` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.resolvedNoReopen` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.selectConversation` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.selectConversationHint` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.sendFailed` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.sendReply` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.startedAt` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.status.closed` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.status.resolved` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.status.waiting_for_guest` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.status.waiting_for_staff` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.subtitle` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.title` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.updatedAt` — `src/features/guestPortal/components/PortalSupportTab.tsx`
-- `guestPortal:support.widgetClose` — `src/features/guestPortal/components/PortalSupportWidget.tsx`
-- `guestPortal:support.widgetOpen` — `src/features/guestPortal/components/PortalSupportWidget.tsx`
-- `guestPortal:support.widgetTitle` — `src/features/guestPortal/components/PortalSupportWidget.tsx`
-- `guestPortal:support.you` — `src/features/guestPortal/components/PortalSupportTab.tsx`
+- `guestPortal:recoverPayment.alreadySubmitted` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.amountDue` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.bankTransfer` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.bankTransferHint` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.expires` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.failed` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.loading` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.or` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.paypal` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`, `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.paypalFailed` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.paypalUnavailable` — `src/features/guest-portal/components/GuestPaymentPanel.tsx`, `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.reference` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.singleUse` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.submitted` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.submittedBody` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.submitting` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.subtitle` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.title` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.unavailableBody` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.unavailableTitle` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.uploadChoose` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.uploadFailed` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.uploadHeading` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.uploadHint` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.uploaded` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:recoverPayment.uploading` — `src/features/payment-recovery/PaymentRecoveryPage.tsx`
+- `guestPortal:shell.homeAria` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:shell.mobileNavAria` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:shell.navAria` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:shell.notifications` — `src/features/guest-portal/components/GuestPortalNotificationBell.tsx`
+- `guestPortal:shell.skipToContent` — `src/features/guest-portal/components/GuestPortalShell.tsx`
+- `guestPortal:support.backToConversations` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.categories.billing` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.categories.booking` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.categories.loyalty` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.categories.other` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.categories.stay` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.categories.technical` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.closedNotice` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.contactSupport` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.conversationsHeading` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.detailLoadFailed` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.dialogAria` — `src/features/guest-portal/components/PortalSupportWidget.tsx`
+- `guestPortal:support.disabledNotice` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.emergencyNotice` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.emptyBody` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.emptyTitle` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.hotelSupport` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.listAria` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.listLoadFailed` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.messagesAria` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.new` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newConversation` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.categoryLabel` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.createFailed` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.emptyMessage` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.messageLabel` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.messagePlaceholder` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.safetyNote` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.send` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.newDialog.title` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.reopen` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.reopenFailed` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.reopenHint` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.replyLabel` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.replyPlaceholder` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.resolution` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.resolvedNoReopen` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.selectConversation` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.selectConversationHint` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.sendFailed` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.sendReply` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.startedAt` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.status.closed` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.status.resolved` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.status.waiting_for_guest` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.status.waiting_for_staff` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.subtitle` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.title` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.updatedAt` — `src/features/guest-portal/components/PortalSupportTab.tsx`
+- `guestPortal:support.widgetClose` — `src/features/guest-portal/components/PortalSupportWidget.tsx`
+- `guestPortal:support.widgetOpen` — `src/features/guest-portal/components/PortalSupportWidget.tsx`
+- `guestPortal:support.widgetTitle` — `src/features/guest-portal/components/PortalSupportWidget.tsx`
+- `guestPortal:support.you` — `src/features/guest-portal/components/PortalSupportTab.tsx`
 - `guestPortal:unsubscribe.allButton` — `src/features/communications/pages/UnsubscribePage.tsx`
 - `guestPortal:unsubscribe.invalidLink` — `src/features/communications/pages/UnsubscribePage.tsx`
 - `guestPortal:unsubscribe.note` — `src/features/communications/pages/UnsubscribePage.tsx`
@@ -3706,60 +3706,60 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guests:communication.channels.push` — *(dynamic or unreferenced)*
 - `guests:communication.channels.sms` — *(dynamic or unreferenced)*
 - `guests:communication.channels.whatsapp` — *(dynamic or unreferenced)*
-- `guests:communication.colChannel` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colDate` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colKind` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colStatus` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colSubject` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colSubscribed` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colTopic` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.colUpdated` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.consentTitle` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.deliverability` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.deliverable` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.deliveriesAria` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.deliveriesEmpty` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.deliveriesTitle` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.editConsent` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.language` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.loadFailed` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.marketingOptIn` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.optInNote` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.optedIn` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.optedOut` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.preferredChannel` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.subscribed` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.suppressed` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.suppressedAlert` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.topicsAria` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.topicsEmpty` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.topicsTitle` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:communication.unsubscribed` — `src/features/guestRelations/components/tabs/CommunicationTab.tsx`
-- `guests:consent.description` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.failed` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.footnote` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.optedIn` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.optedOut` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.save` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.title` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:consent.toggleAria` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
+- `guests:communication.colChannel` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colDate` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colKind` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colStatus` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colSubject` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colSubscribed` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colTopic` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.colUpdated` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.consentTitle` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.deliverability` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.deliverable` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.deliveriesAria` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.deliveriesEmpty` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.deliveriesTitle` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.editConsent` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.language` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.loadFailed` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.marketingOptIn` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.optInNote` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.optedIn` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.optedOut` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.preferredChannel` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.subscribed` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.suppressed` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.suppressedAlert` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.topicsAria` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.topicsEmpty` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.topicsTitle` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:communication.unsubscribed` — `src/features/guest-relations/components/tabs/CommunicationTab.tsx`
+- `guests:consent.description` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.failed` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.footnote` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.optedIn` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.optedOut` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.save` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.title` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:consent.toggleAria` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
 - `guests:consent.topics.announcement` — *(dynamic or unreferenced)*
 - `guests:consent.topics.birthday_voucher` — *(dynamic or unreferenced)*
 - `guests:consent.topics.promotion` — *(dynamic or unreferenced)*
-- `guests:consent.updated` — `src/features/guestRelations/components/GuestConsentDialog.tsx`
-- `guests:credits.byRoomType` — `src/features/guestRelations/components/GuestCreditsDialog.tsx`
-- `guests:credits.code` — `src/features/guestRelations/components/GuestCreditsDialog.tsx`
-- `guests:credits.noneAvailable` — `src/features/guestRelations/components/GuestCreditsDialog.tsx`
-- `guests:credits.title` — `src/features/guestRelations/components/GuestCreditsDialog.tsx`
-- `guests:credits.totalAvailable` — `src/features/guestRelations/components/GuestCreditsDialog.tsx`
-- `guests:credits.unavailable` — `src/features/guestRelations/components/GuestCreditsDialog.tsx`
+- `guests:consent.updated` — `src/features/guest-relations/components/GuestConsentDialog.tsx`
+- `guests:credits.byRoomType` — `src/features/guest-relations/components/GuestCreditsDialog.tsx`
+- `guests:credits.code` — `src/features/guest-relations/components/GuestCreditsDialog.tsx`
+- `guests:credits.noneAvailable` — `src/features/guest-relations/components/GuestCreditsDialog.tsx`
+- `guests:credits.title` — `src/features/guest-relations/components/GuestCreditsDialog.tsx`
+- `guests:credits.totalAvailable` — `src/features/guest-relations/components/GuestCreditsDialog.tsx`
+- `guests:credits.unavailable` — `src/features/guest-relations/components/GuestCreditsDialog.tsx`
 - `guests:csv.blacklisted` — *(dynamic or unreferenced)*
 - `guests:csv.bookings` — *(dynamic or unreferenced)*
 - `guests:csv.company` — *(dynamic or unreferenced)*
 - `guests:csv.country` — *(dynamic or unreferenced)*
 - `guests:csv.email` — *(dynamic or unreferenced)*
 - `guests:csv.guestType` — *(dynamic or unreferenced)*
-- `guests:csv.icPassport` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
+- `guests:csv.icPassport` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
 - `guests:csv.id` — *(dynamic or unreferenced)*
 - `guests:csv.lastStay` — *(dynamic or unreferenced)*
 - `guests:csv.name` — *(dynamic or unreferenced)*
@@ -3767,341 +3767,341 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guests:csv.phone` — *(dynamic or unreferenced)*
 - `guests:csv.tourismType` — *(dynamic or unreferenced)*
 - `guests:csv.vipStatus` — *(dynamic or unreferenced)*
-- `guests:dashboard.cards.arrivalsEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.arrivalsTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.departuresEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.departuresTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.followUpsEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.followUpsTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.followUpsViewAll` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.inHouseEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.inHouseTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.reviewsEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.reviewsTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.supportEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.supportTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.supportViewAll` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.viewAllBookings` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.vipEmpty` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.cards.vipTitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.directory` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.dueAt` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.rating` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.room` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.arrivals` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.awaitingReview` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.departures` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.followUpsDue` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.inHouse` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.openSupport` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.stats.vipArrivals` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.subtitle` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.title` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.unrated` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.waitingForStaff_one` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:dashboard.waitingForStaff_other` — `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:drawer.accountActive` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.accountDeactivated` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.ariaLabel` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.blacklistReason` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.closeAria` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.openFull` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.portalAccount` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:drawer.quickEdit` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`
-- `guests:followUps.cols.assignee` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.cols.due` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.cols.guest` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.cols.snippet` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.cols.subject` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.cols.type` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.completeFailed` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.emptyAll` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.emptyFiltered` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.emptyTitle` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.filters.all` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.filters.overdue` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.filters.today` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.filters.upcoming` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.kicker` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.loadFailed` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.markDone` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.markedDone` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.oldestFirst` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.overdue` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.shownOfTotal` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.subjectFallback` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`
-- `guests:followUps.subtitle` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.title` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:followUps.unassigned` — `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`
-- `guests:form.address` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.city` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.closeAria` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.companyName` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.country` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.createGuest` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.createSubtitle` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.createTitle` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.discountMemberHelp` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.discountNonMemberHelp` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.discountPercentage` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.editSubtitle` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.editTitle` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.email` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.firstName` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.guestFallback` — `src/features/guestRelations/components/GuestFormDialog.tsx`, `src/features/invoices/hooks/useCheckoutFlow.ts`
-- `guests:form.guestType` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.icHelper` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.icNumber` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.lastName` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.membershipSection` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.nationality` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.noCompanies` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.noCompaniesMatch` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.notSpecified` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.phone` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.phoneRequired` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.postalCode` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.saveChanges` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.selectTourism` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.stateProvince` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.tourismSection` — `src/features/guestRelations/components/GuestFormDialog.tsx`
-- `guests:form.tourismType` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guestRelations/components/GuestFormDialog.tsx`
+- `guests:dashboard.cards.arrivalsEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.arrivalsTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.departuresEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.departuresTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.followUpsEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.followUpsTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.followUpsViewAll` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.inHouseEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.inHouseTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.reviewsEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.reviewsTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.supportEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.supportTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.supportViewAll` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.viewAllBookings` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.vipEmpty` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.cards.vipTitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.directory` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.dueAt` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.rating` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.room` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.arrivals` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.awaitingReview` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.departures` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.followUpsDue` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.inHouse` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.openSupport` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.stats.vipArrivals` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.subtitle` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.title` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.unrated` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.waitingForStaff_one` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:dashboard.waitingForStaff_other` — `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:drawer.accountActive` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.accountDeactivated` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.ariaLabel` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.blacklistReason` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.closeAria` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.openFull` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.portalAccount` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:drawer.quickEdit` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`
+- `guests:followUps.cols.assignee` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.cols.due` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.cols.guest` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.cols.snippet` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.cols.subject` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.cols.type` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.completeFailed` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.emptyAll` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.emptyFiltered` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.emptyTitle` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.filters.all` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.filters.overdue` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.filters.today` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.filters.upcoming` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.kicker` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.loadFailed` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.markDone` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.markedDone` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.oldestFirst` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.overdue` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.shownOfTotal` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.subjectFallback` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`
+- `guests:followUps.subtitle` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.title` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:followUps.unassigned` — `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`
+- `guests:form.address` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.city` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.closeAria` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.companyName` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.country` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.createGuest` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.createSubtitle` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.createTitle` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.discountMemberHelp` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.discountNonMemberHelp` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.discountPercentage` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.editSubtitle` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.editTitle` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.email` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.firstName` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.guestFallback` — `src/features/guest-relations/components/GuestFormDialog.tsx`, `src/features/invoices/hooks/useCheckoutFlow.ts`
+- `guests:form.guestType` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.icHelper` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.icNumber` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.lastName` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.membershipSection` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.nationality` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.noCompanies` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.noCompaniesMatch` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.notSpecified` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.phone` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.phoneRequired` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.postalCode` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.saveChanges` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.selectTourism` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.stateProvince` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.tourismSection` — `src/features/guest-relations/components/GuestFormDialog.tsx`
+- `guests:form.tourismType` — `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`, `src/features/guest-relations/components/GuestFormDialog.tsx`
 - `guests:guestType.member` — `src/constants/guest.constants.ts`
 - `guests:guestType.memberDiscount` — `src/constants/guest.constants.ts`
-- `guests:guestType.memberOption` — `src/features/guestRelations/components/GuestFormDialog.tsx`
+- `guests:guestType.memberOption` — `src/features/guest-relations/components/GuestFormDialog.tsx`
 - `guests:guestType.nonMember` — `src/constants/guest.constants.ts`
-- `guests:guestType.nonMemberOption` — `src/features/guestRelations/components/GuestFormDialog.tsx`
+- `guests:guestType.nonMemberOption` — `src/features/guest-relations/components/GuestFormDialog.tsx`
 - `guests:guestType.standardRate` — `src/constants/guest.constants.ts`
-- `guests:history.cols.amount` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.cols.bookingNumber` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.cols.checkIn` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.cols.checkOut` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.cols.nights` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.cols.room` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.cols.status` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.empty` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.groupEmpty.checkedOut` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.groupEmpty.other` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.groupEmpty.void` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.groups.checkedOut` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.groups.other` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.groups.void` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
-- `guests:history.title` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.amount` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.bookingNumber` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.checkIn` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.checkOut` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.nights` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.room` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.cols.status` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.empty` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.groupEmpty.checkedOut` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.groupEmpty.other` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.groupEmpty.void` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.groups.checkedOut` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.groups.other` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.groups.void` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
+- `guests:history.title` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`
 - `guests:idTypes.driver_license` — *(dynamic or unreferenced)*
 - `guests:idTypes.ic` — *(dynamic or unreferenced)*
 - `guests:idTypes.mykad` — *(dynamic or unreferenced)*
 - `guests:idTypes.other` — *(dynamic or unreferenced)*
 - `guests:idTypes.passport` — *(dynamic or unreferenced)*
-- `guests:interactions.add` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.addFailed` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.addNote` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.added` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.alert` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.assignedTo` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.booking` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.completeFollowUp` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.deleteAria` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.deleteFailed` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.deleteMessage` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.deleteTitle` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.deleted` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.editAria` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.edited` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.empty` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.emptyHint` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.followUp` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.followUpCompleted` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.followUpDone` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.followUpReopened` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.followUpUpdateFailed` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.form.agentsError` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.assignee` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.assigneeNotClearable` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.content` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.followUpDate` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.followUpEmpty` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.followUpNotClearable` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.noteContent` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.privateNote` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.relatedBooking` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.showAsAlert` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.subject` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.type` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.unassigned` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.form.userFallback` — `src/features/guestRelations/components/InteractionForm.tsx`
-- `guests:interactions.includeCompleted` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.loadFailed` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.loadMore` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.loading` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.private` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.reopenFollowUp` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.saveChanges` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.timeline` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.add` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.addFailed` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.addNote` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.added` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.alert` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.assignedTo` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.booking` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.completeFollowUp` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.deleteAria` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.deleteFailed` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.deleteMessage` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.deleteTitle` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.deleted` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.editAria` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.edited` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.empty` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.emptyHint` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.followUp` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.followUpCompleted` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.followUpDone` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.followUpReopened` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.followUpUpdateFailed` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.form.agentsError` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.assignee` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.assigneeNotClearable` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.content` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.followUpDate` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.followUpEmpty` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.followUpNotClearable` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.noteContent` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.privateNote` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.relatedBooking` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.showAsAlert` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.subject` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.type` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.unassigned` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.form.userFallback` — `src/features/guest-relations/components/InteractionForm.tsx`
+- `guests:interactions.includeCompleted` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.loadFailed` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.loadMore` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.loading` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.private` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.reopenFollowUp` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.saveChanges` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.timeline` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
 - `guests:interactions.types.call` — *(dynamic or unreferenced)*
 - `guests:interactions.types.email` — *(dynamic or unreferenced)*
 - `guests:interactions.types.follow_up` — *(dynamic or unreferenced)*
 - `guests:interactions.types.in_person` — *(dynamic or unreferenced)*
 - `guests:interactions.types.note` — *(dynamic or unreferenced)*
-- `guests:interactions.updateFailed` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:interactions.updated` — `src/features/guestRelations/components/tabs/InteractionsTab.tsx`
-- `guests:list.account` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.accountActive` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.accountDeactivated` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.alerts` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.blacklisted` — `src/features/guestRelations/components/GuestChips.tsx`
-- `guests:list.blacklistedGuest` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.blacklistedReason` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.contact` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.convertTourism` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.createEkyc` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.credits` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.deleteGuest` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.editAria` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.editTooltip` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.guest` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.lastStay` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.lastStayPrefix` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.local` — `src/features/guestRelations/components/GuestChips.tsx`
-- `guests:list.member` — `src/features/guestRelations/components/GuestChips.tsx`
-- `guests:list.missingTourism` — `src/features/guestRelations/components/GuestChips.tsx`
-- `guests:list.moreAria` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.moreTooltip` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.newBookingAria` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.newBookingTooltip` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.noContact` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.noPhone` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.noStays` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.openRequest` — `src/features/guestRelations/components/GuestChips.tsx`
-- `guests:list.openSupportTooltip` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.stayHistory` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.stays_one` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.stays_other` — `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.tourist` — `src/features/guestRelations/components/GuestChips.tsx`
-- `guests:list.transferPortal` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestListTable.tsx`
-- `guests:list.type` — `src/features/guestRelations/components/GuestListTable.tsx`
+- `guests:interactions.updateFailed` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:interactions.updated` — `src/features/guest-relations/components/tabs/InteractionsTab.tsx`
+- `guests:list.account` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.accountActive` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.accountDeactivated` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.alerts` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.blacklisted` — `src/features/guest-relations/components/GuestChips.tsx`
+- `guests:list.blacklistedGuest` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.blacklistedReason` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.contact` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.convertTourism` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.createEkyc` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.credits` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.deleteGuest` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.editAria` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.editTooltip` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.guest` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.lastStay` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.lastStayPrefix` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.local` — `src/features/guest-relations/components/GuestChips.tsx`
+- `guests:list.member` — `src/features/guest-relations/components/GuestChips.tsx`
+- `guests:list.missingTourism` — `src/features/guest-relations/components/GuestChips.tsx`
+- `guests:list.moreAria` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.moreTooltip` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.newBookingAria` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.newBookingTooltip` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.noContact` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.noPhone` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.noStays` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.openRequest` — `src/features/guest-relations/components/GuestChips.tsx`
+- `guests:list.openSupportTooltip` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.stayHistory` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.stays_one` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.stays_other` — `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.tourist` — `src/features/guest-relations/components/GuestChips.tsx`
+- `guests:list.transferPortal` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestListTable.tsx`
+- `guests:list.type` — `src/features/guest-relations/components/GuestListTable.tsx`
 - `guests:list.viewAria` — *(dynamic or unreferenced)*
 - `guests:list.viewTooltip` — *(dynamic or unreferenced)*
-- `guests:loyaltyTab.availablePoints` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colCode` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colDate` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colExpires` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colPoints` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colPromotion` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colRedeemed` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colReward` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colSource` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.colStatus` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.lifetimePoints` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.loadFailed` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.manage` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.managePromotions` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.memberNumber` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.noRedemptions` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.notEnrolled` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.notEnrolledHint` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.qualifyingNights` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.recentRedemptions` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.redemptionsAria` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.rewardFallback` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.status` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.tier` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.title` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.vouchersAria` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.vouchersEmpty` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.vouchersLoadFailed` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:loyaltyTab.vouchersTitle` — `src/features/guestRelations/components/tabs/LoyaltyVouchersTab.tsx`
-- `guests:overview.alerts.blacklisted` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.alerts.blacklistedReason` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.alerts.empty` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.alerts.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.address` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.altPhone` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.company` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.email` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.jobTitle` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.language` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.marketingOptIn` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.nationality` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.no` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.phone` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.preferredChannel` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.tags` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.totalBookings` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.tourismType` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.details.yes` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.duplicates.score` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.duplicates.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.duplicates.warning_one` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.duplicates.warning_other` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.metrics.completedStays` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.metrics.lifetimeRevenue` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.metrics.outstanding` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.metrics.totalNights` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.followUps_one` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.followUps_other` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.reviews_one` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.reviews_other` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.support_one` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.support_other` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.openItems.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.preferences.empty` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.preferences.more` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.preferences.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.sensitive.dob` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.sensitive.idCountry` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.sensitive.idExpiry` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.sensitive.idNumber` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.sensitive.idType` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.sensitive.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.stayStatus.activeStay` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.stayStatus.nextStay` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.stayStatus.noActive` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.stayStatus.nothingBooked` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:overview.stayStatus.title` — `src/features/guestRelations/components/tabs/OverviewTab.tsx`
-- `guests:page.addGuest` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.clearFilters` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.clearSearch` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.createFailed` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.created` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.deleteConfirm` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.deleteFailed` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.deleteTitle` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.deleted` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.emptyDescription` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.emptyFilteredDescription` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.emptyFilteredTitle` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.emptyTitle` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.exportCsv` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.exportCsvTitle` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.exported` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.filteredSuffix` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.kicker` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.loadFailed` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.membersSuffix` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.missingTourismSuffix` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.namesRequired` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/pages/GuestProfilePage.tsx`, `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.noExportRows` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.nonMembersSuffix` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.searchPlaceholder` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.shownOfTotal` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.sortAZ` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.totalSuffix` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.tourismFailed` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.tourismLocal` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.tourismMarked` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.tourismTourist` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.updateFailed` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/pages/GuestProfilePage.tsx`, `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:page.updated` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/pages/GuestProfilePage.tsx`, `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:permissionDenied` — `src/features/guestRelations/pages/GuestProfilePage.tsx`, `src/features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guestRelations/pages/GuestRelationsOverviewPage.tsx`, `src/features/guestRelations/pages/GuestRelationsPage.tsx`
-- `guests:portal.emptyUsername` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.failed` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.helper` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.title` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.transfer` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.transferred` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.username` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
-- `guests:portal.warning` — `src/features/guestRelations/components/GuestPortalAccountDialog.tsx`
+- `guests:loyaltyTab.availablePoints` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colCode` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colDate` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colExpires` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colPoints` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colPromotion` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colRedeemed` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colReward` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colSource` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.colStatus` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.lifetimePoints` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.loadFailed` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.manage` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.managePromotions` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.memberNumber` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.noRedemptions` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.notEnrolled` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.notEnrolledHint` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.qualifyingNights` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.recentRedemptions` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.redemptionsAria` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.rewardFallback` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.status` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.tier` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.title` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.vouchersAria` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.vouchersEmpty` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.vouchersLoadFailed` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:loyaltyTab.vouchersTitle` — `src/features/guest-relations/components/tabs/LoyaltyVouchersTab.tsx`
+- `guests:overview.alerts.blacklisted` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.alerts.blacklistedReason` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.alerts.empty` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.alerts.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.address` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.altPhone` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.company` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.email` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.jobTitle` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.language` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.marketingOptIn` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.nationality` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.no` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.phone` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.preferredChannel` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.tags` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.totalBookings` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.tourismType` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.details.yes` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.duplicates.score` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.duplicates.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.duplicates.warning_one` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.duplicates.warning_other` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.metrics.completedStays` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.metrics.lifetimeRevenue` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.metrics.outstanding` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.metrics.totalNights` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.followUps_one` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.followUps_other` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.reviews_one` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.reviews_other` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.support_one` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.support_other` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.openItems.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.preferences.empty` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.preferences.more` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.preferences.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.sensitive.dob` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.sensitive.idCountry` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.sensitive.idExpiry` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.sensitive.idNumber` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.sensitive.idType` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.sensitive.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.stayStatus.activeStay` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.stayStatus.nextStay` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.stayStatus.noActive` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.stayStatus.nothingBooked` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:overview.stayStatus.title` — `src/features/guest-relations/components/tabs/OverviewTab.tsx`
+- `guests:page.addGuest` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.clearFilters` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.clearSearch` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.createFailed` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.created` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.deleteConfirm` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.deleteFailed` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.deleteTitle` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.deleted` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.emptyDescription` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.emptyFilteredDescription` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.emptyFilteredTitle` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.emptyTitle` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.exportCsv` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.exportCsvTitle` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.exported` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.filteredSuffix` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.kicker` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.loadFailed` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.membersSuffix` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.missingTourismSuffix` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.namesRequired` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/pages/GuestProfilePage.tsx`, `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.noExportRows` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.nonMembersSuffix` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.searchPlaceholder` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.shownOfTotal` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.sortAZ` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.totalSuffix` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.tourismFailed` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.tourismLocal` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.tourismMarked` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.tourismTourist` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.updateFailed` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/pages/GuestProfilePage.tsx`, `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:page.updated` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/pages/GuestProfilePage.tsx`, `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:permissionDenied` — `src/features/guest-relations/pages/GuestProfilePage.tsx`, `src/features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx`, `src/features/guest-relations/pages/GuestRelationsOverviewPage.tsx`, `src/features/guest-relations/pages/GuestRelationsPage.tsx`
+- `guests:portal.emptyUsername` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.failed` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.helper` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.title` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.transfer` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.transferred` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.username` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
+- `guests:portal.warning` — `src/features/guest-relations/components/GuestPortalAccountDialog.tsx`
 - `guests:preferenceCategories.bed` — *(dynamic or unreferenced)*
 - `guests:preferenceCategories.communication` — *(dynamic or unreferenced)*
 - `guests:preferenceCategories.dietary` — *(dynamic or unreferenced)*
@@ -4109,121 +4109,121 @@ candidates — see `i18n-coverage-inventory.md`.
 - `guests:preferenceCategories.occasion` — *(dynamic or unreferenced)*
 - `guests:preferenceCategories.other` — *(dynamic or unreferenced)*
 - `guests:preferenceCategories.room` — *(dynamic or unreferenced)*
-- `guests:preferences.addRow` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.bookingRef` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.duplicateKey` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.emptySection` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.guestNotesProfile` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.key` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.keyPlaceholder` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.keyPlaceholderRoom` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.legacyChip` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.loadFailed` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.partialError` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.removeAria` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.removeRow` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.saveFailed` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.saveSection` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.saved` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.specialRequestsProfile` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.unconfirmedNote` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.unconfirmedTitle` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.unsaved` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.value` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.valuePlaceholder` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:preferences.valuePlaceholderRoom` — `src/features/guestRelations/components/tabs/PreferencesTab.tsx`
-- `guests:profile.addNote` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.backToGuests` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.blacklistReason` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.blacklisted` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.bookedAs` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.duplicateChip` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.duplicateTooltip_one` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.duplicateTooltip_other` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.edit` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.guestNumber` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.invalidId` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.lastStay` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.loadFailed` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.member` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.newBooking` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.nextStay` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.noAltPhone` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.noEmail` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.noPhone` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.noReason` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.openSupport` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.returning` — `src/features/guestRelations/components/GuestProfileHeader.tsx`
-- `guests:profile.tabs.communication` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.tabs.interactions` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.tabs.loyalty` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.tabs.overview` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.tabs.preferences` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.tabs.stays` — `src/features/guestRelations/components/GuestDetailDrawer.tsx`, `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:profile.tabs.support` — `src/features/guestRelations/pages/GuestProfilePage.tsx`
-- `guests:segments.all` — `src/features/guestRelations/segments.ts`
-- `guests:segments.blacklisted` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.inHouse` — `src/features/guestRelations/segments.ts`
-- `guests:segments.inactive` — `src/features/guestRelations/segments.ts`
-- `guests:segments.incomplete` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.member` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.missingTourism` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.non` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.openRequests` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.returning` — `src/features/guestRelations/segments.ts`
-- `guests:segments.tourist` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:segments.upcoming` — `src/features/guestRelations/segments.ts`
-- `guests:segments.vip` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`, `src/features/guestRelations/segments.ts`
-- `guests:stats.total` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
+- `guests:preferences.addRow` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.bookingRef` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.duplicateKey` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.emptySection` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.guestNotesProfile` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.key` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.keyPlaceholder` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.keyPlaceholderRoom` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.legacyChip` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.loadFailed` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.partialError` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.removeAria` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.removeRow` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.saveFailed` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.saveSection` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.saved` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.specialRequestsProfile` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.unconfirmedNote` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.unconfirmedTitle` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.unsaved` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.value` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.valuePlaceholder` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:preferences.valuePlaceholderRoom` — `src/features/guest-relations/components/tabs/PreferencesTab.tsx`
+- `guests:profile.addNote` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.backToGuests` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.blacklistReason` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.blacklisted` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.bookedAs` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.duplicateChip` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.duplicateTooltip_one` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.duplicateTooltip_other` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.edit` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.guestNumber` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.invalidId` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.lastStay` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.loadFailed` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.member` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.newBooking` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.nextStay` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.noAltPhone` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.noEmail` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.noPhone` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.noReason` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.openSupport` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.returning` — `src/features/guest-relations/components/GuestProfileHeader.tsx`
+- `guests:profile.tabs.communication` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.tabs.interactions` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.tabs.loyalty` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.tabs.overview` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.tabs.preferences` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.tabs.stays` — `src/features/guest-relations/components/GuestDetailDrawer.tsx`, `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:profile.tabs.support` — `src/features/guest-relations/pages/GuestProfilePage.tsx`
+- `guests:segments.all` — `src/features/guest-relations/segments.ts`
+- `guests:segments.blacklisted` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.inHouse` — `src/features/guest-relations/segments.ts`
+- `guests:segments.inactive` — `src/features/guest-relations/segments.ts`
+- `guests:segments.incomplete` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.member` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.missingTourism` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.non` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.openRequests` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.returning` — `src/features/guest-relations/segments.ts`
+- `guests:segments.tourist` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:segments.upcoming` — `src/features/guest-relations/segments.ts`
+- `guests:segments.vip` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`, `src/features/guest-relations/segments.ts`
+- `guests:stats.total` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
 - `guests:stays.actions` — `src/features/guests/components/GuestProfileParts.tsx`
 - `guests:stays.balance` — `src/features/guests/components/GuestProfileParts.tsx`
 - `guests:stays.booking` — `src/features/guests/components/GuestProfileParts.tsx`
 - `guests:stays.dates` — `src/features/guests/components/GuestProfileParts.tsx`
 - `guests:stays.direct` — `src/features/guests/components/GuestProfileParts.tsx`
 - `guests:stays.empty` — `src/features/guests/components/GuestProfileParts.tsx`
-- `guests:stays.nightsStayed_one` — `src/features/guestRelations/components/tabs/StaysTab.tsx`
-- `guests:stays.nightsStayed_other` — `src/features/guestRelations/components/tabs/StaysTab.tsx`
-- `guests:stays.nights_one` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`, `src/features/guestRelations/components/GuestCreditsDialog.tsx`, `src/features/guests/components/GuestProfileParts.tsx`
-- `guests:stays.nights_other` — `src/features/guestRelations/components/GuestBookingHistoryDialog.tsx`, `src/features/guestRelations/components/GuestCreditsDialog.tsx`, `src/features/guests/components/GuestProfileParts.tsx`
-- `guests:stays.openInBookings` — `src/features/guestRelations/components/tabs/StaysTab.tsx`
-- `guests:stays.reservations_one` — `src/features/guestRelations/components/tabs/StaysTab.tsx`
-- `guests:stays.reservations_other` — `src/features/guestRelations/components/tabs/StaysTab.tsx`
+- `guests:stays.nightsStayed_one` — `src/features/guest-relations/components/tabs/StaysTab.tsx`
+- `guests:stays.nightsStayed_other` — `src/features/guest-relations/components/tabs/StaysTab.tsx`
+- `guests:stays.nights_one` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`, `src/features/guest-relations/components/GuestCreditsDialog.tsx`, `src/features/guests/components/GuestProfileParts.tsx`
+- `guests:stays.nights_other` — `src/features/guest-relations/components/GuestBookingHistoryDialog.tsx`, `src/features/guest-relations/components/GuestCreditsDialog.tsx`, `src/features/guests/components/GuestProfileParts.tsx`
+- `guests:stays.openInBookings` — `src/features/guest-relations/components/tabs/StaysTab.tsx`
+- `guests:stays.reservations_one` — `src/features/guest-relations/components/tabs/StaysTab.tsx`
+- `guests:stays.reservations_other` — `src/features/guest-relations/components/tabs/StaysTab.tsx`
 - `guests:stays.room` — `src/features/guests/components/GuestProfileParts.tsx`
-- `guests:stays.roomNumber` — `src/features/guestRelations/components/InteractionForm.tsx`, `src/features/guestRelations/components/tabs/OverviewTab.tsx`, `src/features/guests/components/GuestProfileParts.tsx`
+- `guests:stays.roomNumber` — `src/features/guest-relations/components/InteractionForm.tsx`, `src/features/guest-relations/components/tabs/OverviewTab.tsx`, `src/features/guests/components/GuestProfileParts.tsx`
 - `guests:stays.status` — `src/features/guests/components/GuestProfileParts.tsx`
-- `guests:supportFeedback.aria` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.booking` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colAssignee` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colCategory` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colConversation` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colLastActivity` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colPriority` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colSla` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.colStatus` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.editResponse` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.empty` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.emptyHint` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.loadFailed` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.newConversation` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.noResponse` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.openInSupport` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.postResponse` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.propertyResponse` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.published` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.respond` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.responseHelper` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.responseLabel` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.responseRequired` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.responseSaveFailed` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.responseSaved` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.reviewsEmpty` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.reviewsLoadFailed` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.reviewsTitle` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.title` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.unassigned` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.unpublished` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:supportFeedback.updateResponse` — `src/features/guestRelations/components/tabs/SupportFeedbackTab.tsx`
-- `guests:title` — `src/features/guestRelations/pages/GuestRelationsPage.tsx`
+- `guests:supportFeedback.aria` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.booking` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colAssignee` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colCategory` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colConversation` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colLastActivity` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colPriority` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colSla` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.colStatus` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.editResponse` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.empty` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.emptyHint` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.loadFailed` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.newConversation` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.noResponse` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.openInSupport` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.postResponse` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.propertyResponse` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.published` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.respond` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.responseHelper` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.responseLabel` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.responseRequired` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.responseSaveFailed` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.responseSaved` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.reviewsEmpty` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.reviewsLoadFailed` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.reviewsTitle` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.title` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.unassigned` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.unpublished` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:supportFeedback.updateResponse` — `src/features/guest-relations/components/tabs/SupportFeedbackTab.tsx`
+- `guests:title` — `src/features/guest-relations/pages/GuestRelationsPage.tsx`
 - `guests:tourismType.foreign` — `src/constants/guest.constants.ts`, `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`
 - `guests:tourismType.local` — `src/constants/guest.constants.ts`, `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`
 - `guests:tourismType.noTax` — `src/constants/guest.constants.ts`, `src/features/admin/components/CustomerLedger/components/CompanyCheckInDialog.tsx`
@@ -5065,17 +5065,17 @@ candidates — see `i18n-coverage-inventory.md`.
 
 ### `onlineInventory`
 
-- `onlineInventory:bulk.adjustAmountAria` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.adjustPercentAria` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.amountLabel` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.applyAmount` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.applyPercent` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.aria` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.cellsSelected_one` — `src/features/onlineInventory/components/BulkEditPanel.tsx`, `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:bulk.cellsSelected_other` — `src/features/onlineInventory/components/BulkEditPanel.tsx`, `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:bulk.clearOverrides` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.clearSelection` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.closeOnline` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.adjustAmountAria` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.adjustPercentAria` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.amountLabel` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.applyAmount` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.applyPercent` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.aria` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.cellsSelected_one` — `src/features/online-inventory/components/BulkEditPanel.tsx`, `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:bulk.cellsSelected_other` — `src/features/online-inventory/components/BulkEditPanel.tsx`, `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:bulk.clearOverrides` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.clearSelection` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.closeOnline` — `src/features/online-inventory/components/BulkEditPanel.tsx`
 - `onlineInventory:bulk.days.fri` — *(dynamic or unreferenced)*
 - `onlineInventory:bulk.days.mon` — *(dynamic or unreferenced)*
 - `onlineInventory:bulk.days.sat` — *(dynamic or unreferenced)*
@@ -5083,95 +5083,95 @@ candidates — see `i18n-coverage-inventory.md`.
 - `onlineInventory:bulk.days.thu` — *(dynamic or unreferenced)*
 - `onlineInventory:bulk.days.tue` — *(dynamic or unreferenced)*
 - `onlineInventory:bulk.days.wed` — *(dynamic or unreferenced)*
-- `onlineInventory:bulk.daysAria` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.editSelected` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:bulk.editSelectedTitle` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:bulk.hold` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.inScope` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.openOnline` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.percentLabel` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.price` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.setHold` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.setPrice` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.skipped_one` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:bulk.skipped_other` — `src/features/onlineInventory/components/BulkEditPanel.tsx`
-- `onlineInventory:cell.ariaClosed` — `src/features/onlineInventory/components/GridCell.tsx`
-- `onlineInventory:cell.ariaModified` — `src/features/onlineInventory/components/GridCell.tsx`
-- `onlineInventory:cell.ariaNoneLeft` — `src/features/onlineInventory/components/GridCell.tsx`
-- `onlineInventory:cell.ariaOnline` — `src/features/onlineInventory/components/GridCell.tsx`
-- `onlineInventory:cell.ariaResetPending` — `src/features/onlineInventory/components/GridCell.tsx`
-- `onlineInventory:cell.closed` — `src/features/onlineInventory/components/GridCell.tsx`, `src/features/onlineInventory/components/PhoneInventoryView.tsx`
-- `onlineInventory:cell.noneLeft` — `src/features/onlineInventory/components/GridCell.tsx`
-- `onlineInventory:changedBar_one` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:changedBar_other` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:confirm.discardConfirm` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:confirm.discardMove` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:confirm.discardRefresh` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:confirm.discardTitle` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:discard` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:editor.bookable` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.bookableOff` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.bookableOn` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.customPrice` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.decrease` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.holdAria` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.holdWalkins` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.increase` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.ofFree` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.overHeld` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.priceInvalid` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:editor.resetStandard` — `src/features/onlineInventory/components/CellEditorPopover.tsx`, `src/features/onlineInventory/components/CellEditorSheet.tsx`
-- `onlineInventory:editor.standardRate` — `src/features/onlineInventory/components/CellEditorForm.tsx`
-- `onlineInventory:empty.body` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:empty.title` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:errors.load` — `src/features/onlineInventory/hooks/useOnlineInventory.ts`
-- `onlineInventory:errors.save` — `src/features/onlineInventory/hooks/useOnlineInventory.ts`
-- `onlineInventory:grid.aria` — `src/features/onlineInventory/components/InventoryGrid.tsx`
-- `onlineInventory:grid.colHeader` — `src/features/onlineInventory/components/InventoryGrid.tsx`
-- `onlineInventory:grid.selectAll` — `src/features/onlineInventory/components/InventoryGrid.tsx`
-- `onlineInventory:grid.selectColumn` — `src/features/onlineInventory/components/InventoryGrid.tsx`
-- `onlineInventory:grid.selectRow` — `src/features/onlineInventory/components/InventoryGrid.tsx`
-- `onlineInventory:grid.today` — `src/features/onlineInventory/components/InventoryGrid.tsx`, `src/features/onlineInventory/components/PhoneInventoryView.tsx`
-- `onlineInventory:kicker` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:lines.closeOnline` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.holdLine` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.priceLine` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.priceStandard` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.reopenOnline` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.resetStandard` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.roomTypeFallback` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:lines.updated` — `src/features/onlineInventory/utils.ts`
-- `onlineInventory:loading` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:phone.dayStripAria` — `src/features/onlineInventory/components/PhoneInventoryView.tsx`
-- `onlineInventory:phone.freeToday` — `src/features/onlineInventory/components/PhoneInventoryView.tsx`
-- `onlineInventory:phone.noDataAria` — `src/features/onlineInventory/components/PhoneInventoryView.tsx`
-- `onlineInventory:review.apply_one` — `src/features/onlineInventory/components/ReviewChangesDialog.tsx`
-- `onlineInventory:review.apply_other` — `src/features/onlineInventory/components/ReviewChangesDialog.tsx`
-- `onlineInventory:review.atomicNote_one` — `src/features/onlineInventory/components/ReviewChangesDialog.tsx`
-- `onlineInventory:review.atomicNote_other` — `src/features/onlineInventory/components/ReviewChangesDialog.tsx`
-- `onlineInventory:review.saving` — `src/features/onlineInventory/components/ReviewChangesDialog.tsx`
-- `onlineInventory:review.title` — `src/features/onlineInventory/components/ReviewChangesDialog.tsx`
-- `onlineInventory:reviewApply` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:subtitle` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:success.updated_one` — `src/features/onlineInventory/hooks/useOnlineInventory.ts`
-- `onlineInventory:success.updated_other` — `src/features/onlineInventory/hooks/useOnlineInventory.ts`
-- `onlineInventory:summary.aria` — `src/features/onlineInventory/components/InventorySummary.tsx`
-- `onlineInventory:summary.held` — `src/features/onlineInventory/components/InventorySummary.tsx`
-- `onlineInventory:summary.online` — `src/features/onlineInventory/components/InventorySummary.tsx`
-- `onlineInventory:summary.physical` — `src/features/onlineInventory/components/InventorySummary.tsx`
-- `onlineInventory:summary.roomNights` — `src/features/onlineInventory/components/InventorySummary.tsx`
-- `onlineInventory:summary.selectedCells` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:summary.visibleWindow` — `src/features/onlineInventory/components/InventorySummary.tsx`, `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:title` — `src/features/onlineInventory/pages/OnlineInventoryPage.tsx`
-- `onlineInventory:toolbar.aria` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.backDays` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.forwardDays` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.nextDay` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.overridesOnly` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.prevDay` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.selected` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.startDate` — `src/features/onlineInventory/components/GridToolbar.tsx`
-- `onlineInventory:toolbar.today` — `src/features/onlineInventory/components/GridToolbar.tsx`
+- `onlineInventory:bulk.daysAria` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.editSelected` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:bulk.editSelectedTitle` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:bulk.hold` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.inScope` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.openOnline` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.percentLabel` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.price` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.setHold` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.setPrice` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.skipped_one` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:bulk.skipped_other` — `src/features/online-inventory/components/BulkEditPanel.tsx`
+- `onlineInventory:cell.ariaClosed` — `src/features/online-inventory/components/GridCell.tsx`
+- `onlineInventory:cell.ariaModified` — `src/features/online-inventory/components/GridCell.tsx`
+- `onlineInventory:cell.ariaNoneLeft` — `src/features/online-inventory/components/GridCell.tsx`
+- `onlineInventory:cell.ariaOnline` — `src/features/online-inventory/components/GridCell.tsx`
+- `onlineInventory:cell.ariaResetPending` — `src/features/online-inventory/components/GridCell.tsx`
+- `onlineInventory:cell.closed` — `src/features/online-inventory/components/GridCell.tsx`, `src/features/online-inventory/components/PhoneInventoryView.tsx`
+- `onlineInventory:cell.noneLeft` — `src/features/online-inventory/components/GridCell.tsx`
+- `onlineInventory:changedBar_one` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:changedBar_other` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:confirm.discardConfirm` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:confirm.discardMove` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:confirm.discardRefresh` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:confirm.discardTitle` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:discard` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:editor.bookable` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.bookableOff` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.bookableOn` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.customPrice` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.decrease` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.holdAria` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.holdWalkins` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.increase` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.ofFree` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.overHeld` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.priceInvalid` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:editor.resetStandard` — `src/features/online-inventory/components/CellEditorPopover.tsx`, `src/features/online-inventory/components/CellEditorSheet.tsx`
+- `onlineInventory:editor.standardRate` — `src/features/online-inventory/components/CellEditorForm.tsx`
+- `onlineInventory:empty.body` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:empty.title` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:errors.load` — `src/features/online-inventory/hooks/useOnlineInventory.ts`
+- `onlineInventory:errors.save` — `src/features/online-inventory/hooks/useOnlineInventory.ts`
+- `onlineInventory:grid.aria` — `src/features/online-inventory/components/InventoryGrid.tsx`
+- `onlineInventory:grid.colHeader` — `src/features/online-inventory/components/InventoryGrid.tsx`
+- `onlineInventory:grid.selectAll` — `src/features/online-inventory/components/InventoryGrid.tsx`
+- `onlineInventory:grid.selectColumn` — `src/features/online-inventory/components/InventoryGrid.tsx`
+- `onlineInventory:grid.selectRow` — `src/features/online-inventory/components/InventoryGrid.tsx`
+- `onlineInventory:grid.today` — `src/features/online-inventory/components/InventoryGrid.tsx`, `src/features/online-inventory/components/PhoneInventoryView.tsx`
+- `onlineInventory:kicker` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:lines.closeOnline` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.holdLine` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.priceLine` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.priceStandard` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.reopenOnline` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.resetStandard` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.roomTypeFallback` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:lines.updated` — `src/features/online-inventory/utils.ts`
+- `onlineInventory:loading` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:phone.dayStripAria` — `src/features/online-inventory/components/PhoneInventoryView.tsx`
+- `onlineInventory:phone.freeToday` — `src/features/online-inventory/components/PhoneInventoryView.tsx`
+- `onlineInventory:phone.noDataAria` — `src/features/online-inventory/components/PhoneInventoryView.tsx`
+- `onlineInventory:review.apply_one` — `src/features/online-inventory/components/ReviewChangesDialog.tsx`
+- `onlineInventory:review.apply_other` — `src/features/online-inventory/components/ReviewChangesDialog.tsx`
+- `onlineInventory:review.atomicNote_one` — `src/features/online-inventory/components/ReviewChangesDialog.tsx`
+- `onlineInventory:review.atomicNote_other` — `src/features/online-inventory/components/ReviewChangesDialog.tsx`
+- `onlineInventory:review.saving` — `src/features/online-inventory/components/ReviewChangesDialog.tsx`
+- `onlineInventory:review.title` — `src/features/online-inventory/components/ReviewChangesDialog.tsx`
+- `onlineInventory:reviewApply` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:subtitle` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:success.updated_one` — `src/features/online-inventory/hooks/useOnlineInventory.ts`
+- `onlineInventory:success.updated_other` — `src/features/online-inventory/hooks/useOnlineInventory.ts`
+- `onlineInventory:summary.aria` — `src/features/online-inventory/components/InventorySummary.tsx`
+- `onlineInventory:summary.held` — `src/features/online-inventory/components/InventorySummary.tsx`
+- `onlineInventory:summary.online` — `src/features/online-inventory/components/InventorySummary.tsx`
+- `onlineInventory:summary.physical` — `src/features/online-inventory/components/InventorySummary.tsx`
+- `onlineInventory:summary.roomNights` — `src/features/online-inventory/components/InventorySummary.tsx`
+- `onlineInventory:summary.selectedCells` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:summary.visibleWindow` — `src/features/online-inventory/components/InventorySummary.tsx`, `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:title` — `src/features/online-inventory/pages/OnlineInventoryPage.tsx`
+- `onlineInventory:toolbar.aria` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.backDays` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.forwardDays` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.nextDay` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.overridesOnly` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.prevDay` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.selected` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.startDate` — `src/features/online-inventory/components/GridToolbar.tsx`
+- `onlineInventory:toolbar.today` — `src/features/online-inventory/components/GridToolbar.tsx`
 
 ### `promotions`
 
@@ -6695,21 +6695,21 @@ candidates — see `i18n-coverage-inventory.md`.
 - `support:list.unassigned` — `src/features/support/components/SupportConversationList.tsx`
 - `support:list.unread_one` — `src/features/support/components/SupportConversationList.tsx`
 - `support:list.unread_other` — `src/features/support/components/SupportConversationList.tsx`
-- `support:openDialog.agentsError` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.assignee` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.category` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.created` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.failed` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.firstMessage` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.firstMessagePlaceholder` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.firstMessageRequired` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.open` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.opening` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.priority` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.subject` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.subjectPlaceholder` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.title` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
-- `support:openDialog.unassigned` — `src/features/guestRelations/components/OpenSupportDialog.tsx`
+- `support:openDialog.agentsError` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.assignee` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.category` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.created` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.failed` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.firstMessage` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.firstMessagePlaceholder` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.firstMessageRequired` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.open` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.opening` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.priority` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.subject` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.subjectPlaceholder` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.title` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
+- `support:openDialog.unassigned` — `src/features/guest-relations/components/OpenSupportDialog.tsx`
 - `support:page.allPriorities` — `src/features/support/components/SupportManagementPage.tsx`
 - `support:page.allStatuses` — `src/features/support/components/SupportManagementPage.tsx`
 - `support:page.loadFailed` — `src/features/support/components/SupportManagementPage.tsx`

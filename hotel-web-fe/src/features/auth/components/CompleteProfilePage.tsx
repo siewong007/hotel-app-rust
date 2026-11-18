@@ -20,7 +20,7 @@ import { validatePhoneKey } from '../../../utils/validation';
 import { useProfileQuery } from '../../user/hooks/useProfileQueries';
 import { queryKeys } from '../../../api/queryKeys';
 import { LogoLoader } from '../../../components';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { safeGuestRedirect } from '../guestRedirect';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';

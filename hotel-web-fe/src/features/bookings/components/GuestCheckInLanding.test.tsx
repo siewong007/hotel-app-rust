@@ -14,7 +14,7 @@ vi.mock('../../../api', () => ({
   },
 }));
 
-vi.mock('../../guestPortal/api/bookingAccessTokenStore', () => ({
+vi.mock('../../guest-portal/api/bookingAccessTokenStore', () => ({
   setBookingAccessToken: (...args: unknown[]) => mocks.setBookingAccessToken(...args),
 }));
 

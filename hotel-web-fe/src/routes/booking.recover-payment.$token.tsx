@@ -7,7 +7,7 @@ import { lazyRoute } from '../navigation/lazyRoute';
 // Rendered directly rather than through the lazy registry: the registry drives
 // the authenticated sidebar, and this page must never imply a session.
 const PaymentRecoveryPage = lazyRoute(
-  () => import('../features/paymentRecovery/PaymentRecoveryPage')
+  () => import('../features/payment-recovery/PaymentRecoveryPage')
 );
 
 function PaymentRecoveryRoute() {

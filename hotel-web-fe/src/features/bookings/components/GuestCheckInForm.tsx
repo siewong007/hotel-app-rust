@@ -33,17 +33,17 @@ import {
   GuestPortalAutoCheckinResponse,
 } from '../../../types';
 import { LogoLoader } from '../../../components';
-import { GuestPaymentPanel } from '../../guestPortal/components/GuestPaymentPanel';
-import { IdentitySection } from '../../guestPortal/components/dashboard/IdentitySection';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { GuestPaymentPanel } from '../../guest-portal/components/GuestPaymentPanel';
+import { IdentitySection } from '../../guest-portal/components/dashboard/IdentitySection';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { toApiError } from '../../../api/client';
 import { formatStatusLabel } from '../../../utils/formatters';
 import { formatHotelDate } from '../../../utils/date';
-import { captureBookingAccessToken } from '../../guestPortal/api/bookingAccessTokenStore';
-import { getValidPortalToken } from '../../guestPortal/api/portalTokenStore';
+import { captureBookingAccessToken } from '../../guest-portal/api/bookingAccessTokenStore';
+import { getValidPortalToken } from '../../guest-portal/api/portalTokenStore';
 import { useAuth } from '../../../auth/AuthContext';
-import { usePortalSessionBootstrap } from '../../guestPortal/hooks/usePortalSessionBootstrap';
+import { usePortalSessionBootstrap } from '../../guest-portal/hooks/usePortalSessionBootstrap';
 import { ClaimAccountStep } from './guestCheckIn/ClaimAccountStep';
 import { PreCheckInDetailsStep } from './guestCheckIn/PreCheckInDetailsStep';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';

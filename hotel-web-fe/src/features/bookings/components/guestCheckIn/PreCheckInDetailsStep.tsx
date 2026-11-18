@@ -12,7 +12,7 @@ import { Alert, Box, Button, Grid, Stack, TextField, Typography } from '@mui/mat
 
 import { GuestPortalService } from '../../../../api';
 import type { Booking, Guest, GuestUpdateRequest } from '../../../../types';
-import { guestErrorMessage } from '../../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../../i18n';
 import { useAutoFocusError } from '../../../../hooks/useAutoFocusError';
 

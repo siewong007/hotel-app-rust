@@ -23,7 +23,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../../../auth/AuthContext';
 import { validateEmailKey, validatePhoneKey } from '../../../utils/validation';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { returnFromAuthPage, safeGuestRedirect } from '../guestRedirect';
 import { LanguageSwitcher } from '../../../components/common/LanguageSwitcher';
 import { useTranslation } from '../../../i18n';

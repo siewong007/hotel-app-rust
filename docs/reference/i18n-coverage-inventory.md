@@ -63,8 +63,8 @@ Flattened leaf keys per bundle (generated: `node` script flattening each
 | `ekyc` | 261 | 261 | 261 | 261 | features/ekyc |
 | `errors` | 144 | 144 | 144 | 144 | src/api, shared error surfaces |
 | `finance` | 523 | 513 | 513 | 513 | features/admin (CustomerLedger), features/invoices |
-| `guestPortal` | 984 | 975 | 984 | 972 | features/guestPortal, features/bookings, features/paymentRecovery |
-| `guests` | 580 | 580 | 580 | 568 | features/guestRelations |
+| `guestPortal` | 984 | 975 | 984 | 972 | features/guest-portal, features/bookings, features/payment-recovery |
+| `guests` | 580 | 580 | 580 | 568 | features/guest-relations |
 | `help` | 85 | 85 | 85 | 85 | features/help |
 | `housekeeping` | 204 | 204 | 204 | 204 | features/housekeeping |
 | `insights` | 209 | 209 | 209 | 209 | features/insights, report catalog |
@@ -73,14 +73,14 @@ Flattened leaf keys per bundle (generated: `node` script flattening each
 | `nav` | 139 | 139 | 139 | 139 | src/navigation, src/components/layout |
 | `nightAudit` | 137 | 137 | 135 | 135 | features/admin (night audit) |
 | `notifications` | 28 | 28 | 28 | 28 | src/components/layout, features/notifications |
-| `onlineInventory` | 135 | 135 | 126 | 125 | features/onlineInventory |
+| `onlineInventory` | 135 | 135 | 126 | 125 | features/online-inventory |
 | `promotions` | 271 | 271 | 271 | 263 | features/promotions |
 | `rates` | 113 | 113 | 113 | 113 | features/rates |
 | `revenue` | 58 | 57 | 57 | 57 | features/revenue |
 | `rooms` | 678 | 676 | 663 | 663 | features/rooms (+ housekeeping consumers) |
 | `segments` | 99 | 99 | 99 | 97 | features/segments |
 | `status` | 259 | 259 | 259 | 259 | status chip/label helpers, enum coverage |
-| `support` | 115 | 115 | 115 | 114 | features/support, features/guestRelations |
+| `support` | 115 | 115 | 115 | 114 | features/support, features/guest-relations |
 | `validation` | 30 | 28 | 28 | 28 | src/utils, form validation |
 
 ## Key → file usage map
@@ -132,13 +132,13 @@ tests enforce translation across all four locales.
 | features/admin/components/data-transfer/TransferHistoryList.tsx | `history.modes.${mode}` |
 | features/admin/components/data-transfer/utils.ts + ExportPanel.tsx | `export.exclusions.${reason}` (via `resolve()`) |
 | features/support/components/SupportStatusChip.tsx + SupportConversationDetail.tsx + SupportConversationList.tsx | `categories.${category}` (via `supportCategoryLabel`) |
-| features/guestRelations/components/tabs/OverviewTab.tsx (×3) | `tourismType.${}` / `preferenceCategories.${}` / `idTypes.${}` |
-| features/guestRelations/components/tabs/CommunicationTab.tsx (×2) | `consent.topics.${}` / `communication.channels.${}` |
-| features/guestRelations/components/tabs/SupportFeedbackTab.tsx | `support:categories.${}` |
-| features/guestRelations/components/InteractionForm.tsx | `interactions.types.${type}` |
-| features/guestRelations/components/GuestConsentDialog.tsx | `consent.topics.${topic}` |
-| features/guestRelations/components/OpenSupportDialog.tsx | `categories.${value}` |
-| features/guestRelations/pages/GuestRelationsFollowUpsPage.tsx | `interactions.types.${}` |
+| features/guest-relations/components/tabs/OverviewTab.tsx (×3) | `tourismType.${}` / `preferenceCategories.${}` / `idTypes.${}` |
+| features/guest-relations/components/tabs/CommunicationTab.tsx (×2) | `consent.topics.${}` / `communication.channels.${}` |
+| features/guest-relations/components/tabs/SupportFeedbackTab.tsx | `support:categories.${}` |
+| features/guest-relations/components/InteractionForm.tsx | `interactions.types.${type}` |
+| features/guest-relations/components/GuestConsentDialog.tsx | `consent.topics.${topic}` |
+| features/guest-relations/components/OpenSupportDialog.tsx | `categories.${value}` |
+| features/guest-relations/pages/GuestRelationsFollowUpsPage.tsx | `interactions.types.${}` |
 | src/navigation/routeLabels.ts (×3) | `routes.${id}.label` / `.breadcrumb` / `groups.${group}` |
 | components/layout/CommandPalette.tsx | `palette.scopes.${g.type}` |
 | components/layout/UserMenu.tsx | `roles.${roles[0]}` |

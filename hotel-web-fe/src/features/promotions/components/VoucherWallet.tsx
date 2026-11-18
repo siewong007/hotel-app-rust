@@ -9,7 +9,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { useVoucherWallet } from '../hooks/useVoucherWallet';
 import { VoucherCard } from './VoucherCard';

@@ -4,7 +4,7 @@
 //
 // Book direct hands the choice to the guest portal in the URL
 // (/guest-portal?view=booking&check_in_date=…&room_type=…). The portal
-// validates the parameters (features/guestPortal/booking/prefill.ts), runs the
+// validates the parameters (features/guest-portal/booking/prefill.ts), runs the
 // search and lands on Choose with the room highlighted; anything it rejects
 // falls back to its normal Search step.
 import { roomLayouts, ROOM_ORDER, type RoomLayout } from '../interiors/roomLayouts';

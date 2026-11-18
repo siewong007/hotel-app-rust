@@ -2,7 +2,7 @@
 
 Staff-facing CRM workspace: find a guest → understand their situation → take
 action → follow up. Lives in `modules/guest_relations/` (backend) and
-`src/features/guestRelations/` (frontend). Phase 1 shipped 2026-09-13; Phase 2
+`src/features/guest-relations/` (frontend). Phase 1 shipped 2026-09-13; Phase 2
 (overview dashboard, follow-up queue, list segments, open-issue badge) shipped
 2026-09-14. This document is the canonical record — the design specs were
 removed after shipping (git history has them if needed).
@@ -28,7 +28,7 @@ payment/campaign engine duplication, no fabricated "inferred" preferences.
 
 - `guests` is the canonical guest identity. `nick_name` is the booking display
   name; `first_name`/`last_name` are the legal name captured at check-in.
-  `display_guest_name` (FE mirror: `features/guestRelations/utils.ts`) prefers
+  `display_guest_name` (FE mirror: `features/guest-relations/utils.ts`) prefers
   the legal name only when BOTH halves exist.
 - `users.guest_id` links a guest-portal login to a guest (portal accounts live
   in `users`, not `guests`).
@@ -124,7 +124,7 @@ the 360 aggregate.
 - `/guest-config` is retained as a redirect that forwards `?search=`/`?guest_id=`
   to the list (global-search results keep working).
 - Service layer: `src/api/guestRelations.service.ts`; hooks:
-  `features/guestRelations/hooks/useGuestRelationsQueries.ts`.
+  `features/guest-relations/hooks/useGuestRelationsQueries.ts`.
 - `guest_notes.follow_up_at` is `timestamptz` fed by a hotel-local date picker —
   the FE anchors it at noon hotel-local (`toHotelInstantIso`) so the stored
   instant stays on the picked calendar date in every timezone.

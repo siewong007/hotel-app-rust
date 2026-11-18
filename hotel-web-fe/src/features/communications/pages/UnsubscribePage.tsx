@@ -14,7 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogoLoader } from '../../../components';
 import { PublicCommunicationsApi } from '../api';
 import { type NotificationTopic } from '../types';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { formatStatusLabel } from '../../../utils/formatters';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';

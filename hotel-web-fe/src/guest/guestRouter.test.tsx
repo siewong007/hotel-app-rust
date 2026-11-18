@@ -17,10 +17,10 @@ import {
 
 // Stub the lazy portal pages: this suite only asserts which surface
 // GuestPortalRoute selects for a given ?view= value.
-vi.mock('../features/guestPortal/components/PortalDashboardPage', () => ({
+vi.mock('../features/guest-portal/components/PortalDashboardPage', () => ({
   default: () => <div data-testid="dashboard-page" />,
 }));
-vi.mock('../features/guestPortal/booking/PortalBookingPage', () => ({
+vi.mock('../features/guest-portal/booking/PortalBookingPage', () => ({
   default: () => <div data-testid="booking-page" />,
 }));
 

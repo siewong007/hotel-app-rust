@@ -9,7 +9,7 @@ vi.mock('../components/PromotionCatalog', () => ({
   PromotionCatalog: () => <div data-testid="promotion-catalog" />,
 }));
 
-vi.mock('../../guestPortal/theme/GuestPortalThemeProvider', () => ({
+vi.mock('../../guest-portal/theme/GuestPortalThemeProvider', () => ({
   GuestPortalThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 

@@ -90,14 +90,14 @@ const FirstLoginPasskeyPrompt = lazyRoute(() => import('../features/auth/compone
 const RoomReservationTimeline = lazyRoute(() => import('../features/rooms/components/RoomReservationTimeline'));
 const RoomConfigurationPage = lazyRoute(() => import('../features/rooms/components/RoomConfigurationPage'));
 const RoomManagementPage = lazyRoute(() => import('../features/rooms/components/RoomManagement'));
-const GuestRelationsOverviewPage = lazyRoute(() => import('../features/guestRelations/pages/GuestRelationsOverviewPage'));
-const GuestRelationsPage = lazyRoute(() => import('../features/guestRelations/pages/GuestRelationsPage'));
+const GuestRelationsOverviewPage = lazyRoute(() => import('../features/guest-relations/pages/GuestRelationsOverviewPage'));
+const GuestRelationsPage = lazyRoute(() => import('../features/guest-relations/pages/GuestRelationsPage'));
 const GuestCheckInLanding = lazyRoute(() => import('../features/bookings/components/GuestCheckInLanding'));
 const GuestCheckInVerify = lazyRoute(() => import('../features/bookings/components/GuestCheckInVerify'));
 const GuestCheckInForm = lazyRoute(() => import('../features/bookings/components/GuestCheckInForm'));
 const GuestCheckInConfirmation = lazyRoute(() => import('../features/bookings/components/GuestCheckInConfirmation'));
-const PortalDashboardPage = lazyRoute(() => import('../features/guestPortal/components/PortalDashboardPage'));
-const PortalBookingPage = lazyRoute(() => import('../features/guestPortal/booking/PortalBookingPage'));
+const PortalDashboardPage = lazyRoute(() => import('../features/guest-portal/components/PortalDashboardPage'));
+const PortalBookingPage = lazyRoute(() => import('../features/guest-portal/booking/PortalBookingPage'));
 const CustomerLedgerPage = lazyRoute(() => import('../features/admin/components/CustomerLedger'));
 const ComplimentaryManagementPage = lazyRoute(() => import('../features/admin/components/ComplimentaryManagementPage'));
 const AuditLogPage = lazyRoute(() => import('../features/admin/components/AuditLogPage'));
@@ -112,7 +112,7 @@ const CommunicationsPage = lazyRoute(() => import('../features/communications/pa
 const NotificationsPage = lazyRoute(() => import('../features/notifications/pages/NotificationsPage'));
 const SystemHealthPage = lazyRoute(() => import('../features/admin/system/SystemHealthPage'));
 const JobsPage = lazyRoute(() => import('../features/admin/system/JobsPage'));
-const OnlineInventoryPage = lazyRoute(() => import('../features/onlineInventory/pages/OnlineInventoryPage'));
+const OnlineInventoryPage = lazyRoute(() => import('../features/online-inventory/pages/OnlineInventoryPage'));
 const RevenueOverviewPage = lazyRoute(() => import('../features/revenue/pages/RevenueOverviewPage'));
 const RatesPage = lazyRoute(() => import('../features/rates/pages/RatesPage'));
 const SegmentsPage = lazyRoute(() => import('../features/segments/pages/SegmentsPage'));

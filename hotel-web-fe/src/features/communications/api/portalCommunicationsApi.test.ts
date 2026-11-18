@@ -11,7 +11,7 @@ vi.mock('../../../api/client', () => ({
   },
 }));
 
-vi.mock('../../guestPortal/api/portalTokenStore', () => ({
+vi.mock('../../guest-portal/api/portalTokenStore', () => ({
   getPortalToken: () => getPortalToken(),
 }));
 

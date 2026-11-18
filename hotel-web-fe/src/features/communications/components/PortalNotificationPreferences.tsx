@@ -16,7 +16,7 @@ import { type NotificationTopic } from '../types';
 import { MARKETING_CONSENT_VERSION } from '../../legal/content';
 import { portalSessionScope } from '../../promotions/utils';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { formatStatusLabel } from '../../../utils/formatters';
 

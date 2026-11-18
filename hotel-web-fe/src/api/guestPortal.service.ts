@@ -1,4 +1,4 @@
-import type { GroupPaymentActionResponse } from '../features/guestPortal/booking/types';
+import type { GroupPaymentActionResponse } from '../features/guest-portal/booking/types';
 import { api } from './client';
 import type { ConsentAcceptance } from '../features/legal/useConsent';
 import { SKIP_API_NOTIFICATION_HEADER } from '../utils/apiNotifications';

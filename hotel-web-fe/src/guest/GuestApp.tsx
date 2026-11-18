@@ -11,16 +11,16 @@ import { ApiNotificationHost } from '../components/common/ApiNotificationHost';
 import { ConfirmProvider } from '../components/common/ConfirmProvider';
 import { I18nProvider } from '../i18n';
 import { ThemeModeContext } from '../router/ThemeModeContext';
-import { createGuestPortalTheme } from '../features/guestPortal/theme/guestPortalTheme';
+import { createGuestPortalTheme } from '../features/guest-portal/theme/guestPortalTheme';
 import {
   GUEST_THEME_STORAGE_KEY,
   normalizeGuestThemePreference,
   type GuestThemePreference,
-} from '../features/guestPortal/theme/guestTokens';
+} from '../features/guest-portal/theme/guestTokens';
 import {
   GuestThemePreferenceContext,
   systemPrefersDark,
-} from '../features/guestPortal/theme/guestThemePreference';
+} from '../features/guest-portal/theme/guestThemePreference';
 import { guestRouter } from './guestRouter';
 
 export default function GuestApp() {

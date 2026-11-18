@@ -12,7 +12,7 @@ import { lazyRoute } from '../../navigation/lazyRoute';
 // 0003, and the page's own `guests:read` guard covers access when the row is
 // absent.
 const GuestRelationsFollowUpsPage = lazyRoute(
-  () => import('../../features/guestRelations/pages/GuestRelationsFollowUpsPage')
+  () => import('../../features/guest-relations/pages/GuestRelationsFollowUpsPage')
 );
 
 function FollowUpsRoute() {

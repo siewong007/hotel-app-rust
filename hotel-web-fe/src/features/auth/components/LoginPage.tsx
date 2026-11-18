@@ -26,8 +26,8 @@ import {
 import { useAuth } from '../../../auth/AuthContext';
 import { storage } from '../../../utils/storage';
 import FirstLoginPasskeyPrompt from './FirstLoginPasskeyPrompt';
-import { GuestPortalDashboardService } from '../../guestPortal/api/guestPortalDashboard.service';
-import { setPortalToken } from '../../guestPortal/api/portalTokenStore';
+import { GuestPortalDashboardService } from '../../guest-portal/api/guestPortalDashboard.service';
+import { setPortalToken } from '../../guest-portal/api/portalTokenStore';
 import { GoogleSignInButton, isGoogleSignInAvailable } from './GoogleSignInButton';
 import { googleSignInErrorMessage } from '../google/googleSignInError';
 import { ConsentNotice } from '../../legal/components/ConsentNotice';
@@ -45,7 +45,7 @@ import {
 import type { TwoFactorView } from './twoFactor/TwoFactorChallenge';
 import { AuthService } from '../../../api';
 import type { LoginResult } from '../../../auth/AuthContext';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import {
   isTwoFactorEnrollmentRequired,
   TWO_FACTOR_ENROLLMENT_PATH,

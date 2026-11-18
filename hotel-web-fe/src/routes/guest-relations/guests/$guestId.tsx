@@ -8,7 +8,7 @@ import { lazyRoute } from '../../../navigation/lazyRoute';
 // as help.$slug.tsx — but bound to its own seeded `guest-relations-detail`
 // route-access policy rather than the list's `guest-relations` id.
 const GuestProfilePage = lazyRoute(
-  () => import('../../../features/guestRelations/pages/GuestProfilePage')
+  () => import('../../../features/guest-relations/pages/GuestProfilePage')
 );
 
 function GuestProfileRoute() {

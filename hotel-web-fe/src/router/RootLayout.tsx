@@ -14,7 +14,7 @@ import { UpdateNotifier } from '../desktop/UpdateNotifier';
 import { BootSplash, LoadingFallback, MinimalLoadingFallback } from './RouteFallbacks';
 import { FirstLoginPasskeyPrompt } from '../navigation/routeRegistry';
 import { ErrorBoundary, PageErrorBoundary } from '../components';
-import { GuestPortalShell } from '../features/guestPortal/components/GuestPortalShell';
+import { GuestPortalShell } from '../features/guest-portal/components/GuestPortalShell';
 import { useTranslation } from '../i18n';
 import { getHotelSettings } from '../utils/hotelSettings';
 import { MAIN_CONTAINMENT } from './mainContainment';

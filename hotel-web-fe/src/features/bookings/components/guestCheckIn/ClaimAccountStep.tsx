@@ -17,9 +17,9 @@ import { isHTTPError } from 'ky';
 import { GuestPortalService } from '../../../../api';
 import { APIError } from '../../../../api/client';
 import type { Booking, Guest } from '../../../../types';
-import { guestErrorMessage } from '../../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../../guest-portal/utils/feedback';
 import { ConsentBlock, REGISTRATION_CONSENTS, useConsent, useLegalLocale } from '../../../legal';
-import { setPortalToken } from '../../../guestPortal/api/portalTokenStore';
+import { setPortalToken } from '../../../guest-portal/api/portalTokenStore';
 import { useTranslation } from '../../../../i18n';
 import { useAutoFocusError } from '../../../../hooks/useAutoFocusError';
 

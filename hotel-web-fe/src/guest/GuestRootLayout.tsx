@@ -6,13 +6,13 @@ import { getHotelSettings } from '../utils/hotelSettings';
 import { BootSplash, LoadingFallback } from '../router/RouteFallbacks';
 import { isPublicGuestPath } from './guestDocumentPaths';
 import { GuestOneTap } from '../features/auth/google/GuestOneTap';
-import { GuestPortalThemeProvider } from '../features/guestPortal/theme/GuestPortalThemeProvider';
+import { GuestPortalThemeProvider } from '../features/guest-portal/theme/GuestPortalThemeProvider';
 import { CrossAppRedirect } from './CrossAppRedirect';
 import { lazyRoute } from '../navigation/lazyRoute';
 import { useTranslation } from '../i18n';
 
 const GuestPortalShell = lazyRoute(
-  () => import('../features/guestPortal/components/GuestPortalShell').then(module => ({
+  () => import('../features/guest-portal/components/GuestPortalShell').then(module => ({
     default: module.GuestPortalShell,
   })),
 );

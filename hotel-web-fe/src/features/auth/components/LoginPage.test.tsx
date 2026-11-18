@@ -65,13 +65,13 @@ vi.mock('./FirstLoginPasskeyPrompt', () => ({
   default: () => null,
 }));
 
-vi.mock('../../guestPortal/api/guestPortalDashboard.service', () => ({
+vi.mock('../../guest-portal/api/guestPortalDashboard.service', () => ({
   GuestPortalDashboardService: {
     createSession: vi.fn(),
   },
 }));
 
-vi.mock('../../guestPortal/api/portalTokenStore', () => ({
+vi.mock('../../guest-portal/api/portalTokenStore', () => ({
   setPortalToken: vi.fn(),
 }));
 

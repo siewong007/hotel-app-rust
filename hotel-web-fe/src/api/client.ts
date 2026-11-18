@@ -183,7 +183,7 @@ function isAuthEndpoint(url: string): boolean {
 }
 
 // Guest-portal endpoints use their own bearer token (sessionStorage-backed,
-// see src/features/guestPortal/api/portalTokenStore.ts) — a 401 there says
+// see src/features/guest-portal/api/portalTokenStore.ts) — a 401 there says
 // nothing about the staff session.
 function isGuestPortalRequest(url: string): boolean {
   const pathname = new URL(

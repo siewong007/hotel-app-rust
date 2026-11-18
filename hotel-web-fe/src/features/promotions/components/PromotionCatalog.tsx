@@ -3,7 +3,7 @@ import { LogoLoader } from '../../../components';
 import { useState } from 'react';
 import { useNavigate } from '../../../router';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation, type UseTranslationResult } from '../../../i18n';
 import {
   useClaimPromotion,

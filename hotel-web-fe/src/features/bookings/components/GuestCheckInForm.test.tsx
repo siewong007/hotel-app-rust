@@ -22,7 +22,7 @@ vi.mock('../../../auth/AuthContext', () => ({
   useAuth: () => mocks.auth,
 }));
 
-vi.mock('../../guestPortal/hooks/usePortalSessionBootstrap', () => ({
+vi.mock('../../guest-portal/hooks/usePortalSessionBootstrap', () => ({
   usePortalSessionBootstrap: () => ({ token: mocks.bootstrapToken }),
 }));
 
@@ -41,22 +41,22 @@ vi.mock('../../../api', () => ({
   },
 }));
 
-vi.mock('../../guestPortal/api/bookingAccessTokenStore', () => ({
+vi.mock('../../guest-portal/api/bookingAccessTokenStore', () => ({
   captureBookingAccessToken: (...args: unknown[]) => mocks.captureBookingAccessToken(...args),
 }));
 
-vi.mock('../../guestPortal/api/portalTokenStore', () => ({
+vi.mock('../../guest-portal/api/portalTokenStore', () => ({
   getValidPortalToken: () => mocks.getValidPortalToken(),
   setPortalToken: (...args: unknown[]) => mocks.setPortalToken(...args),
 }));
 
-vi.mock('../../guestPortal/components/GuestPaymentPanel', () => ({
+vi.mock('../../guest-portal/components/GuestPaymentPanel', () => ({
   GuestPaymentPanel: ({ mode, token }: { mode: string; token: string }) => (
     <div data-testid="guest-payment-panel" data-mode={mode} data-token={token} />
   ),
 }));
 
-vi.mock('../../guestPortal/components/dashboard/IdentitySection', () => ({
+vi.mock('../../guest-portal/components/dashboard/IdentitySection', () => ({
   IdentitySection: ({ token }: { token: string }) => (
     <div data-testid="identity-section" data-token={token} />
   ),

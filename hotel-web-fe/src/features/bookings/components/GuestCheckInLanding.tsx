@@ -11,8 +11,8 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { GuestPortalService } from '../../../api';
-import { setBookingAccessToken } from '../../guestPortal/api/bookingAccessTokenStore';
-import { guestErrorMessage } from '../../guestPortal/utils/feedback';
+import { setBookingAccessToken } from '../../guest-portal/api/bookingAccessTokenStore';
+import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';
 
