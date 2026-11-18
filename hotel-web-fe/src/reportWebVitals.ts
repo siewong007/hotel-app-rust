@@ -12,12 +12,14 @@ const reportWebVitals = (onPerfEntry?: (metric: Metric) => void) => {
 
 export const logWebVitals = () => {
   reportWebVitals((metric) => {
-    console.log(`[Performance] ${metric.name}:`, {
-      value: metric.value,
-      rating: metric.rating,
-      delta: metric.delta,
-      id: metric.id,
-    });
+    if (import.meta.env.DEV) {
+      console.log(`[Performance] ${metric.name}:`, {
+        value: metric.value,
+        rating: metric.rating,
+        delta: metric.delta,
+        id: metric.id,
+      });
+    }
 
     // Send to analytics endpoint if available
     const gtag = (window as Window & { gtag?: (...args: unknown[]) => void }).gtag;

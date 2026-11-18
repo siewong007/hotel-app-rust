@@ -15,6 +15,7 @@
 
 ## Bug Fixes (`fix:` commits)
 - `fix(desktop): collapse nested if in uploads restore for clippy` — collapsed nested `if let` in [`hotel-desktop/src-tauri/src/postgres.rs`](../../hotel-desktop/src-tauri/src/postgres.rs#L2246-L2254) (`cargo clippy -- -D warnings` clean; 31 desktop script tests pass).
+- `fix(security): gate Web Vitals console telemetry behind development mode` — wrapped `console.log` in [`hotel-web-fe/src/reportWebVitals.ts`](../../hotel-web-fe/src/reportWebVitals.ts#L13-L23) inside `if (import.meta.env.DEV)` so production sessions do not emit console telemetry logs.
 
 ## Decisions
 - Preserve 6 pre-existing untracked files from concurrent sessions (`0032_*`, `0033_*` SQL patches in backend + desktop mirror, `backup_completeness_check.rs`, `role_hierarchy.rs`) untouched and unstaged.
