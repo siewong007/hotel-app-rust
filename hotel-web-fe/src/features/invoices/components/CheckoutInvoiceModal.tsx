@@ -848,30 +848,29 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
 
   const calculateNights = () => {
     if (isHourlyBooking) return 0;
-    const checkIn = new Date(booking.check_in_date);
-    const checkOut = new Date(booking.check_out_date);
-    return Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+    const checkIn = parseLocalDate(booking.check_in_date);
+    const checkOut = parseLocalDate(booking.check_out_date);
+    return Math.max(0, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
   };
 
   // Get actual checkout date from booking data
-  const getActualCheckoutDate = () => {
+  const getActualCheckoutDate = (): Date => {
     if (booking.actual_check_out) {
-      return new Date(booking.actual_check_out);
+      return parseLocalDate(booking.actual_check_out);
     }
-    return new Date(booking.check_out_date);
+    return parseLocalDate(booking.check_out_date);
   };
 
   // Compare the actual checkout date against the scheduled checkout date
-  // (date-only). Drives the "Early"/"Late" badge and the "Scheduled" line so
-  // the invoice explains any divergence between the two dates instead of
-  // silently showing a range that doesn't match the nights charged.
+  // (date-only in hotel timezone). Drives the "Early"/"Late" badge and the
+  // "Scheduled" line so the invoice explains any divergence between the two
+  // dates instead of silently showing a range that doesn't match the nights charged.
   const getCheckoutVariance = (): 'early' | 'late' | null => {
-    const actual = getActualCheckoutDate();
-    actual.setHours(0, 0, 0, 0);
-    const scheduledCheckout = new Date(booking.check_out_date);
-    scheduledCheckout.setHours(0, 0, 0, 0);
-    if (actual.getTime() < scheduledCheckout.getTime()) return 'early';
-    if (actual.getTime() > scheduledCheckout.getTime()) return 'late';
+    const actualIso = toHotelDateString(getActualCheckoutDate());
+    const scheduledIso = toHotelDateString(booking.check_out_date);
+    if (!actualIso || !scheduledIso) return null;
+    if (actualIso < scheduledIso) return 'early';
+    if (actualIso > scheduledIso) return 'late';
     return null;
   };
   const isEarlyCheckout = () => getCheckoutVariance() === 'early';
@@ -1279,10 +1278,9 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                     );
                   }
                   const perNight = divideMoney(charges.tourismTax, nights);
-                  const checkIn = new Date(booking.check_in_date);
+                  const checkIn = parseLocalDate(booking.check_in_date);
                   return Array.from({ length: nights }, (_, i) => {
-                    const date = new Date(checkIn);
-                    date.setDate(date.getDate() + i);
+                    const date = formatLocalDate(addLocalDays(checkIn, i));
                     return (
                       <Box key={`tt-${i}`} sx={{ p: 1.5, borderBottom: '1px solid var(--hotel-border)' }}>
                         <Grid container>
@@ -2064,10 +2062,9 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                     );
                   }
                     const perNight = divideMoney(charges.tourismTax, nights);
-                  const checkIn = new Date(booking.check_in_date);
+                  const checkIn = parseLocalDate(booking.check_in_date);
                   return Array.from({ length: nights }, (_, i) => {
-                    const date = new Date(checkIn);
-                    date.setDate(date.getDate() + i);
+                    const date = formatLocalDate(addLocalDays(checkIn, i));
                     return (
                       <React.Fragment key={`tt-${i}`}>
                         <Grid size={8}>
