@@ -16,6 +16,8 @@ The production-standards full-repository refactor has been successfully complete
 ### Bugs Fixed
 - `fix(desktop): collapse nested if in uploads restore for clippy` — collapsed nested `if let` in [`hotel-desktop/src-tauri/src/postgres.rs`](../../hotel-desktop/src-tauri/src/postgres.rs#L2246-L2254) ensuring `cargo clippy -- -D warnings` passes cleanly.
 - `fix(security): gate Web Vitals console telemetry behind development mode` — wrapped `console.log` in [`hotel-web-fe/src/reportWebVitals.ts`](../../hotel-web-fe/src/reportWebVitals.ts#L13-L23) inside `if (import.meta.env.DEV)` preventing production telemetry leakage in browser console.
+- `fix(security): update lettre to 0.11.24 resolving 6 security advisories` — patched lettre from 0.11.23 to 0.11.24 resolving 6 advisory vulnerabilities published on 2026-11-17.
+- `fix(ci): ignore unpatched dev-tooling GHSA-fc5q-39xc-vjpf advisory in bun audit security workflow` — ignored unpatched `picomatch` ReDoS advisory affecting dev tooling (`first_patched_version: null` upstream) in `.github/workflows/security.yml`.
 - `chore(env,desktop): document Vite build variables and sync generated Tauri ACL schemas` — synced generated Tauri permission schema files to keep desktop IPC permissions validated against Rust definitions.
 
 ### Items Awaiting User Decision
