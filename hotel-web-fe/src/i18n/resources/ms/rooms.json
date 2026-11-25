@@ -618,7 +618,9 @@
       "available": "Tersedia",
       "unavailable": "Tidak tersedia",
       "maintenance": "Penyelenggaraan"
-    }
+    },
+    "photosLowBadge": "{{count}}/{{target}} FOTO",
+    "photosLowHint": "Tetamu yang memilih bilik di portal tempahan melihat kurang daripada {{target}} foto jenis ini. Tambah lagi di Edit → Foto."
   },
   "timeline": {
     "title": "Garis Masa Tempahan",

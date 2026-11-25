@@ -56,6 +56,7 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { emitApiNotification } from '../../../utils/apiNotifications';
 import { compareMoney, toMoneyNumber } from '../../../utils/money';
 import { apiUrl } from '../../../desktop/runtimeApi';
+import { RECOMMENDED_ROOM_PHOTOS } from '../../guest-portal/booking/roomMediaSources';
 import {
   useAllRoomTypes,
   useCreateRoom,
@@ -1124,6 +1125,16 @@ const RoomConfigurationPage: React.FC = () => {
                         {t('config.hiddenBadge')}
                       </Box>
                     )}
+                    {rt && rt.is_active && (rt.images ?? []).length < RECOMMENDED_ROOM_PHOTOS && (
+                      <Box
+                        component="span"
+                        data-testid={`photos-low-${rt.id}`}
+                        title={t('config.photosLowHint', { target: RECOMMENDED_ROOM_PHOTOS })}
+                        sx={{ fontSize: 10.5, fontWeight: 700, bgcolor: C.amberSoft, color: C.amber, px: 0.875, py: 0.25, borderRadius: '5px' }}
+                      >
+                        {t('config.photosLowBadge', { count: (rt.images ?? []).length, target: RECOMMENDED_ROOM_PHOTOS })}
+                      </Box>
+                    )}
                     {rt && (
                       <Box
                         component="span"
@@ -1611,6 +1622,11 @@ const RoomConfigurationPage: React.FC = () => {
               <Typography sx={{ fontSize: 11, color: C.ink3, mt: 0.75 }}>
                 {t('config.photoHint')}
               </Typography>
+              {(editingType.images ?? []).length < RECOMMENDED_ROOM_PHOTOS && (
+                <Alert severity="warning" sx={{ fontSize: 12, mt: 1 }}>
+                  {t('config.photosLowHint', { target: RECOMMENDED_ROOM_PHOTOS })}
+                </Alert>
+              )}
             </>
           ) : (
             <Alert severity="info" sx={{ fontSize: 12 }}>

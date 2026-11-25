@@ -605,7 +605,9 @@
       "available": "可售",
       "unavailable": "不可用",
       "maintenance": "维修中"
-    }
+    },
+    "photosLowBadge": "照片 {{count}}/{{target}}",
+    "photosLowHint": "客人在预订门户选择房型时，此房型的照片少于 {{target}} 张。请在 编辑 → 照片 中添加。"
   },
   "timeline": {
     "title": "预订时间轴",

@@ -2,6 +2,10 @@
 import { apiUrl } from '../../../desktop/runtimeApi';
 import type { GuestBookingOffer } from './types';
 
+/** Photos a room type should carry before guests choose it from the portal;
+ *  Room configuration flags active types below this. */
+export const RECOMMENDED_ROOM_PHOTOS = 3;
+
 /** Room-type codes the landing ships a bundled photo for. */
 export const MODEL_CODES = ['STDQ', 'DLX', 'SUP', 'FR', 'FS'] as const;
 export type ModelCode = (typeof MODEL_CODES)[number];

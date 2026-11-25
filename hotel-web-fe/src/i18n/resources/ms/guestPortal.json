@@ -98,7 +98,9 @@
     "reviewStay": "Semak penginapan anda",
     "media": {
       "previous": "Foto sebelumnya",
-      "next": "Foto seterusnya"
+      "next": "Foto seterusnya",
+      "enlarge": "Lihat foto skrin penuh",
+      "close": "Tutup"
     },
     "roomImageAlt": "Bilik {{name}}",
     "roomsLeft_other": "{{count}} bilik berbaki",

@@ -99,7 +99,9 @@
     "reviewStay": "Review your stay",
     "media": {
       "previous": "Previous photo",
-      "next": "Next photo"
+      "next": "Next photo",
+      "enlarge": "View photos full screen",
+      "close": "Close"
     },
     "roomImageAlt": "{{name}} room",
     "roomsLeft_one": "{{count}} room left",

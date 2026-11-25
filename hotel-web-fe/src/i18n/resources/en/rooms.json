@@ -618,7 +618,9 @@
       "available": "Available",
       "unavailable": "Unavailable",
       "maintenance": "Maintenance"
-    }
+    },
+    "photosLowBadge": "{{count}}/{{target}} PHOTOS",
+    "photosLowHint": "Guests choosing a room in the booking portal see fewer than {{target}} photos of this type. Add more under Edit → Photos."
   },
   "timeline": {
     "title": "Reservation Timeline",
