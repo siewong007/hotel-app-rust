@@ -157,7 +157,17 @@ Three example files own their scope: root [`.env.example`](../../.env.example) (
 | `TRUST_PROXY_HEADERS` | Behind proxy | `false` | Read `X-Forwarded-For` when set by trusted Caddy/Nginx |
 | `APP_ENV` / `ENVIRONMENT` | Production | `production` | `APP_ENV` takes precedence; enforces prod boot guards |
 | `PAYPAL_API_BASE` | Production w/ PayPal | `https://api-m.paypal.com` | Prod boot refuses sandbox URL when `PAYPAL_ENABLED=true` |
+| `PAYPAL_WEBHOOK_ID` | Production w/ PayPal | (unset) | PayPal webhook ID for `POST /api/webhooks/paypal` signature verification (returns 503 until set) |
 | `SKIP_EMAIL_VERIFICATION` | Security | `false` (`true` on desktop) | Refused if `true` in production |
+
+### PayPal Webhook
+
+Guest-portal PayPal checkout captures synchronously, so payments complete without a webhook. The webhook is the safety net: it records a capture whose browser never returned to the portal. Until `PAYPAL_WEBHOOK_ID` is set, `POST /api/webhooks/paypal` answers 503 and no PayPal call is made.
+
+1. In the PayPal developer dashboard, open the app whose credentials the environment uses (the **live** app for production, the sandbox app for staging) and add a webhook for `https://<domain>/api/webhooks/paypal`, subscribed to `PAYMENT.CAPTURE.COMPLETED` and `PAYMENT.CAPTURE.DENIED`.
+2. Copy the webhook's **Webhook ID**.
+3. Production: set it as the `PAYPAL_WEBHOOK_ID` repository variable (`gh variable set PAYPAL_WEBHOOK_ID`). The deploy workflow writes it into the host's `secrets.env` on the next deploy, and `deploy.sh` logs whether verification is enabled. Staging has no CI provisioning path yet, so its value goes in the staging `secrets.env`.
+4. Confirm with a real capture: PayPal's dashboard should show the delivery as succeeded. Simulator events may fail signature verification (403) and prove nothing either way.
 
 ---
 

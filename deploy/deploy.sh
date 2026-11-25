@@ -281,7 +281,7 @@ ensure_secrets() {
     source "$ci_env"
     set +a
     local ci_key ci_value
-    for ci_key in TURNSTILE_ENABLED TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY; do
+    for ci_key in TURNSTILE_ENABLED TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY PAYPAL_WEBHOOK_ID; do
       ci_value="${!ci_key:-}"
       if [[ -n "$ci_value" ]]; then
         upsert_secret "$ci_key" "$ci_value"
@@ -353,6 +353,20 @@ ensure_secrets() {
     log "  To enable: append TURNSTILE_ENABLED, TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY"
     log "  to $SECRETS_FILE, set the TURNSTILE_SITE_KEY repository variable to the same site"
     log "  key, and redeploy so the bundle is rebuilt."
+  fi
+
+  # The PayPal webhook is the async safety net behind the synchronous capture:
+  # it records a payment whose browser never came back to the portal. Missing it
+  # is not fatal (checkout still works), so report rather than block the deploy.
+  if [[ "${PAYPAL_ENABLED:-false}" == "true" ]]; then
+    if [[ -n "${PAYPAL_WEBHOOK_ID:-}" ]]; then
+      log "PayPal webhook verification ENABLED (webhook id ${PAYPAL_WEBHOOK_ID})"
+    else
+      log "WARNING: PAYPAL_ENABLED=true but PAYPAL_WEBHOOK_ID is unset;"
+      log "  /api/webhooks/paypal answers 503, so a capture whose browser never returned"
+      log "  is not reconciled. Set the PAYPAL_WEBHOOK_ID repository variable to the id"
+      log "  PayPal shows for https://saliminn.my/api/webhooks/paypal and redeploy."
+    fi
   fi
 }
 
