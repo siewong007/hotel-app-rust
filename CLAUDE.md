@@ -81,7 +81,7 @@ Root `Makefile`: `dev-be`, `lint`, `format`, `typecheck`, `test`, `build`, `inst
 
 ## Testing & CI
 
-Backend: 83 files in `tests/` (79 read `DATABASE_URL`; skip = PASS in 0.00s — judge by wall-clock, 0 `#[ignore]`). Frontend: 337 Vitest files (17 in `salim-inn/`). Android: 27 test files (67 tests incl. env-gated `LiveBackendE2eTest`).
+Backend: 81 files in `tests/` (77 read `DATABASE_URL`; skip = PASS in 0.00s — judge by wall-clock, 0 `#[ignore]`). Frontend: 339 Vitest files (17 in `salim-inn/`). Android: 29 test files (67 tests incl. env-gated `LiveBackendE2eTest`).
 `ci.yml` runs 9 jobs (secrets/audit, Markdown link check, proto, DB/proto mirrors, FE, BE, PG suite, desktop placeholder builds). `android-ci.yml` runs unit tests, lint, and debug APK. `deploy.yml` triggers only from green `master` CI.
 Never read real `.env` files into docs/logs. Required prod backend vars: `DATABASE_URL`, `JWT_SECRET` (≥32 chars), `TOTP_ENCRYPTION_KEY`, `ALLOWED_ORIGINS` (HTTPS, non-localhost), `PASSKEY_RP_ID`.
 

@@ -59,7 +59,7 @@ Outside React components (interceptors, utils), import bare `t` from `src/i18n` 
 
 ## 4. Coverage & Test Gates (`2026-11-25`)
 
-- **30 namespaces per locale**: Flattened leaf keys measured `2026-11-25`: **`en` 8,130 · `ms` 8,073 · `zh` 8,058 · `zh-TW` 8,007** (`ms`/`zh`/`zh-TW` omit `_one` plural keys by design).
+- **30 namespaces per locale**: Flattened leaf keys measured `2026-11-25`: **`en` 8,134 · `ms` 8,077 · `zh` 8,062 · `zh-TW` 8,011** (`ms`/`zh`/`zh-TW` omit `_one` plural keys by design).
 - **Enforced CI gates**:
   - `hotel-web-fe/src/i18n/resources.test.ts`: key completeness, no extra keys, plural category rendering, `{{var}}` placeholder parity, non-blank values, bundle registration on disk.
   - `hotel-web-fe/src/i18n/keyUsage.test.ts`: every literal `t()`/`tOr()`/`translate*()`/`statusLabel()` exists in `en`.

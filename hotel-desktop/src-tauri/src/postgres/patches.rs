@@ -972,6 +972,14 @@ mod tests {
     }
 
     #[cfg(unix)]
+    static FAKE_PSQL_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[cfg(unix)]
+    fn shell_quote(path: &Path) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
+
+    #[cfg(unix)]
     fn fake_psql(directory: &TestPatchDir, script: &str) -> PathBuf {
         let path = directory.path().join("psql");
         directory.write("psql", script.as_bytes());
@@ -1274,6 +1282,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn validates_the_complete_catalog_before_starting_psql() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let patch_dir = TestPatchDir::new();
         write_synthetic_catalog(&patch_dir);
         patch_dir.write(
@@ -1281,9 +1290,10 @@ mod tests {
             b"corrupted final patch\n",
         );
         let capture_dir = TestPatchDir::new();
+        let started_path = shell_quote(&capture_dir.path().join("started"));
         let psql_path = fake_psql(
             &capture_dir,
-            "#!/bin/sh\nprintf started > \"$CAPTURE_DIR/started\"\ncat >/dev/null\n",
+            &format!("#!/bin/sh\nprintf started > {started_path}\ncat >/dev/null\n"),
         );
         let mut connection = test_connection();
         connection.password = "catalog-test-password".to_string();
@@ -1303,12 +1313,17 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn streams_each_verified_patch_once_with_metadata_and_password_env() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let patch_dir = TestPatchDir::new();
         write_synthetic_catalog(&patch_dir);
         let capture_dir = TestPatchDir::new();
+        let capture_root = shell_quote(capture_dir.path());
+        let mutate_patch = shell_quote(&patch_dir.path().join("0003_payment_idempotency.sql"));
         let psql_path = fake_psql(
             &capture_dir,
-            "#!/bin/sh\nset -eu\ncount_file=\"$CAPTURE_DIR/count\"\ncount=0\nif [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$count_file\"\nprintf '%s\\n' \"$@\" > \"$CAPTURE_DIR/args-$count\"\nprintf '%s' \"$PGPASSWORD\" > \"$CAPTURE_DIR/password-$count\"\ncat > \"$CAPTURE_DIR/stdin-$count\"\nif [ \"$count\" -eq 1 ]; then printf 'changed after validation\\n' > \"$MUTATE_PATCH\"; fi\n",
+            &format!(
+                "#!/bin/sh\nset -eu\ncapture_dir={capture_root}\nmutate_patch={mutate_patch}\ncount_file=\"$capture_dir/count\"\ncount=0\nif [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$count_file\"\nprintf '%s\\n' \"$@\" > \"$capture_dir/args-$count\"\nprintf '%s' \"$PGPASSWORD\" > \"$capture_dir/password-$count\"\ncat > \"$capture_dir/stdin-$count\"\nif [ \"$count\" -eq 1 ]; then printf 'changed after validation\\n' > \"$mutate_patch\"; fi\n"
+            ),
         );
         let password = "only-in-pgpassword";
         let connection = PsqlConnection::new("db-host", 5444, "db-user", "db-name", password);
@@ -1323,16 +1338,6 @@ mod tests {
                 std::fs::read(patch_dir.path().join(file)).expect("patch source must be readable")
             })
             .collect();
-        // SAFETY: test-only process env for the fake-psql capture harness; the
-        // test mutates before/after apply_catalog and no other thread reads
-        // these variables concurrently.
-        unsafe {
-            std::env::set_var("CAPTURE_DIR", capture_dir.path());
-            std::env::set_var(
-                "MUTATE_PATCH",
-                patch_dir.path().join("0003_payment_idempotency.sql"),
-            );
-        }
 
         apply_catalog(&psql_path, &connection, patch_dir.path())
             .await
@@ -1377,16 +1382,12 @@ mod tests {
                 expected_source
             );
         }
-        // SAFETY: see the set_var block above.
-        unsafe {
-            std::env::remove_var("CAPTURE_DIR");
-            std::env::remove_var("MUTATE_PATCH");
-        }
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn failed_psql_names_the_patch_and_redacts_the_password() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let patch_dir = TestPatchDir::new();
         write_synthetic_catalog(&patch_dir);
         let fake_dir = TestPatchDir::new();
@@ -1402,14 +1403,21 @@ mod tests {
             .expect_err("nonzero psql exit must be fatal");
         let message = error.to_string();
 
-        assert!(message.contains("patch 1.2 google-subject"));
-        assert!(message.contains("[redacted]"));
-        assert!(!message.contains(password));
+        assert!(
+            message.contains("patch 1.2 google-subject"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("[redacted]"),
+            "unexpected error: {message}"
+        );
+        assert!(!message.contains(password), "unexpected error: {message}");
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn nonzero_child_diagnostics_win_the_stdin_close_race() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let fake_dir = TestPatchDir::new();
         let psql_path = fake_psql(
             &fake_dir,
@@ -1438,6 +1446,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn bounds_and_marks_large_psql_failure_output() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let patch_dir = TestPatchDir::new();
         write_synthetic_catalog(&patch_dir);
         let fake_dir = TestPatchDir::new();
@@ -1467,6 +1476,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn redacts_a_password_straddling_both_diagnostic_cutoffs() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let fake_dir = TestPatchDir::new();
         let psql_path = fake_psql(
             &fake_dir,
@@ -1502,6 +1512,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn streams_stdin_while_draining_large_psql_output() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let patch_dir = TestPatchDir::new();
         write_synthetic_catalog(&patch_dir);
         let large_patch = vec![b'-'; 4 * 1024 * 1024];
@@ -1529,6 +1540,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn bounds_drain_completion_when_a_descendant_inherits_the_pipes() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let patch_dir = TestPatchDir::new();
         write_synthetic_catalog(&patch_dir);
         let fake_dir = TestPatchDir::new();
@@ -1582,6 +1594,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn kills_and_reaps_psql_immediately_when_stdin_fails() {
+        let _guard = FAKE_PSQL_TEST_LOCK.lock().await;
         let fake_dir = TestPatchDir::new();
         let psql_path = fake_psql(
             &fake_dir,

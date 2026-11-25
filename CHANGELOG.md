@@ -106,6 +106,10 @@ Updated `2026-11-25` from `v0.3.0..master`. Highlights include the native Kotlin
   - guest-timeline notes appear without a reload
   - the guest app's book-stay button works for signed-in guests
   - the help centre matches the admin portal's labels in each language
+- **Checkout receipt PDF emails**: checkout receipt emails attach a four-locale PDF copy (`krilla` + embedded `NotoSansCJKsc-Regular.ttf`) itemising desk-collected Tourism Tax and extra beds so totals reconcile with payments received.
+- **Guest portal & admin polish**:
+  - room cards replace the 3D view with a full-screen photo lightbox (`RoomMedia`) and room configuration flags active types with fewer than three photos
+  - background jobs table (`JobsTable`) adopts the shared `DataTable` with sorting and mobile cards
 
 ### Security
 
@@ -144,6 +148,7 @@ Updated `2026-11-25` from `v0.3.0..master`. Highlights include the native Kotlin
   [docs/guides/deployment.md](docs/guides/deployment.md#postgresql-engine-upgrade-dump-and-restore).
 - nginx sends relative redirects, so `/` no longer bounces through `http`.
   Deploys prune stale per-SHA release images during the disk pre-check.
+- `PAYPAL_WEBHOOK_ID` is wired through CI, Compose, and deploy scripts so production/staging hosts verify `POST /api/webhooks/paypal` deliveries instead of returning 503.
 
 ## v0.3.0 — 2026-09-19
 

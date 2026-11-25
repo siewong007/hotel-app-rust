@@ -66,6 +66,7 @@ rejects requests without a User-Agent and returns nothing useful).
 | ring | AES-256-GCM | TOTP secret encryption at rest |
 | reqwest 0.13 | Outbound HTTP (PayPal, Turnstile) | `rustls` = platform cert verifier (image ships `ca-certificates`); `form` feature for Turnstile siteverify |
 | lettre 0.11 | SMTP | `tokio1-rustls-tls` — no OpenSSL anywhere |
+| krilla 0.8 | PDF receipts | Checkout-receipt email PDF attachments (`receipt_pdf.rs`) with embedded `NotoSansCJKsc-Regular.ttf` across all 4 locales |
 | rust_decimal | Money | Never floats |
 | validator 0.21 | Request validation | Derives on request models |
 | ammonia | HTML sanitization | Campaign/email HTML |
