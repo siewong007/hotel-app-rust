@@ -165,6 +165,10 @@ export class Post {
     this.composer.addPass(this.gradePass);
 
     this.smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
+    // its edge and blend-weight passes read only the graded image, which a
+    // settled frame has not changed: they keep last frame's (renderSettled)
+    const smaaUpdate = this.smaa.update.bind(this.smaa);
+    this.smaa.update = (r, input, dt) => { if (!this.settled) smaaUpdate(r, input, dt); };
     this.vignette = new VignetteEffect({ offset: 0.32, darkness: 0.42 });
     this.noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
     this.noise.blendMode.opacity.value = 0.028;
@@ -275,11 +279,15 @@ export class Post {
     this.composer.render(dt);
   }
 
+  private settled = false;
+
   /** The last frame again (a settled frame, experience/FrameKey.ts): only the
-   *  final pass runs — SMAA, grade, vignette and the grain, which stays alive
-   *  — over the graded scene the full chain left in its buffer. The composer
-   *  starts every frame from the same buffer and swaps the pair after each
-   *  pass that writes the other, so the final pass reads where it did then. */
+   *  final pass runs — SMAA's blend, grade, vignette and the grain, which
+   *  stays alive — over the graded scene the full chain left in its buffer,
+   *  with the SMAA edges and weights found for it then (two thirds of what is
+   *  left of the frame). The composer starts every frame from the same buffer
+   *  and swaps the pair after each pass that writes the other, so the final
+   *  pass reads where it did then. */
   renderSettled(dt: number): void {
     let input = this.composer.inputBuffer;
     let output = this.composer.outputBuffer;
@@ -291,6 +299,11 @@ export class Post {
         output = t;
       }
     }
-    this.aaPass.render(this.renderer, input, output, dt, false);
+    this.settled = true;
+    try {
+      this.aaPass.render(this.renderer, input, output, dt, false);
+    } finally {
+      this.settled = false;
+    }
   }
 }
