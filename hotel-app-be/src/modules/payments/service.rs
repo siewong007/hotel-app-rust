@@ -1183,36 +1183,140 @@ pub async fn ensure_invoice_for_booking_tx(
     Ok(invoice_number)
 }
 
-/// Queue the transactional checkout-receipt email for a just-invoiced booking.
-///
-/// Called from the checkout transition's post-commit best-effort block
-/// (`repositories/bookings/lifecycle.rs`), immediately after
-/// [`ensure_invoice_for_booking`] succeeds — the invoice number is the
-/// idempotency key, so retries and night-audit auto-checkouts cannot
-/// double-send. Company-billed folios and guests without an email are skipped:
-/// the receipt is a personal document.
-pub async fn queue_checkout_receipt_email(
-    pool: &DbPool,
-    booking_id: i64,
-    invoice_number: &str,
-) -> Result<(), ApiError> {
-    #[derive(sqlx::FromRow)]
-    struct ReceiptSource {
-        guest_id: i64,
-        guest_name: String,
-        guest_email: Option<String>,
-        company_id: Option<i64>,
-        booking_number: Option<String>,
-        check_in_date: chrono::NaiveDate,
-        check_out_date: chrono::NaiveDate,
-        total_amount: rust_decimal::Decimal,
-        tourism_tax_amount: rust_decimal::Decimal,
-        extra_bed_charge: rust_decimal::Decimal,
-        room_number: Option<String>,
-        room_type: Option<String>,
-        guest_locale: Option<String>,
+const CHECKOUT_RECEIPT_KEY_PREFIX: &str = "checkout-receipt:";
+
+/// Idempotency key of a checkout-receipt delivery; the invoice number makes
+/// retries and night-audit auto-checkouts unable to double-send.
+pub fn checkout_receipt_idempotency_key(invoice_number: &str) -> String {
+    format!("{CHECKOUT_RECEIPT_KEY_PREFIX}{invoice_number}")
+}
+
+/// The invoice number back out of a checkout-receipt delivery's key.
+pub fn invoice_from_checkout_receipt_key(key: &str) -> Option<&str> {
+    key.strip_prefix(CHECKOUT_RECEIPT_KEY_PREFIX)
+        .filter(|invoice| !invoice.is_empty())
+}
+
+#[derive(sqlx::FromRow)]
+struct ReceiptSource {
+    guest_id: i64,
+    guest_name: String,
+    guest_email: Option<String>,
+    company_id: Option<i64>,
+    booking_number: Option<String>,
+    check_in_date: chrono::NaiveDate,
+    check_out_date: chrono::NaiveDate,
+    total_amount: rust_decimal::Decimal,
+    tourism_tax_amount: rust_decimal::Decimal,
+    extra_bed_charge: rust_decimal::Decimal,
+    room_number: Option<String>,
+    room_type: Option<String>,
+    guest_locale: Option<String>,
+}
+
+/// Everything the checkout receipt prints, loaded once so the email body and
+/// its PDF copy cannot disagree.
+struct CheckoutReceipt {
+    source: ReceiptSource,
+    paid: rust_decimal::Decimal,
+    balance: rust_decimal::Decimal,
+    nights: i64,
+    locale: i18n::Locale,
+}
+
+impl CheckoutReceipt {
+    fn booking_number(&self) -> &str {
+        self.source.booking_number.as_deref().unwrap_or("")
     }
 
+    fn stay(&self) -> String {
+        let locale = self.locale;
+        locale.format(
+            "email.stay.range",
+            &[
+                ("from", &locale.format_date(self.source.check_in_date)),
+                ("to", &locale.format_date(self.source.check_out_date)),
+                ("nights", &self.nights.to_string()),
+            ],
+        )
+    }
+
+    /// Room charges plus the desk charges (tourism tax, extra bed) that are
+    /// collected at the front desk on arrival. Payments received includes
+    /// those desk collections, so the total must too or the receipt reads as
+    /// an overpayment.
+    fn billable_total(&self) -> rust_decimal::Decimal {
+        self.source.total_amount + self.source.tourism_tax_amount + self.source.extra_bed_charge
+    }
+
+    fn total_label(&self) -> String {
+        format!("{:.2}", self.billable_total())
+    }
+
+    fn paid_label(&self) -> String {
+        format!("{:.2}", self.paid)
+    }
+
+    fn balance_label(&self) -> String {
+        format!("{:.2}", self.balance)
+    }
+
+    /// The label/value rows shared by the email's details table and the PDF.
+    fn detail_rows(&self, invoice_number: &str) -> Vec<(&'static str, String)> {
+        let locale = self.locale;
+        let room = format!(
+            "{} ({})",
+            self.source.room_number.as_deref().unwrap_or("-"),
+            self.source.room_type.as_deref().unwrap_or("-"),
+        );
+        let mut rows = vec![
+            (
+                locale.message("email.labels.booking"),
+                self.booking_number().to_string(),
+            ),
+            (
+                locale.message("email.labels.invoice"),
+                invoice_number.to_string(),
+            ),
+            (locale.message("email.labels.room"), room),
+            (locale.message("email.labels.stay"), self.stay()),
+        ];
+        // Itemise only when a desk charge exists; otherwise the room charges
+        // line would just repeat the total.
+        let desk_charges = [
+            ("email.labels.tourismTax", self.source.tourism_tax_amount),
+            ("email.labels.extraBed", self.source.extra_bed_charge),
+        ];
+        if desk_charges.iter().any(|(_, amount)| !amount.is_zero()) {
+            rows.push((
+                locale.message("email.labels.roomCharges"),
+                format!("{:.2}", self.source.total_amount),
+            ));
+            for (key, amount) in desk_charges {
+                if !amount.is_zero() {
+                    rows.push((locale.message(key), format!("{amount:.2}")));
+                }
+            }
+        }
+        rows.extend([
+            (
+                locale.message("email.labels.totalCharged"),
+                self.total_label(),
+            ),
+            (
+                locale.message("email.labels.paymentsReceived"),
+                self.paid_label(),
+            ),
+            (locale.message("email.labels.balance"), self.balance_label()),
+        ]);
+        rows
+    }
+}
+
+async fn load_checkout_receipt(
+    pool: &DbPool,
+    booking_id: i64,
+) -> Result<CheckoutReceipt, ApiError> {
     let source = sqlx::query_as::<_, ReceiptSource>(
         r#"
         SELECT g.id AS guest_id,
@@ -1240,20 +1344,6 @@ pub async fn queue_checkout_receipt_email(
     .await
     .map_err(ApiError::from)?
     .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
-
-    let Some(recipient) = source
-        .guest_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-    else {
-        return Ok(());
-    };
-    // Corporate stays are billed to the company; no personal receipt.
-    if source.company_id.is_some() {
-        return Ok(());
-    }
 
     // Money that settles the booking's charges — held deposits are collateral
     // and forfeited deposits are income, so neither reduces the balance the
@@ -1284,42 +1374,116 @@ pub async fn queue_checkout_receipt_email(
     let nights = (source.check_out_date - source.check_in_date)
         .num_days()
         .max(0);
-    let billable_total = source.total_amount + source.tourism_tax_amount + source.extra_bed_charge;
-    let balance = (billable_total - paid).max(rust_decimal::Decimal::ZERO);
-
     let locale = i18n::mail_locale(pool, source.guest_locale.as_deref()).await;
+
+    let mut receipt = CheckoutReceipt {
+        source,
+        paid,
+        balance: rust_decimal::Decimal::ZERO,
+        nights,
+        locale,
+    };
+    receipt.balance = (receipt.billable_total() - paid).max(rust_decimal::Decimal::ZERO);
+    Ok(receipt)
+}
+
+/// Render the PDF copy of a checkout receipt for its invoice number, as
+/// `(filename, bytes)`. `Ok(None)` when no invoice carries that number.
+///
+/// Called by the email worker at send time (the delivery row stores only the
+/// rendered body), so a retried delivery prints the booking as it stands
+/// when the retry runs.
+pub async fn checkout_receipt_pdf(
+    pool: &DbPool,
+    invoice_number: &str,
+) -> Result<Option<(String, Vec<u8>)>, ApiError> {
+    let booking_id = sqlx::query_scalar::<_, i64>(
+        "SELECT booking_id FROM invoices WHERE invoice_number = $1 AND booking_id IS NOT NULL",
+    )
+    .bind(invoice_number)
+    .fetch_optional(pool)
+    .await
+    .map_err(ApiError::from)?;
+    let Some(booking_id) = booking_id else {
+        return Ok(None);
+    };
+    let receipt = load_checkout_receipt(pool, booking_id).await?;
+    let document = super::receipt_pdf::ReceiptPdf {
+        hotel: email_layout::hotel_display_name(),
+        heading: receipt.locale.message("email.receipt.heading").to_string(),
+        guest_name: receipt.source.guest_name.clone(),
+        rows: receipt
+            .detail_rows(invoice_number)
+            .into_iter()
+            .map(|(label, value)| (label.to_string(), value))
+            .collect(),
+    };
+    let bytes = tokio::task::spawn_blocking(move || super::receipt_pdf::render(&document))
+        .await
+        .map_err(|e| ApiError::Internal(format!("receipt PDF task failed: {e}")))?
+        .map_err(ApiError::Internal)?;
+    let safe_invoice: String = invoice_number
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    Ok(Some((format!("receipt-{safe_invoice}.pdf"), bytes)))
+}
+
+/// Queue the transactional checkout-receipt email for a just-invoiced booking.
+///
+/// Called from the checkout transition's post-commit best-effort block
+/// (`repositories/bookings/lifecycle.rs`), immediately after
+/// [`ensure_invoice_for_booking`] succeeds — the invoice number is the
+/// idempotency key, so retries and night-audit auto-checkouts cannot
+/// double-send. Company-billed folios and guests without an email are skipped:
+/// the receipt is a personal document. The worker attaches the PDF copy
+/// ([`checkout_receipt_pdf`]) when it sends.
+pub async fn queue_checkout_receipt_email(
+    pool: &DbPool,
+    booking_id: i64,
+    invoice_number: &str,
+) -> Result<(), ApiError> {
+    let receipt = load_checkout_receipt(pool, booking_id).await?;
+    let source = &receipt.source;
+
+    let Some(recipient) = source
+        .guest_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
+    // Corporate stays are billed to the company; no personal receipt.
+    if source.company_id.is_some() {
+        return Ok(());
+    }
+
+    let locale = receipt.locale;
     let hotel = email_layout::hotel_display_name();
-    let booking_number = source.booking_number.as_deref().unwrap_or("");
+    let booking_number = receipt.booking_number();
     let subject = locale.format(
         "email.receipt.subject",
         &[("hotel", &hotel), ("booking", booking_number)],
     );
     let portal = email_layout::absolute_url("/portal");
-    let stay = locale.format(
-        "email.stay.range",
-        &[
-            ("from", &locale.format_date(source.check_in_date)),
-            ("to", &locale.format_date(source.check_out_date)),
-            ("nights", &nights.to_string()),
-        ],
-    );
-    let room = format!(
-        "{} ({})",
-        source.room_number.as_deref().unwrap_or("-"),
-        source.room_type.as_deref().unwrap_or("-"),
-    );
-    let total = format!("{:.2}", source.total_amount);
-    let paid_label = format!("{paid:.2}");
-    let balance_label = format!("{balance:.2}");
-    let details = email_layout::details_table(&[
-        (locale.message("email.labels.booking"), booking_number),
-        (locale.message("email.labels.invoice"), invoice_number),
-        (locale.message("email.labels.room"), &room),
-        (locale.message("email.labels.stay"), &stay),
-        (locale.message("email.labels.totalCharged"), &total),
-        (locale.message("email.labels.paymentsReceived"), &paid_label),
-        (locale.message("email.labels.balance"), &balance_label),
-    ]);
+    let stay = receipt.stay();
+    let total = receipt.total_label();
+    let paid_label = receipt.paid_label();
+    let balance_label = receipt.balance_label();
+    let rows = receipt.detail_rows(invoice_number);
+    let row_refs: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|(label, value)| (*label, value.as_str()))
+        .collect();
+    let details = email_layout::details_table(&row_refs);
     let inner_html = format!(
         "<p>{}</p><p>{}</p>{}<p>{}</p>",
         locale.format(
@@ -1374,12 +1538,91 @@ pub async fn queue_checkout_receipt_email(
             body_html: &body_html_with_footer,
             body_text: Some(&body_text),
             voucher_id: None,
-            idempotency_key: &format!("checkout-receipt:{invoice_number}"),
+            idempotency_key: &checkout_receipt_idempotency_key(invoice_number),
         },
     )
     .await?;
     tx.commit().await.map_err(ApiError::from)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod checkout_receipt_key_tests {
+    use super::{checkout_receipt_idempotency_key, invoice_from_checkout_receipt_key};
+
+    #[test]
+    fn the_invoice_round_trips_through_the_delivery_key() {
+        let key = checkout_receipt_idempotency_key("INV-2026-000123");
+        assert_eq!(key, "checkout-receipt:INV-2026-000123");
+        assert_eq!(
+            invoice_from_checkout_receipt_key(&key),
+            Some("INV-2026-000123")
+        );
+        assert_eq!(invoice_from_checkout_receipt_key("checkout-receipt:"), None);
+        assert_eq!(invoice_from_checkout_receipt_key("campaign:7:12"), None);
+    }
+}
+
+#[cfg(test)]
+mod checkout_receipt_rows_tests {
+    use super::{CheckoutReceipt, ReceiptSource};
+    use crate::core::i18n::Locale;
+    use rust_decimal::Decimal;
+
+    fn receipt(tax: i64, extra_bed: i64, paid: i64) -> CheckoutReceipt {
+        let source = ReceiptSource {
+            guest_id: 1,
+            guest_name: "Guest".into(),
+            guest_email: None,
+            company_id: None,
+            booking_number: Some("BK-1".into()),
+            check_in_date: chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            check_out_date: chrono::NaiveDate::from_ymd_opt(2026, 11, 4).unwrap(),
+            total_amount: Decimal::from(540),
+            tourism_tax_amount: Decimal::from(tax),
+            extra_bed_charge: Decimal::from(extra_bed),
+            room_number: Some("101".into()),
+            room_type: Some("Deluxe".into()),
+            guest_locale: None,
+        };
+        let mut receipt = CheckoutReceipt {
+            source,
+            paid: Decimal::from(paid),
+            balance: Decimal::ZERO,
+            nights: 3,
+            locale: Locale::parse("en").unwrap(),
+        };
+        receipt.balance = (receipt.billable_total() - receipt.paid).max(Decimal::ZERO);
+        receipt
+    }
+
+    fn value<'a>(rows: &'a [(&'static str, String)], label: &str) -> Option<&'a str> {
+        rows.iter()
+            .find(|(l, _)| *l == label)
+            .map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn desk_charges_are_itemised_and_counted_in_the_total() {
+        // Tourism tax is collected at the desk on arrival, so it is already in
+        // payments received; the total must include it to reconcile.
+        let rows = receipt(30, 0, 570).detail_rows("INV-1");
+        assert_eq!(value(&rows, "Room charges"), Some("540.00"));
+        assert_eq!(value(&rows, "Tourism tax"), Some("30.00"));
+        assert_eq!(value(&rows, "Extra bed"), None);
+        assert_eq!(value(&rows, "Total charged"), Some("570.00"));
+        assert_eq!(value(&rows, "Payments received"), Some("570.00"));
+        assert_eq!(value(&rows, "Balance"), Some("0.00"));
+    }
+
+    #[test]
+    fn no_desk_charges_keeps_the_short_form() {
+        let rows = receipt(0, 0, 500).detail_rows("INV-1");
+        assert_eq!(value(&rows, "Room charges"), None);
+        assert_eq!(value(&rows, "Tourism tax"), None);
+        assert_eq!(value(&rows, "Total charged"), Some("540.00"));
+        assert_eq!(value(&rows, "Balance"), Some("40.00"));
+    }
 }
 
 // ===========================================================================

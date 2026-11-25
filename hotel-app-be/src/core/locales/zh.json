@@ -17,6 +17,9 @@
       "checkIn": "入住",
       "checkOut": "退房",
       "invoice": "发票",
+      "roomCharges": "房费",
+      "tourismTax": "旅游税",
+      "extraBed": "加床",
       "totalCharged": "收费总额",
       "reason": "原因",
       "linkValidUntil": "链接有效期至"

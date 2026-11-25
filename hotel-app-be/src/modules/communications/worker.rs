@@ -13,7 +13,7 @@ use std::time::Duration;
 use chrono::Utc;
 
 use super::repository::CommunicationsRepository as Repo;
-use super::transport::{OutgoingEmail, Transport};
+use super::transport::{EmailAttachment, OutgoingEmail, Transport};
 use super::validation;
 use crate::core::db::{DbPool, generate_uuid};
 use crate::core::error::ApiError;
@@ -130,6 +130,48 @@ pub async fn tick(
     Ok(count)
 }
 
+/// Files to send with a delivery: the PDF copy of a checkout receipt. A PDF
+/// problem never fails or delays the email — the body already carries every
+/// figure — so it is logged and the message goes out without the attachment.
+async fn delivery_attachments(
+    pool: &DbPool,
+    delivery: &super::models::EmailDelivery,
+) -> Vec<EmailAttachment> {
+    if delivery.kind != "checkout_receipt" {
+        return Vec::new();
+    }
+    let Some(invoice_number) = crate::modules::payments::service::invoice_from_checkout_receipt_key(
+        &delivery.idempotency_key,
+    ) else {
+        log::warn!(
+            "Delivery {}: checkout receipt key has no invoice; sending without PDF",
+            delivery.id
+        );
+        return Vec::new();
+    };
+    match crate::modules::payments::service::checkout_receipt_pdf(pool, invoice_number).await {
+        Ok(Some((filename, bytes))) => vec![EmailAttachment {
+            filename,
+            content_type: "application/pdf".to_string(),
+            bytes,
+        }],
+        Ok(None) => {
+            log::warn!(
+                "Delivery {}: invoice {invoice_number} not found; sending receipt without PDF",
+                delivery.id
+            );
+            Vec::new()
+        }
+        Err(e) => {
+            log::warn!(
+                "Delivery {}: receipt PDF failed ({e}); sending without it",
+                delivery.id
+            );
+            Vec::new()
+        }
+    }
+}
+
 async fn process_delivery(
     pool: &DbPool,
     transport: &Transport,
@@ -180,12 +222,14 @@ async fn process_delivery(
         return Ok(());
     }
 
+    let attachments = delivery_attachments(pool, delivery).await;
     let outcome = transport
         .send(&OutgoingEmail {
             to: delivery.recipient_email.clone(),
             subject: delivery.subject.clone(),
             body_html: delivery.body_html.clone(),
             body_text: delivery.body_text.clone(),
+            attachments,
         })
         .await;
 

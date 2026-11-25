@@ -4,7 +4,7 @@
 //! exclusively from environment variables — never from system_settings or any
 //! client-visible surface.
 
-use lettre::message::{Mailbox, MultiPart};
+use lettre::message::{Attachment as MimeAttachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
@@ -16,6 +16,60 @@ pub struct OutgoingEmail {
     pub subject: String,
     pub body_html: String,
     pub body_text: Option<String>,
+    /// Files sent alongside the body (the checkout receipt's PDF copy).
+    pub attachments: Vec<EmailAttachment>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmailAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Build the MIME message: the plain/HTML alternative alone, or wrapped in
+/// `multipart/mixed` with the attachments after it.
+fn build_message(from: Mailbox, email: &OutgoingEmail) -> Result<Message, String> {
+    let to: Mailbox = email
+        .to
+        .parse()
+        .map_err(|_| "invalid recipient address".to_string())?;
+    let builder = Message::builder().from(from).to(to).subject(&email.subject);
+    let html_part = || {
+        SinglePart::builder()
+            .header(lettre::message::header::ContentType::TEXT_HTML)
+            .body(email.body_html.clone())
+    };
+    let message = if email.attachments.is_empty() {
+        match &email.body_text {
+            Some(text) => builder.multipart(MultiPart::alternative_plain_html(
+                text.clone(),
+                email.body_html.clone(),
+            )),
+            None => builder
+                .header(lettre::message::header::ContentType::TEXT_HTML)
+                .body(email.body_html.clone()),
+        }
+    } else {
+        let mut mixed = match &email.body_text {
+            Some(text) => MultiPart::mixed().multipart(MultiPart::alternative_plain_html(
+                text.clone(),
+                email.body_html.clone(),
+            )),
+            None => MultiPart::mixed().singlepart(html_part()),
+        };
+        for attachment in &email.attachments {
+            let content_type =
+                lettre::message::header::ContentType::parse(&attachment.content_type)
+                    .map_err(|_| format!("invalid attachment type {}", attachment.content_type))?;
+            mixed = mixed.singlepart(
+                MimeAttachment::new(attachment.filename.clone())
+                    .body(attachment.bytes.clone(), content_type),
+            );
+        }
+        builder.multipart(mixed)
+    };
+    message.map_err(|e| format!("message build failed: {e}"))
 }
 
 #[derive(Debug, Clone)]
@@ -102,24 +156,7 @@ impl Transport {
     pub async fn send(&self, email: &OutgoingEmail) -> Result<Option<String>, String> {
         match self {
             Transport::Smtp(smtp) => {
-                let to: Mailbox = email
-                    .to
-                    .parse()
-                    .map_err(|_| "invalid recipient address".to_string())?;
-                let builder = Message::builder()
-                    .from(smtp.from.clone())
-                    .to(to)
-                    .subject(&email.subject);
-                let message = match &email.body_text {
-                    Some(text) => builder.multipart(MultiPart::alternative_plain_html(
-                        text.clone(),
-                        email.body_html.clone(),
-                    )),
-                    None => builder
-                        .header(lettre::message::header::ContentType::TEXT_HTML)
-                        .body(email.body_html.clone()),
-                }
-                .map_err(|e| format!("message build failed: {e}"))?;
+                let message = build_message(smtp.from.clone(), email)?;
                 let response = smtp
                     .mailer
                     .send(message)
@@ -133,7 +170,43 @@ impl Transport {
 
 #[cfg(test)]
 mod tests {
-    use super::SmtpConfig;
+    use super::{EmailAttachment, OutgoingEmail, SmtpConfig, build_message};
+
+    fn email(attachments: Vec<EmailAttachment>) -> OutgoingEmail {
+        OutgoingEmail {
+            to: "guest@example.com".to_string(),
+            subject: "Your receipt".to_string(),
+            body_html: "<p>Thank you</p>".to_string(),
+            body_text: Some("Thank you".to_string()),
+            attachments,
+        }
+    }
+
+    fn formatted(email: &OutgoingEmail) -> String {
+        let from = "Hotel <hotel@example.com>".parse().expect("sender parses");
+        let message = build_message(from, email).expect("message builds");
+        String::from_utf8_lossy(&message.formatted()).into_owned()
+    }
+
+    #[test]
+    fn attaches_the_receipt_pdf_beside_the_plain_and_html_body() {
+        let raw = formatted(&email(vec![EmailAttachment {
+            filename: "receipt-INV-1.pdf".to_string(),
+            content_type: "application/pdf".to_string(),
+            bytes: b"%PDF-1.7 test".to_vec(),
+        }]));
+        assert!(raw.contains("multipart/mixed"), "{raw}");
+        assert!(raw.contains("multipart/alternative"), "{raw}");
+        assert!(raw.contains("application/pdf"), "{raw}");
+        assert!(raw.contains("filename=\"receipt-INV-1.pdf\""), "{raw}");
+    }
+
+    #[test]
+    fn a_message_without_attachments_stays_a_plain_alternative() {
+        let raw = formatted(&email(Vec::new()));
+        assert!(raw.contains("multipart/alternative"), "{raw}");
+        assert!(!raw.contains("multipart/mixed"), "{raw}");
+    }
 
     #[test]
     fn smtp_config_requires_host_and_sender_identity() {
