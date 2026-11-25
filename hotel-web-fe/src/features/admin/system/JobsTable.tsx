@@ -1,24 +1,13 @@
 import React from 'react';
-import {
-  Box,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { Chip, Tooltip, Typography } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
 
-import { useIsPhone } from '../../../hooks/useIsPhone';
 import { useTranslation, statusLabel } from '../../../i18n';
 import { formatRelativeTime } from '../../../i18n/format';
 import { formatHotelDateTime } from '../../../utils/date';
 import { MobileCardRow } from '../../../components/data-table/MobileCardRow';
-import { TableScroll } from '../../../components/data-table/TableScroll';
+import { DataTable, type ColumnDef } from '../../../components';
 import type { JobHealth } from './types';
 
 function formatDuration(ms: number | null): string {
@@ -39,130 +28,123 @@ const JOB_LABEL_KEYS: Record<string, string> = {
   room_arrival_holds: 'admin:jobs.names.room_arrival_holds',
 };
 
+const StatusChip: React.FC<{ status: string; label: string }> = ({ status, label }) => (
+  <Chip
+    size="small"
+    icon={status === 'ok' ? <CheckCircleOutlineIcon /> : <ErrorOutlineIcon />}
+    label={label}
+    color={status === 'ok' ? 'success' : 'error'}
+    variant="outlined"
+  />
+);
+
 export const JobsTable: React.FC<{ jobs: JobHealth[] }> = ({ jobs }) => {
-  const isPhone = useIsPhone();
-  const { t, tOr } = useTranslation('admin');
+  const { t } = useTranslation('admin');
   const jobName = (name: string) =>
     JOB_LABEL_KEYS[name] ? t(JOB_LABEL_KEYS[name]) : name;
 
-  if (isPhone) {
-    return (
-      <Box>
-        {jobs.map((job) => (
-          <Box
-            key={job.job_name}
-            sx={{ borderBottom: '1px solid', borderColor: 'divider' }}
-          >
-            <MobileCardRow
-              title={jobName(job.job_name)}
-              subtitle={t('jobs.cardSubtitle', {
-                at: formatRelativeTime(job.last_run_at),
-                runs: job.runs_24h,
-                failures: job.failures_24h,
-              })}
-              meta={job.last_error ? t('jobs.lastError', { error: job.last_error }) : t('jobs.lastRunDuration', { duration: formatDuration(job.last_duration_ms) })}
-              status={
-                <Chip
-                  size="small"
-                  icon={
-                    job.last_status === 'ok' ? (
-                      <CheckCircleOutlineIcon />
-                    ) : (
-                      <ErrorOutlineIcon />
-                    )
-                  }
-                  label={statusLabel(t, 'job', job.last_status)}
-                  color={job.last_status === 'ok' ? 'success' : 'error'}
-                  variant="outlined"
-                />
-              }
-            />
-          </Box>
-        ))}
-      </Box>
-    );
-  }
+  const columns: ColumnDef<JobHealth, any>[] = [
+    {
+      id: 'job',
+      accessorFn: (job) => jobName(job.job_name),
+      header: t('jobs.col.job'),
+      cell: ({ row }) => (
+        <>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {jobName(row.original.job_name)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {row.original.job_name}
+          </Typography>
+        </>
+      ),
+    },
+    {
+      id: 'lastRun',
+      accessorKey: 'last_run_at',
+      header: t('jobs.col.lastRun'),
+      cell: ({ row }) => (
+        <Tooltip title={formatHotelDateTime(row.original.last_run_at)}>
+          <span>{formatRelativeTime(row.original.last_run_at)}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      id: 'status',
+      accessorKey: 'last_status',
+      header: t('common:field.status'),
+      cell: ({ row }) => (
+        <StatusChip status={row.original.last_status} label={statusLabel(t, 'job', row.original.last_status)} />
+      ),
+    },
+    {
+      id: 'duration',
+      accessorFn: (job) => job.last_duration_ms ?? -1,
+      header: t('jobs.col.duration'),
+      meta: { align: 'right' },
+      cell: ({ row }) => formatDuration(row.original.last_duration_ms),
+    },
+    {
+      id: 'runs24h',
+      accessorKey: 'runs_24h',
+      header: t('jobs.col.runs24h'),
+      meta: { align: 'right' },
+    },
+    {
+      id: 'failures24h',
+      accessorKey: 'failures_24h',
+      header: t('jobs.col.failures24h'),
+      meta: { align: 'right' },
+      cell: ({ row }) =>
+        row.original.failures_24h > 0 ? (
+          <Typography component="span" color="error.main" sx={{ fontWeight: 700 }}>
+            {row.original.failures_24h}
+          </Typography>
+        ) : (
+          0
+        ),
+    },
+    {
+      id: 'lastError',
+      accessorFn: (job) => job.last_error ?? '',
+      header: t('jobs.col.lastError'),
+      enableSorting: false,
+      cell: ({ row }) =>
+        row.original.last_error ? (
+          <Tooltip title={row.original.last_error}>
+            <Typography
+              variant="caption"
+              color="error.main"
+              sx={{ display: 'block', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {row.original.last_error}
+            </Typography>
+          </Tooltip>
+        ) : (
+          '—'
+        ),
+    },
+  ];
 
   return (
-  <TableScroll>
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          <TableCell>{t('jobs.col.job')}</TableCell>
-          <TableCell>{t('jobs.col.lastRun')}</TableCell>
-          <TableCell>{t('common:field.status')}</TableCell>
-          <TableCell align="right">{t('jobs.col.duration')}</TableCell>
-          <TableCell align="right">{t('jobs.col.runs24h')}</TableCell>
-          <TableCell align="right">{t('jobs.col.failures24h')}</TableCell>
-          <TableCell>{t('jobs.col.lastError')}</TableCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {jobs.map((job) => (
-          <TableRow key={job.job_name} hover>
-            <TableCell>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {jobName(job.job_name)}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {job.job_name}
-              </Typography>
-            </TableCell>
-            <TableCell>
-              <Tooltip title={formatHotelDateTime(job.last_run_at)}>
-                <span>{formatRelativeTime(job.last_run_at)}</span>
-              </Tooltip>
-            </TableCell>
-            <TableCell>
-              <Chip
-                size="small"
-                icon={
-                  job.last_status === 'ok' ? (
-                    <CheckCircleOutlineIcon />
-                  ) : (
-                    <ErrorOutlineIcon />
-                  )
-                }
-                label={statusLabel(t, 'job', job.last_status)}
-                color={job.last_status === 'ok' ? 'success' : 'error'}
-                variant="outlined"
-              />
-            </TableCell>
-            <TableCell align="right">{formatDuration(job.last_duration_ms)}</TableCell>
-            <TableCell align="right">{job.runs_24h}</TableCell>
-            <TableCell align="right">
-              {job.failures_24h > 0 ? (
-                <Typography component="span" color="error.main" sx={{ fontWeight: 700 }}>
-                  {job.failures_24h}
-                </Typography>
-              ) : (
-                0
-              )}
-            </TableCell>
-            <TableCell sx={{ maxWidth: 280 }}>
-              {job.last_error ? (
-                <Tooltip title={job.last_error}>
-                  <Typography
-                    variant="caption"
-                    color="error.main"
-                    sx={{
-                      display: 'block',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {job.last_error}
-                  </Typography>
-                </Tooltip>
-              ) : (
-                '—'
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </TableScroll>
+    <DataTable<JobHealth>
+      data={jobs}
+      columns={columns}
+      getRowId={(job) => job.job_name}
+      // Sits inside the page's outlined Card: no second Paper border.
+      containerProps={{ sx: { borderRadius: 0, boxShadow: 'none', bgcolor: 'transparent' } }}
+      renderMobileCard={(job) => (
+        <MobileCardRow
+          title={jobName(job.job_name)}
+          subtitle={t('jobs.cardSubtitle', {
+            at: formatRelativeTime(job.last_run_at),
+            runs: job.runs_24h,
+            failures: job.failures_24h,
+          })}
+          meta={job.last_error ? t('jobs.lastError', { error: job.last_error }) : t('jobs.lastRunDuration', { duration: formatDuration(job.last_duration_ms) })}
+          status={<StatusChip status={job.last_status} label={statusLabel(t, 'job', job.last_status)} />}
+        />
+      )}
+    />
   );
 };
