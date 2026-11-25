@@ -94,33 +94,39 @@ export const GuestCheckInForm: React.FC = () => {
   const receiptUploadErrorRef = useAutoFocusError(receiptUploadError);
   const checkinErrorRef = useAutoFocusError(checkinError);
 
+  const applyBookingResponse = useCallback(
+    (response: Awaited<ReturnType<typeof GuestPortalService.getBooking>>, options?: { keepStep?: boolean }) => {
+      setBooking(response.booking);
+      setGuest(response.guest);
+      setEkycSummary(response.ekyc_summary ?? null);
+      setReceiptRequestPaymentId(response.receipt_request_payment_id ?? null);
+      setReceiptRequestMessage(response.receipt_request_message ?? null);
+      setReceiptAlreadyUploaded(Boolean(response.receipt_uploaded));
+      setHasAccount(Boolean(response.has_account));
+
+      if (!options?.keepStep) {
+        // Start where the guest actually has something to do: money first
+        // when it is outstanding, otherwise straight into their details.
+        const paymentOutstanding =
+          needsOnlinePayment(response.booking?.status) ||
+          (Boolean(response.receipt_request_payment_id) && !response.receipt_uploaded);
+        setActiveStep(paymentOutstanding ? 'payment' : 'details');
+      }
+    },
+    [],
+  );
+
   const loadBookingData = useCallback(
     async (options?: { keepStep?: boolean }) => {
       try {
-        const response = await GuestPortalService.getBooking(token!);
-        setBooking(response.booking);
-        setGuest(response.guest);
-        setEkycSummary(response.ekyc_summary ?? null);
-        setReceiptRequestPaymentId(response.receipt_request_payment_id ?? null);
-        setReceiptRequestMessage(response.receipt_request_message ?? null);
-        setReceiptAlreadyUploaded(Boolean(response.receipt_uploaded));
-        setHasAccount(Boolean(response.has_account));
-
-        if (!options?.keepStep) {
-          // Start where the guest actually has something to do: money first
-          // when it is outstanding, otherwise straight into their details.
-          const paymentOutstanding =
-            needsOnlinePayment(response.booking?.status) ||
-            (Boolean(response.receipt_request_payment_id) && !response.receipt_uploaded);
-          setActiveStep(paymentOutstanding ? 'payment' : 'details');
-        }
+        applyBookingResponse(await GuestPortalService.getBooking(token!), options);
       } catch (err) {
         setError(guestErrorMessage(err, t('checkin.form.errors.loadFailed')));
       } finally {
         setLoading(false);
       }
     },
-    [token, t],
+    [token, t, applyBookingResponse],
   );
 
   useEffect(() => {
@@ -141,10 +147,25 @@ export const GuestCheckInForm: React.FC = () => {
     }
   }
 
+  // First load: state is only set from the promise callbacks, and a token
+  // change or unmount drops a stale response.
   useEffect(() => {
     if (!token) return;
-    void loadBookingData();
-  }, [token, loadBookingData]);
+    let cancelled = false;
+    GuestPortalService.getBooking(token)
+      .then((response) => {
+        if (!cancelled) applyBookingResponse(response);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(guestErrorMessage(err, t('checkin.form.errors.loadFailed')));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, t, applyBookingResponse]);
 
   const needsReceipt =
     Boolean(receiptRequestPaymentId) && !receiptAlreadyUploaded && !receiptSubmitted;

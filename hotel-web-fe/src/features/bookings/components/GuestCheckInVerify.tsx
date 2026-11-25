@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from '../../../router';
 import {
   Container,
@@ -28,18 +28,6 @@ export const GuestCheckInVerify: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadBookingData = useCallback(async () => {
-    try {
-      const response = await GuestPortalService.getBooking(token!);
-      setBooking(response.booking);
-      setGuest(response.guest);
-    } catch (err) {
-      setError(guestErrorMessage(err, t('checkin.verify.errors.loadFailed')));
-    } finally {
-      setLoading(false);
-    }
-  }, [token, t]);
-
   useEffect(() => {
     if (searchParams.has('token')) {
       const next = new URLSearchParams(searchParams);
@@ -58,10 +46,27 @@ export const GuestCheckInVerify: React.FC = () => {
     }
   }
 
+  // State is only set from the promise callbacks; a token change or unmount
+  // drops a stale response.
   useEffect(() => {
     if (!token) return;
-    loadBookingData();
-  }, [token, loadBookingData]);
+    let cancelled = false;
+    GuestPortalService.getBooking(token)
+      .then((response) => {
+        if (cancelled) return;
+        setBooking(response.booking);
+        setGuest(response.guest);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(guestErrorMessage(err, t('checkin.verify.errors.loadFailed')));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, t]);
 
   const handleContinue = () => {
     navigate('/guest-checkin/form');
