@@ -1,6 +1,6 @@
 //! Integration tests for the checkout deposit guard in
 //! `repositories::bookings::lifecycle::ensure_checkout_balance_resolved`
-//! (rules: `docs/architecture/system-flows.md` §Checkout deposit guard).
+//! (rules: `docs/architecture/overview.md` §Payments, PayPal webhooks, idempotency & checkout deposit guard).
 //!
 //! A `checked_out`/`completed` transition through `update_booking_handler` —
 //! the single entry point every caller (Bookings page, Rooms grid, ledger

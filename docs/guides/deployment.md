@@ -1,17 +1,18 @@
-# Deployment Guide
+# Deployment & Infrastructure Guide
 
-This guide covers deploying the hotel management system in various environments.
+Canonical operations guide for Docker Compose, OCI dev environments, production and staging deployments, AIC VPS host access, PostgreSQL V1 patching/drift reporting, and the PostgreSQL engine upgrade runbook.
 
 ## Table of Contents
+
 1. [Quick Start (Docker Compose)](#quick-start-docker-compose)
 2. [Oracle Cloud Always Free Development](#oracle-cloud-always-free-development)
-3. [Production Deployment](#production-deployment)
-4. [Desktop App Distribution](#desktop-app-distribution)
-5. [Environment Configuration](#environment-configuration)
-6. [Database Setup](#database-setup)
-7. [Security Checklist](#security-checklist)
-8. [Monitoring](#monitoring)
-9. [Backup and Recovery](#backup-and-recovery)
+3. [Production & Staging Environments](#production--staging-environments)
+4. [AIC VPS Access & Operations](#aic-vps-access--operations)
+5. [Manual & Multi-Replica Deployment](#manual--multi-replica-deployment)
+6. [Environment Configuration](#environment-configuration)
+7. [Database Setup, Patching & Schema Drift](#database-setup-patching--schema-drift)
+8. [PostgreSQL Engine Upgrade (Dump and Restore)](#postgresql-engine-upgrade-dump-and-restore)
+9. [Monitoring, Backups & Log Rotation](#monitoring-backups--log-rotation)
 10. [Troubleshooting](#troubleshooting)
 
 ---
@@ -22,447 +23,155 @@ This guide covers deploying the hotel management system in various environments.
 git clone https://github.com/siewong007/hotel-app-rust.git
 cd hotel-app-rust
 cp .env.example .env
-# Edit .env — at minimum set JWT_SECRET and POSTGRES_PASSWORD
+# Edit .env — set POSTGRES_PASSWORD and JWT_SECRET (required)
 docker compose up -d
 docker compose ps
 curl http://localhost:3030/health
 ```
 
-Available at: **Frontend** http://localhost:80, **Backend API** http://localhost:3030, **PostgreSQL** localhost:5432.
+Available at: **Frontend** `http://localhost:80`, **Backend API** `http://localhost:3030`, **PostgreSQL** `localhost:5432`.
 
 ---
 
 ## Oracle Cloud Always Free Development
 
-`infra/terraform/oci/environments/dev` provisions a low-cost dev environment
-on one Oracle Ampere A1 Flex VM (2 OCPU / 12 GB defaults — check your tenancy
-limits before raising either) running the existing Docker Compose stack, so
-there is no paid managed PostgreSQL service. This is a development/preview
-topology only: VM, database, and app share one failure domain; Always Free
-capacity has no production SLA and can be unavailable or reclaimed; PostgreSQL
-19 is a pre-release engine (`19beta3` today) and is not supported for
-production data until it reaches GA.
-
-Create an OCI Vault secret for each required application secret, then:
-
-```bash
-cd infra/terraform/oci/environments/dev
-cp terraform.tfvars.example terraform.tfvars
-terraform init && terraform plan && terraform apply
-```
-
-Never commit OCI API keys, database passwords, JWT secrets, or Terraform
-state — the directory includes an Object Storage backend example for teams
-that need remote state.
-
-Oracle references: [Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm), [Terraform provider](https://docs.oracle.com/en-us/iaas/Content/dev/terraform/home.htm), and [Object Storage state](https://docs.oracle.com/en-us/iaas/Content/dev/terraform/object-storage-state.htm).
+`infra/terraform/oci/environments/dev` provisions a development stack on one Oracle Ampere A1 Flex VM (2 OCPU / 12 GB defaults) running the root Compose stack. See [infra/terraform/oci/README.md](../../infra/terraform/oci/README.md) for Vault secret prerequisites, Object Storage state, and Always Free limits. PostgreSQL 19 (`postgres:19beta3`) on this VM is for development/preview only.
 
 ---
 
-## Production Deployment
+## Production & Staging Environments
 
-> **PostgreSQL 19 status:** the repository targets PostgreSQL 19
-> (`postgres:19beta3` on every server/CI/compose surface; the desktop bundle
-> still provisions 19beta2). PostgreSQL identifies version 19 as a development
-> release. Production nevertheless runs this path with real hotel data, by owner
-> decision (H7, 2026-08-22), as an accepted risk recorded in the
-> [readiness assessment](../security/production-readiness-assessment.md). A new
-> deployment should not repeat that choice lightly. Moving to 19 GA is a dump and
-> restore ([`postgres-engine-upgrade.md`](postgres-engine-upgrade.md)), and patches
-> 0015/0016, which remove the schema's uses of features 19 Beta 4 reverted, must
-> run on beta3 first.
+Production (`saliminn.my`) and staging (`staging.saliminn.my`) coexist on the AIC VPS in isolated Compose projects.
 
-### Prerequisites
+| Item | Production | Staging |
+|---|---|---|
+| Dir | `/opt/saliminn` | `/opt/saliminn-staging` |
+| Host | `saliminn.my` | `staging.saliminn.my` |
+| API port | `127.0.0.1:3030` | `127.0.0.1:3031` |
+| FE port | `127.0.0.1:8081` | `127.0.0.1:8083` |
+| DB container | `saliminn-db` | `saliminn-staging-db` |
+| Volume | `saliminn_postgres_data` | `saliminn-staging_postgres_data` |
+| PostgreSQL | `postgres:19beta3` | `postgres:19beta3` |
+| Auth | public (Cloudflare) | Caddy basic auth (`/opt/saliminn-staging/basic-auth.hash`, credentials in `/root/.saliminn-staging-basic-auth`) + Cloudflare |
+| Workflow | `deploy.yml` (`master` after green CI only) | `deploy-staging.yml` (`master` CI or manual SHA `workflow_dispatch`) |
 
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| CPU | 2 cores | 4+ cores |
-| RAM | 4 GB | 8+ GB |
-| Disk | 20 GB | 50+ GB (SSD) |
-| PostgreSQL | 19 (`19beta3` image) | 19 GA after validation |
-| Reverse Proxy | — | Nginx or Caddy |
-| TLS Certificate | — | Let's Encrypt |
+### Staging specifics
 
-### Architecture
+- **DNS / Cloudflare**: `staging.saliminn.my` proxies through Cloudflare and returns `401` until basic auth is supplied. `deploy-staging.yml` sets `PUBLIC_DNS_CUTOVER: "true"` to verify public HTTPS alongside localhost probes.
+- **Capacity**: The VPS has 2 GB RAM running `saliminn`, `saliminn-staging`, `payroll`, and `online-shopping` stacks; pause unused sandboxes if memory pressure rises.
+- **Staging demo data**: Deploys initialize fresh volumes with baseline + `seed.sql` + patches only (`seed` binary is not in the backend image and `saliminn-staging-db` binds no host port). Seeding staging requires copying a Linux `seed` build to the host against the container network with `APP_ENV=staging` (never `ENVIRONMENT=production`; see [hotel-app-be/database/README.md](../../hotel-app-be/database/README.md)).
 
-An optional CDN and a TLS-terminating reverse proxy sit in front of the
-backend and static frontend; the backend is the only component that talks to
-PostgreSQL, and monitoring is an optional sidecar off the reverse proxy.
+### Docker + Caddy HTTPS Architecture
 
-### Docker + Caddy HTTPS (recommended)
+The root `docker-compose.yml` `--profile https` runs [`deploy/Caddyfile`](../../deploy/Caddyfile) to terminate Let's Encrypt TLS, set security headers, and serve frontend + API on the **same domain** (required for `SameSite=Lax` refresh cookies).
 
-The repository ships a TLS entry point as a `caddy` service in
-`docker-compose.yml` (enabled via the `https` profile) configured by
-[`deploy/Caddyfile`](../../deploy/Caddyfile). Caddy obtains and renews
-Let's Encrypt certificates automatically, redirects HTTP→HTTPS, and serves
-the whole app on **one domain**: the API prefixes (`/api`, `/uploads`,
-`/health`, `/ws`) are proxied to the backend, everything else to
-the frontend SPA. Same-origin serving is required for the
-`SameSite=Lax` refresh cookie to work — do **not** split the API onto a
-separate subdomain.
-
-> **gRPC-Web is not routed here yet.** `PROXY_PREFIXES` in
-> `hotel-web-fe/vite.config.ts` additionally lists `/hotel.` (the gRPC/Connect
-> service paths), but none of the production edge matchers include it — this
-> Caddyfile's `@backend` list, and the generated site matchers embedded in
-> [`deploy/deploy.sh`](../../deploy/deploy.sh) and
-> [`deploy/deploy-staging.sh`](../../deploy/deploy-staging.sh). A browser build
-> with `VITE_GRPC_CONTEXTS` enabled would 404 in production, so the rollout
-> flags stay off outside development until `/hotel.*` is added at the edge
-> (and to the Nginx example below); REST serves those domains either
-> way. See [../architecture/grpc.md](../architecture/grpc.md).
-
-Prerequisites: a DNS A/AAAA record for your domain, and ports 80+443 reachable from the internet.
+> **gRPC-Web edge routing**: `PROXY_PREFIXES` in `hotel-web-fe/vite.config.ts` and `deploy/Caddyfile` (`@backend`) both include `/hotel.*`, **but** the host site matchers generated by [`deploy/deploy.sh`](../../deploy/deploy.sh) and [`deploy/deploy-staging.sh`](../../deploy/deploy-staging.sh) currently list `/api`, `/uploads`, `/health`, and `/ws` without `/hotel.*`. Keep `VITE_GRPC_CONTEXTS` unset outside development/desktop until those scripts are updated ([../architecture/overview.md#grpc-web-transport-partial-rollout](../architecture/overview.md#grpc-web-transport-partial-rollout)).
 
 ```bash
-# Add to .env, in addition to the Quick Start values:
+# Additional .env entries for docker-compose --profile https:
 DOMAIN=hotel.example.com
 ACME_EMAIL=you@example.com
-TRUST_PROXY_HEADERS=true                  # rate limiter reads X-Forwarded-For from Caddy
+TRUST_PROXY_HEADERS=true
 ALLOWED_ORIGINS=https://hotel.example.com
-VITE_API_URL=                             # empty = use DOMAIN dynamically at runtime
+VITE_API_URL=
 docker compose --profile https up -d --build
 ```
 
-Notes:
-- Backend, frontend, and postgres ports bind to `127.0.0.1`; only Caddy (80/443) is public.
-- Certs/ACME state persist in the `caddy_data` volume — deleting it forces re-issuance (rate-limit risk); no domain yet? leave `DOMAIN` unset (defaults to `localhost`) — Caddy self-signs, use `curl -k`.
-- The manual Nginx instructions below remain the non-Docker alternative.
+Backend, frontend, and Postgres ports bind to `127.0.0.1`; only Caddy (`80`/`443`) is public. Preserve the `caddy_data` volume to avoid ACME re-issuance rate limits.
 
-### Manual Deployment
+---
 
-#### 1. Database Setup
+## AIC VPS Access & Operations
 
-```bash
-sudo -u postgres psql -c "CREATE USER hotel_admin WITH PASSWORD 'strong_password';"
-sudo -u postgres psql -c "CREATE DATABASE hotel_management OWNER hotel_admin;"
-```
-
-Then run the V1 init sequence from [Database Setup](#database-setup) below
-(baseline → data → seed, once only), prefixing each with
-`PGPASSWORD=strong_password psql -h localhost -U hotel_admin -d hotel_management -f`.
-Apply the catalog patches before starting the backend. The production and
-staging deploy scripts then provision the restricted `hotel_app` role before
-recreating the backend. For a manual deployment, run
-`deploy/db-least-privilege.sql` as `hotel_admin`, set the role password with
-the interactive `psql` command `\password hotel_app`, and configure the
-backend `DATABASE_URL` with that credential. Keep `hotel_admin` for schema
-patches, seed/bootstrap, and database maintenance.
-
-To verify the runtime role against PostgreSQL, use an administrative
-`DATABASE_URL` for a disposable test server:
+- **Provider / Container**: AIC cloud Proxmox LXC (`vps-av1w`). Shared IPv4 `162.19.81.122` forwards **port `20049` only** to SSH (`443`/`80` belong to another tenant). Origin **IPv6** is `2001:41d0:306:277a::2450` (proxied by Cloudflare; `nodad` / `DuplicateAddressDetection=none` must remain configured in `/etc/systemd/network/eth0.network` + `/etc/sysctl.d/99-lxc-ipv6-dad.conf`).
+- **Private key**: Dedicated local admin key `deploy/credentials/aic-vps-ed25519` (mode `0600`, pinned fingerprint `SHA256:HV6OszvuYmwmWRLEY7z7jm8GojWZJppJlDBHIhJVUxw`, gitignored) + `/root/.ssh/authorized_keys` (keep provider key `aic-cloud-support-key-2026`). Connect with:
 
 ```bash
-HOTEL_PRIVILEGE_TEST=1 \
-DATABASE_URL=postgresql://hotel_admin@127.0.0.1:55439/postgres \
-  deploy/tests/run-runtime-privileges.sh
+ssh \
+  -i deploy/credentials/aic-vps-ed25519 \
+  -p 20049 \
+  -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile=deploy/credentials/aic-known-hosts \
+  root@162.19.81.122
 ```
 
-The runner creates and drops a uniquely named database on that server, applies
-the baseline, seed, and patches, then runs SQL privilege checks and the real
-import suites as `hotel_app`. Its administrative account needs permission to
-create and drop databases. PostgreSQL roles are cluster-wide, so the runner
-also creates or updates the `hotel_app` role and its temporary password on the
-server. Use a disposable cluster only; never point it at production or another
-server with data or credentials to keep. The backup suite skips two tests that
-create permanent scratch tables; those remain covered by the normal
-administrative integration suite.
+- **Host layout**: 13 containers across 5 Compose projects (`saliminn`, `saliminn-staging`, `payroll`, `online-shopping`, `online-shopping-hitpay-sandbox`) bound to loopback and fronted by host Caddy. Before DB maintenance, verify container & user:
 
-The managed production and staging deploy scripts persist `HOTEL_APP_PASSWORD`
-in their protected `secrets.env` file and use it for the backend connection.
-`POSTGRES_PASSWORD` remains the administrator credential for the PostgreSQL
-container and maintenance operations.
+```bash
+docker inspect --format '{{.Name}} {{.State.Health.Status}}' saliminn-db
+docker exec saliminn-db psql -U hotel_admin -d hotel_management -Atc 'SELECT current_database(), current_user;'
+```
 
-#### 2. Backend Deployment
+- **TLS & Cloudflare**: Cloudflare SSL mode is **Full**; host ports 80/443 are restricted to Cloudflare edge CIDRs and Caddy's `trusted_proxies` matches them.
+- **Backups (local-only decision 2026-09-25)**: All backups stay on the AIC host (`/opt/saliminn/backups`, `"offsite": false` expected; previous AWS accounts/S3/Route 53 were torn down on 2026-09-25, with pre-teardown snapshots archived under `/srv/backups/{aws-archive,lightsail-final-20260925}`).
+- **Key rotation**: Add replacement public key to `/root/.ssh/authorized_keys`, test in a second session, then delete the old `hotel-app-local-aic-access-2026-09-05` line by comment. If the box returns 522 / *Network is unreachable*, raise a ticket with AIC (provider container outage).
+
+---
+
+## Manual & Multi-Replica Deployment
+
+### Manual systemd + Nginx Setup
+
+1. Create PostgreSQL role/DB (`CREATE USER hotel_admin ...; CREATE DATABASE hotel_management OWNER hotel_admin;`), initialize V1 baseline + seed + `make db-patch`, then execute `deploy/db-least-privilege.sql` as `hotel_admin`, set `\password hotel_app`, and run the backend with `hotel_app`:
+
+```bash
+HOTEL_PRIVILEGE_TEST=1 DATABASE_URL=postgresql://hotel_admin@127.0.0.1:55439/postgres \
+  deploy/tests/run-runtime-privileges.sh   # verifies runtime privileges on disposable cluster
+```
+
+2. Build and run `hotel-app-be`:
 
 ```bash
 cd hotel-app-be
 cargo build --release
 DATABASE_URL=postgres://hotel_app:<runtime-password>@localhost:5432/hotel_management \
-  JWT_SECRET="your-32-char-min-secret" \
-  BACKEND_PORT=3030 \
-  ALLOWED_ORIGINS=https://your-frontend-domain.com \
-  RUST_LOG=info \
+  JWT_SECRET="your-random-secret-at-least-32-chars" \
+  TOTP_ENCRYPTION_KEY="your-base64-or-32-char-totp-key" \
+  BACKEND_PORT=3030 ALLOWED_ORIGINS=https://your-frontend-domain.com RUST_LOG=info \
   ./target/release/hotel-app-be
 ```
 
-Recommended to run as a systemd service:
+3. Build frontend (`cd hotel-web-fe && bun run build`, leave `VITE_API_URL` unset) and reverse proxy `/api`, `/uploads`, `/ws`, and `/health` from the same origin with WebSocket `Upgrade` headers and ≥120s timeouts.
 
-```ini
-[Unit]
-Description=Hotel Management Backend
-After=network.target postgresql.service
-[Service]
-Type=simple
-User=hotel
-WorkingDirectory=/opt/hotel-app/backend
-EnvironmentFile=/opt/hotel-app/backend/.env
-ExecStart=/opt/hotel-app/backend/hotel-app-be
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-```
+### Multiple Backend Replicas
 
-#### 3. Frontend Deployment + Reverse Proxy
+Replicas share state via PostgreSQL with zero extra brokers: rate limits (`rate_limit_buckets`), `pg_notify` cache invalidation (`hotel_cache`), advisory-locked schedulers (`core::leader::spawn_exclusive`, ~30s failover), and staff data-change WebSockets (`hotel_data_changed`).
 
-```bash
-cd hotel-web-fe
-bun run build
-cp -r dist/* /var/www/hotel-frontend/   # or your web server's document root
-```
-
-Leave `VITE_API_URL` unset so the browser uses the current public origin at
-runtime. Serve the SPA and reverse-proxy backend paths from the same HTTPS host;
-this also keeps the `SameSite=Lax` refresh cookie available. The SPA needs a
-fallback (`try_files $uri $uri/ /index.html`), while API and WebSocket paths need
-upgrade headers and longer timeouts (night audit can run long), as in this
-representative config:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name hotel.your-domain.com;
-    ssl_certificate /etc/letsencrypt/live/hotel.your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/hotel.your-domain.com/privkey.pem;
-
-    root /var/www/hotel-frontend;
-    index index.html;
-
-    location ~ ^/(?:api|uploads|ws)(?:/|$)|^/health$ {
-        proxy_pass http://127.0.0.1:3030;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 120s;
-        proxy_send_timeout 120s;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
-
-Set `VITE_API_URL` only when intentionally targeting another API origin; because
-it is a build-time override, changing that value requires rebuilding the frontend.
-
-### Docker Swarm / Kubernetes
-
-Docker Swarm: `docker stack deploy -c docker-compose.yml hotel-app`.
-
-For Kubernetes, create the following resources:
-- `Deployment` for backend (with health checks)
-- `Service` for backend (ClusterIP)
-- `Deployment` for frontend (Nginx serving static files)
-- `Service` for frontend (LoadBalancer or Ingress)
-- `StatefulSet` for PostgreSQL (with persistent volume)
-
-#### Running multiple backend replicas
-
-The backend is multi-instance ready: replicas share rate limits, cache
-invalidation, scheduler leadership, and staff-websocket fan-out through the
-one PostgreSQL they all connect to. No extra infrastructure is required.
-
-Shared across replicas:
-
-- **Rate limits** — fixed-window counters in `rate_limit_buckets`, so N
-  replicas enforce one global budget (not N×). Buckets are
-  `{category}:{key}`; stale rows are pruned by a leader-gated loop.
-- **Cache invalidation** — RBAC and settings caches stay local (30s TTL) but
-  every mutation `pg_notify`s `hotel_cache`; a listener in `main.rs` clears
-  the matching entry on every replica immediately. TTL is the correctness
-  floor if a notification is missed.
-- **Scheduler leadership** — night audit, payment receipts, unpaid-hold
-  release, the email worker, the communications scheduler, and the hourly
-  session-retention + rate-limit bucket prune loop each run under a
-  `pg_advisory_lock` (`core::leader::spawn_exclusive`).
-  Exactly one replica drives each loop; if it dies the lock releases with the
-  session and another replica takes over within ~30s.
-- **Staff realtime** — `DataChangeHub` publishes `hotel_data_changed`
-  notifications so a mutation on replica A reaches websockets connected to
-  replica B.
-
-Still per-replica by design — **sticky sessions required**:
-
-- Staged import uploads live on local disk (`private_uploads/`) and the
-  `IMPORT_JOBS` registry is in-process: an import must upload, poll, and
-  confirm through the same replica.
-- WebSocket connections terminate on one replica; loyalty/support hub events
-  only reach co-located connections.
-- In-process health counters (`GET /api/system/health`; there is no Prometheus
-  `/metrics` endpoint), the PayPal token cache, the Google JWKS cache, and the
-  uptime probe are per-instance.
-
-With Caddy in front of several upstreams, pin by client IP so the
-local-disk pieces above keep working:
-
-```caddy
-reverse_proxy backend1:3030 backend2:3030 {
-    lb_policy ip_hash
-}
-```
-
-Scale-out checklist:
-
-- [ ] Point every replica at the same `DATABASE_URL` (same cluster).
-- [ ] Enable sticky sessions (`lb_policy ip_hash` or equivalent) — required
-      for imports and expected for websockets.
-- [ ] Keep `TRUST_PROXY_HEADERS=true` so rate limits key on the real client
-      IP, not the load balancer's.
-- [ ] Poll `/health` (and authenticated `GET /api/system/health` if monitoring
-      in-process counters) per replica — there is no aggregated `/metrics` view.
-- [ ] Rolling restarts are safe: the worst case is a ~30s scheduler hand-off
-      while the dead replica's advisory locks drain.
-
----
-
-## Desktop App Distribution
-
-### Prerequisites and Build
-
-```bash
-cd hotel-desktop
-bun install
-bun run desktop:prepare
-bun run build   # installer: .dmg (macOS), NSIS/MSI (Windows), deb/AppImage/rpm (Linux) — in src-tauri/target/release/bundle/
-```
-
-`desktop:prepare` is cache-aware: it syncs database resources, builds the frontend bundle, builds the backend sidecar, and copies the sidecar in that order, skipping each artifact when its inputs are unchanged. Production builds use the release backend sidecar; `build:fast` and `build:debug` use the debug sidecar. Use `bun run desktop:prepare:force` to rebuild every prepared artifact.
-
-### Build Variants
-
-| Command | Produces |
-|---|---|
-| `bun run build:fast` | Fast local verification build, no installer packaging |
-| `bun run build:no-bundle` | Release binary, no installer packaging |
-| `bun run build:debug` | Debug build (faster, larger binary) |
-| `bun run build:nsis` / `build:msi` | Windows-only single-installer builds |
-| `bun run build` | Platform-specific installer, run on the target platform (macOS DMG locally; cross-compile Windows/Linux from CI) |
-
-### Desktop Configuration
-
-```bash
-HOTEL_DESKTOP_MODE=true        # Enables desktop-specific behavior
-BACKEND_PORT=3030              # Starting port (auto-increments if busy)
-SKIP_EMAIL_VERIFICATION=true   # Skip email verification in desktop mode
-RUST_LOG=info                  # Logging level
-HOTEL_LOG_DIR=./logs           # Log directory
-```
+**Sticky sessions (`lb_policy ip_hash` in Caddy) are still required** because staged import uploads (`private_uploads/data-transfer/`), `IMPORT_JOBS` state, loyalty/support WS connections, and per-instance health/PayPal/JWKS caches are local to each replica.
 
 ---
 
 ## Environment Configuration
 
-Three example files with distinct scopes: the repository-root `.env.example` is what
-`docker compose` reads (credentials, ports, TLS, image tags),
-`hotel-app-be/.env.example` is the full backend-process reference for running the API
-directly, and `hotel-web-fe/.env.example` lists optional build-time `VITE_*` frontend
-variables. Every variable in these files is read by something — none carry
-aspirational settings.
+Three example files own their scope: root [`.env.example`](../../.env.example) (Docker Compose), [`hotel-app-be/.env.example`](../../hotel-app-be/.env.example) (full backend reference), and [`hotel-web-fe/.env.example`](../../hotel-web-fe/.env.example) (build-time `VITE_*`).
 
-### Required and Security Variables
-
-| Variable | Type | Default / Example | Purpose |
-|----------|------|--------------------|---------|
-| `POSTGRES_PASSWORD` | Required (Compose) | (blank in `.env.example`) | Database password. Declared `:?` in every compose file, so an unset or empty value aborts `docker compose` with an actionable error rather than starting insecurely |
-| `DATABASE_URL` | Required | `postgres://user:pass@host:5432/db` | PostgreSQL connection string |
-| `JWT_SECRET` | Required | `your-random-secret-at-least-32-characters` | Token signing key (≥32 chars) |
-| `ALLOWED_ORIGINS` | Required | `https://app.domain.com,http://localhost:3000` | CORS allowed origins |
-| `TRUST_PROXY_HEADERS` | Security | `false` | Only `true` behind a trusted reverse proxy |
-| `SKIP_EMAIL_VERIFICATION` | Security | (unset) | `false` in production; `true` for desktop |
-| `ENVIRONMENT` | Security | `production` | Set in `.env` for the target environment |
-
-### Performance Tuning
-
-```bash
-DATABASE_MAX_CONNECTIONS=20
-DATABASE_ACQUIRE_TIMEOUT_SECS=30
-RBAC_CACHE_TTL_SECS=30
-SETTINGS_CACHE_TTL_SECS=30
-RUST_LOG=info                   # 'warn' for quieter logs
-DATABASE_SLOW_STATEMENT_MS=500  # log slow queries
-```
+| Variable | Required | Default / Example | Purpose |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | Compose (`:?`) | (blank) | `hotel_admin` password |
+| `DATABASE_URL` | Backend | `postgres://hotel_app:...@host:5432/hotel_management` | PostgreSQL connection string |
+| `JWT_SECRET` | Always | `≥32 chars` | JWT signing key (startup refuses weak/placeholder secrets) |
+| `TOTP_ENCRYPTION_KEY` | Production | 32-byte base64/hex or ≥32 ASCII chars | AES-256-GCM TOTP secret encryption at rest (startup refuses unset/malformed in prod) |
+| `ALLOWED_ORIGINS` | Production | `https://saliminn.my` | Non-localhost HTTPS CORS allow-list |
+| `PASSKEY_RP_ID` | Production | `saliminn.my` | WebAuthn relying-party domain |
+| `TRUST_PROXY_HEADERS` | Behind proxy | `false` | Read `X-Forwarded-For` when set by trusted Caddy/Nginx |
+| `APP_ENV` / `ENVIRONMENT` | Production | `production` | `APP_ENV` takes precedence; enforces prod boot guards |
+| `PAYPAL_API_BASE` | Production w/ PayPal | `https://api-m.paypal.com` | Prod boot refuses sandbox URL when `PAYPAL_ENABLED=true` |
+| `SKIP_EMAIL_VERIFICATION` | Security | `false` (`true` on desktop) | Refused if `true` in production |
 
 ---
 
-## Database Setup
+## Database Setup, Patching & Schema Drift
 
-### PostgreSQL Setup
-
-```bash
-createdb hotel_management
-psql -d hotel_management -c "\dt"  # Verify: should show all tables after init
-```
-
-For the full V1 init order (baseline → seed → patches, once only on a new empty
-database), see
-[`hotel-app-be/database/README.md`](../../hotel-app-be/database/README.md) —
-it is the canonical database lifecycle reference. From the repository root:
+Canonical V1 lifecycle reference: [hotel-app-be/database/README.md](../../hotel-app-be/database/README.md). On an empty database from the repo root:
 
 ```bash
 make db-baseline DATABASE_URL="$DATABASE_URL"
 ```
 
-### Patching an installed V1 database
+### Patching an Installed V1 Database
 
-Fresh installs need nothing here — `make db-baseline` finishes by running the same
-catalog, so a new database is created already at the current patch level.
-
-A database that is **already** on V1 cannot re-run the baseline, so compatible
-schema changes reach it through the verified patch catalog. One command applies
-every outstanding patch, in order:
-
-```bash
-make db-patch DATABASE_URL="$DATABASE_URL"
-```
-
-That command is the whole procedure. There is no per-change SQL block to copy
-any more; `hotel-app-be/database/postgres/patches/manifest.tsv` is the catalog,
-and [`hotel-app-be/database/README.md`](../../hotel-app-be/database/README.md)
-is the canonical reference for how it works.
-
-**The catalog was reset, then reopened.** The original 22-patch lineage
-(revisions 1.2–1.23) was folded into the V1 baseline and `manifest.tsv` was
-reset to empty; generation 1 then reopened at version 2 and has grown one
-converge-style patch at a time since (versions 2–31 as of 2026-11-18; the
-`data_transfer:*` permission patch among them widens the `valid_action`
-check constraint, so it must run before any code that checks the new
-permissions; see `patches/manifest.tsv` for the full entry list — it is the
-catalog of record). A fresh install needs no convergence step, and a database
-that recorded the post-reset lineage skips them as already applied.
-
-A database that recorded **pre-reset** revisions (`1.2`/`1.3` under the old
-names and checksums, e.g. `1.2 google-subject`) no longer converges silently —
-it collides with the republished catalog and aborts on `patch 1.N checksum
-mismatch`. The one-time fix is the lineage reset below, not an edit to the
-patches. Databases older than V1 (unversioned or a wrong baseline checksum) are
-still refused outright and converge by rebuild — export → `make db-baseline` →
-re-import — as with any legacy layout.
-
-What it guarantees:
-
-- **Safe to rerun.** Each patch records its revision; an already-applied patch
-  reports `skipped` and changes nothing. Rerunning a fully patched database is a
-  no-op that reprints the revision table.
-- **Aborts unsupported schemas.** It verifies the recorded V1 baseline checksum
-  first and refuses legacy or unversioned databases with
-  `unsupported V1 baseline checksum` rather than mutating them.
-- **All-or-nothing per patch.** Each patch runs inside one transaction under an
-  advisory lock, and its DDL commits together with its revision row. A failure
-  rolls the whole patch back and leaves the database at the last recorded
-  revision.
-- **No historical rewrite.** The catalog adds columns, indexes and constraint
-  vocabulary only. It does not rewrite historical financial, currency or booking
-  rows. When a patch must replace a schema object, it drops and recreates that
-  object inside the same transaction as its revision row.
-
-#### Take a verified backup first
-
-Required before any production run. Do not proceed if either command fails:
+`make db-baseline` finishes by applying the catalog, so fresh databases are already at head (`manifest.tsv`, generation 1, currently `1.1` through `1.32`). To converge an installed database, always take and verify a backup first, then run the catalog:
 
 ```bash
 set -e
@@ -473,136 +182,18 @@ pg_restore --list "$patch_backup_path" >/dev/null &&
 printf 'verified pre-patch backup: %s\n' "$patch_backup_path"
 ```
 
-`pg_restore --list` is the verification step: a dump that cannot be listed
-cannot be restored either, and finding that out during an incident is too late.
+```bash
+make db-patch DATABASE_URL="$DATABASE_URL"
+```
 
-#### Verify the result
-
-The runner prints the revision table itself. To re-read it later:
+Verify recorded revisions:
 
 ```bash
 psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 -c \
   "SELECT generation || '.' || version || ' ' || name FROM public.hotel_schema_revisions WHERE generation = 1 ORDER BY version;"
 ```
 
-Expect `1.1` (the baseline) through the highest version in `patches/manifest.tsv`
-— currently `1.1`–`1.31`.
-
-#### One-time reset: stale pre-fold patch lineage
-
-*Already executed on staging and production (2026-09-14). Keep this procedure
-for any other database that still records pre-reset revisions — dev databases,
-desktop installs, or a dump restored from before the reset.*
-
-A database installed before the catalog fold recorded rows such as
-`1.2 google-subject` (`sha256:25db31d1…`) and `1.3 payment-idempotency`
-(`sha256:4e3e3641…`). The current manifest republishes generation-1 versions
-2 and 3 under new names and checksums (`deposit-forfeited`,
-`guest-relations-phase2`), and `_begin.sql`'s guard treats the recorded rows
-as a different build of the same version — every patch run then dies with
-`patch 1.2 checksum mismatch`, and `deploy.sh` aborts **before** activating the
-new release. The fix deletes the stale bookkeeping rows only; the schema
-objects those patches created are already part of the baseline, and the
-republished patches are converge-style, so they re-record cleanly.
-
-Production commands (for staging, substitute `saliminn-staging-db` and
-`/opt/saliminn-staging`):
-
-1. **Verify the recorded lineage** — proceed only if generation 1 shows the
-   old names/checksums:
-
-   ```bash
-   docker exec saliminn-db psql -U hotel_admin -d hotel_management -X -c \
-     "SELECT version, name, checksum FROM public.hotel_schema_revisions \
-      WHERE generation = 1 ORDER BY version;"
-   ```
-
-   Pre-reset rows look like `1.2 google-subject`, `1.3 payment-idempotency`,
-   … up to `1.23`. If the database already shows `1.2 deposit-forfeited` and
-   `1.3 guest-relations-phase2`, it is post-reset — **do not run the DELETE.**
-
-2. **Take a verified backup** — the same `pg_dump` + `pg_restore --list` pair
-   as [Take a verified backup first](#take-a-verified-backup-first). Do not
-   proceed on a dump that cannot be listed.
-
-3. **Delete the stale lineage rows:**
-
-   ```bash
-   docker exec saliminn-db psql -U hotel_admin -d hotel_management \
-     -X -v ON_ERROR_STOP=1 -c \
-     "DELETE FROM public.hotel_schema_revisions WHERE generation = 1 AND version > 1;"
-   ```
-
-   Never touch the `version = 1` row — it is the frozen lineage token every
-   patch run checks first.
-
-4. **Deploy** (`deploy/deploy.sh`, or for a local database
-   `make db-patch DATABASE_URL=…`). The catalog's patches apply converge-style
-   and record their rows.
-
-5. **Verify the new lineage** — re-run the SELECT from step 1 and expect
-   `1.1` plus every entry in `patches/manifest.tsv` with matching checksums.
-
-6. **Smoke the public path.** The failure this reset unblocks surfaced through
-   Cloudflare as 502s on `GET /api/data-transfer/export`, so that endpoint is
-   the check:
-
-   ```bash
-   curl -fsS -o /dev/null -w '%{http_code}\n' https://saliminn.my/health
-   # With a bearer token for an account holding data_transfer:export:
-   curl -fsS -H "Authorization: Bearer $TOKEN" \
-     -o /tmp/export.json -w '%{http_code} %{size_download}\n' \
-     https://saliminn.my/api/data-transfer/export
-   tail -c 200 /tmp/export.json   # must end with the "integrity" trailer
-   journalctl -u caddy --since -15m | grep -E '"status":(502|5..)|connection refused|EOF' || echo clean
-   docker logs saliminn-backend --since 15m 2>&1 | grep -iE 'error|panic' || echo clean
-   ```
-
-   Expect `200` from both endpoints and `clean` from both log greps.
-
-**Desktop databases** record the same `hotel_schema_revisions` lineage and the
-desktop launcher applies the same catalog through the bundled `psql`
-(`src-tauri/src/postgres/patches.rs` → `apply_catalog`) — it *converges* a
-database; it does not silently rebuild one. A desktop install that recorded
-pre-reset revisions therefore hits the identical `patch 1.2 checksum mismatch`
-at startup, surfaced as `Failed to run database setup: …`. Two ways out:
-
-- **Same reset.** While the app's embedded PostgreSQL is running, use the
-  bundled `psql` (under the app's `pgsql/bin` resource dir) against
-  `localhost:5433`, user `hotel_admin`, database `hotel_management` — password
-  in `<app-data>/HotelApp/postgres-password.txt`:
-
-  ```bash
-  PGPASSWORD="$(cat ~/Library/Application\ Support/HotelApp/postgres-password.txt)" \
-    psql -h localhost -p 5433 -U hotel_admin -d hotel_management -X \
-    -v ON_ERROR_STOP=1 -c \
-    "DELETE FROM public.hotel_schema_revisions WHERE generation = 1 AND version > 1;"
-  ```
-
-  (macOS path shown; `postgres-password.txt` sits in the platform's
-  `HotelApp` data-local directory.) Restart the app — the catalog then applies
-  normally from version 2 onward.
-- **Rebuild.** The app's doctrine for a database the catalog cannot converge —
-  also the only path for one it classifies as *unversioned* — is to export the
-  data (a `hotel-backup` export, or the app's `pg_dump` backup), delete or
-  recreate the database so the bundled baseline + seed install fresh, then
-  re-import.
-
-#### In production deployment
-
-`deploy/deploy.sh` runs the catalog for you, in a deliberate order: PostgreSQL
-alone is brought up and confirmed to carry the final TCP V1 baseline, then a
-verified backup is taken, then patches run, and only then are the application
-containers activated. A patch failure therefore aborts the release **before**
-any new application code serves traffic against an unconverged schema — which
-is exactly what a stale pre-fold lineage triggers; see the reset procedure
-above.
-
-### Read-only schema drift reporting
-
-To check whether a database still matches a current baseline — after a manual
-intervention, or before a release — compare it against a scratch database built
-fresh by `make db-baseline`:
+### Read-Only Schema Drift Reporting
 
 ```bash
 make db-schema-drift \
@@ -610,16 +201,24 @@ make db-schema-drift \
   BASELINE_DATABASE_URL="$BASELINE_DATABASE_URL"
 ```
 
-Both databases are read inside `READ ONLY` transactions; neither is modified.
-The two URLs must be distinct. Exit `0` is no drift, `2` reports drift as a
-unified diff labelled `baseline`/`target`, and any other nonzero code is a
-connection or query failure. Neither URL is ever printed. The report describes
-differences; it never resolves them.
+Both URLs must be distinct. Exit `0` = identical schema, `2` = drift diff printed (`baseline`/`target`).
 
-### Administrator password
+### One-Time Reset: Stale Pre-Fold Patch Lineage
 
-The bootstrap seed deliberately does not install a shared usable password.
-Set the administrator password before the first login:
+Only needed for an old dev/desktop database or pre-`2026-09-14` dump whose `hotel_schema_revisions` still holds pre-fold names like `1.2 google-subject` (`patch 1.2 checksum mismatch` on deploy/boot — already run on staging and production on `2026-09-14`):
+
+1. Inspect `SELECT version, name, checksum FROM public.hotel_schema_revisions WHERE generation = 1 ORDER BY version;` (do **not** run step 3 if `1.2 deposit-forfeited` is already present).
+2. Take a verified `pg_dump` + `pg_restore --list` backup.
+3. Delete only `version > 1` rows (keep `version = 1`, the frozen baseline lineage token):
+
+```bash
+docker exec saliminn-db psql -U hotel_admin -d hotel_management -X -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.hotel_schema_revisions WHERE generation = 1 AND version > 1;"
+```
+
+4. Re-run `deploy.sh` or `make db-patch` (on desktop, apply against port `5433` using `postgres-password.txt`, or restore after fresh re-init).
+
+### Initial Administrator Password
 
 ```bash
 cd hotel-app-be
@@ -629,168 +228,62 @@ DATABASE_URL="postgres://hotel_admin:strong_password@localhost:5432/hotel_manage
 
 ---
 
-## Security Checklist
+## PostgreSQL Engine Upgrade (Dump and Restore)
 
-### Pre-Deployment
+Used when moving between incompatible PostgreSQL 19 beta data directories (`19beta3` → `19 GA`). Rehearse on staging (`STACK=saliminn-staging`) before production (`STACK=saliminn`).
 
-- [ ] Change all default passwords (`POSTGRES_PASSWORD`, `JWT_SECRET`)
-- [ ] Generate a strong JWT secret (`openssl rand -base64 48`)
-- [ ] Verify `ALLOWED_ORIGINS` only contains trusted domains
-- [ ] Set `TRUST_PROXY_HEADERS=false` unless behind a trusted proxy
-- [ ] Enable TLS via reverse proxy (Docker: `--profile https` Caddy service; see [Docker + Caddy HTTPS](#docker--caddy-https-recommended))
-- [ ] Review Content Security Policy in backend response headers
-- [ ] Verify rate limiting is configured appropriately
-- [ ] Ensure database firewall only allows backend IP access
-- [ ] Run `cargo audit` on backend dependencies
-- [ ] Run `bun audit` on frontend and desktop dependencies
+### Prerequisite: Verify Beta4/RC/GA Blockers Removed
 
-### Operational Security
+PostgreSQL 19 Beta 4 reverted SQL/PGQ (`hotel_graph`) and `ALTER TABLE ... SPLIT PARTITION` (`ensure_audit_logs_partition`). Patches `0015` and `0016` (applied to prod/staging `2026-10-06`) remove both, **and must be applied while still running `19beta3`** before taking the dump:
 
-- [ ] Keep the backend and database on a private network
-- [ ] Use read-only replicas for reporting/analytics queries
-- [ ] Enable audit logging for all mutation operations
-- [ ] Monitor failed authentication attempts
-- [ ] Set up log rotation for application logs
-- [ ] Regularly rotate JWT secrets and database passwords
-- [ ] Keep Rust toolchain and dependencies updated
-
-### The backend sends the following security headers automatically:
-
-```
-Strict-Transport-Security: max-age=31536000; includeSubDomains
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-X-XSS-Protection: 1; mode=block
-Content-Security-Policy: default-src 'self'; ...
-Referrer-Policy: strict-origin-when-cross-origin
+```bash
+docker exec "${STACK}-db" psql -U hotel_admin -d hotel_management -Atc "
+  SELECT string_agg(version::text, ',' ORDER BY version) FROM hotel_schema_revisions
+   WHERE generation = 1 AND version IN (15, 16);
+  SELECT count(*) FROM pg_class WHERE relkind = 'g';"
+# Expect 15,16 and 0
 ```
 
-Verify with `curl -I https://your-api-domain.com/health`.
+### Capture → Cutover → Restore → Verify
+
+Use a subshell wrapper so secrets never leak into shell history (`STACK=saliminn` or `saliminn-staging`):
+
+```bash
+dc() (
+  set -a; . "/opt/$STACK/secrets.env"; set +a
+  IMAGE_TAG=$(cat "/opt/$STACK/current-tag") \
+    docker compose --project-name "$STACK" -f "/opt/$STACK/docker-compose.prod.yml" "$@"
+)
+```
+
+1. **Confirm state & ≥6 GiB free disk**: `docker exec ${STACK}-db psql -U hotel_admin -d hotel_management -c 'SELECT version();'` and `df -h /opt`.
+2. **Verified logical dump + row-count baseline + off-host copy**:
+   - `docker exec ${STACK}-db pg_dump --format=custom --no-owner --no-acl -U hotel_admin hotel_management > /opt/$STACK/backups/cutover-$TS.dump`
+   - Verify with `pg_restore --list`, capture exact per-table `count(*)` (`pg_stat_user_tables` XML query to `/root/rowcounts-before.txt`), and `scp` a copy off-host.
+3. **Stop & move `initdb/` aside** (prevents empty-volume auto-init from colliding with `pg_restore`):
+   - `dc down` (NO `-v`), `mv /opt/$STACK/initdb /opt/$STACK/initdb.hold && install -d -m 0755 /opt/$STACK/initdb`.
+4. **Tarball old volume for physical rollback**:
+   - `docker run --rm -v ${STACK}_postgres_data:/from:ro -v /opt/$STACK/volbackup:/to alpine tar cf /to/pgdata-old.tar -C /from .` and verify `tar tf`.
+5. **Recreate volume on new Postgres image**:
+   - `docker volume rm ${STACK}_postgres_data && dc up -d postgres`. Verify `SELECT version();` shows the **new** engine (if rollback left an older compose pin on host, update `image:` before continuing).
+6. **Restore & verify counts/sequences**:
+   - `docker exec -i ${STACK}-db pg_restore --no-owner --no-acl --exit-on-error -U hotel_admin -d hotel_management < "$DUMP"`.
+   - Diff `/root/rowcounts-before.txt` against post-restore `count(*)` and verify `last_value >= max(id)` on money/booking sequences and max `hotel_schema_revisions.version`.
+7. **Restore `initdb/` directory & start stack**: `rmdir /opt/$STACK/initdb && mv /opt/$STACK/initdb.hold /opt/$STACK/initdb && dc up -d`. Verify `https://saliminn.my/` and `/health`, run `deploy.yml` against `master` tip, and remove `pgdata-old.tar` after one full business cycle.
+8. **Desktop follow-up**: Bump `CONFIGURED_POSTGRES_BUILD_IDENTITY` in `hotel-desktop/src-tauri/src/postgres.rs`, `provision-pgsql.mjs` expectations, and `.github/workflows/desktop-build.yml` together ([desktop.md](desktop.md)).
 
 ---
 
-## Monitoring
+## Monitoring, Backups & Log Rotation
 
-### Health Check Endpoints
-
-```bash
-curl http://localhost:3030/health      # no auth required
-curl http://localhost:3030/ws/status   # no auth required
-```
-
-### Logging
-
-Backend logs are written to:
-- Stderr (captured by Tauri sidecar in desktop mode)
-- File under `HOTEL_LOG_DIR` or default `./logs/` directory
-- A single append-only `backend.log`; rotation is the host's job — see
-  [Log Rotation](#log-rotation) below (`logrotate` + `copytruncate`)
-
-### Metrics
-
-The backend does not expose a Prometheus `/metrics` endpoint. In-process
-counters (auth/permission denials, audit write failures, slow statements,
-request totals) are surfaced through `GET /api/system/health`
-(`settings:manage` permission) — monitor that endpoint, or parse the
-structured logs, for alerting.
-
----
-
-## Backup and Recovery
-
-### PostgreSQL Backup
-
-```bash
-pg_dump -h localhost -U hotel_admin hotel_management > /backups/hotel_$(date +%Y%m%d).sql   # cron: 0 2 * * *
-psql -h localhost -U hotel_admin hotel_management < /backups/hotel_20250101.sql              # restore
-```
-
-### Desktop Data Backup
-
-Desktop builds manage their own verified backup pairs (`pg_dump` + uploads
-tarball, newest 14 kept) under the app data dir — see
-[desktop-backup-restore.md](desktop-backup-restore.md). There is no manual
-copy step; `pgdata` is not portable across bundled versions.
-
-### Backup via Docker
-
-**Production deploys install a nightly backup automatically.** `deploy.sh`
-writes a `saliminn-backup.timer` (18:10 UTC ≈ 02:10 Malaysia time,
-`Persistent=true`) that runs `/opt/saliminn/database-backup.sh`. Each run
-produces a verified `pg_dump --format=custom` at
-`/opt/saliminn/backups/nightly-<timestamp>.dump` plus an
-`uploads-<timestamp>.tar.gz` of the `uploads/` and `private_uploads/` trees
-(eKYC images, receipts, room-type photos — data `pg_dump` cannot cover).
-Retention is per-class: the newest 14 `nightly-*.dump`, newest 5
-`predeploy-*.dump`, and newest 7 `uploads-*.tar.gz` files are kept
-(`SALIMINN_NIGHTLY_RETENTION` / `SALIMINN_PREDEPLOY_RETENTION` /
-`SALIMINN_UPLOADS_RETENTION` in `database-backup.sh`). Check its status with
-`systemctl list-timers saliminn-backup.timer`; runs log to journald
-(`journalctl -u saliminn-backup.service`).
-
-These dumps live on the same host as Postgres — they are the recovery point
-of last resort, **not** an off-host strategy. Ship copies off-host (e.g.
-encrypted upload to object storage) for real disaster recovery.
-
-Manual/ad-hoc backups, or scheduled backups for non-deploy environments:
-
-```bash
-docker compose exec -T postgres pg_dump -U hotel_admin hotel_management > backup.sql   # manual (local compose; prod container is saliminn-db)
-0 2 * * * docker exec saliminn-db pg_dump -U hotel_admin hotel_management > /backups/hotel_$(date +\%Y\%m\%d).sql   # host cron, daily 02:00
-```
-
-### Log Rotation
-
-The backend writes to a single append-only file (`backend.log` under
-`HOTEL_LOG_DIR`) with no built-in size cap or cleanup. Rotate/prune it with
-`logrotate(8)` on Linux hosts:
-
-```
-# /etc/logrotate.d/hotel-app-be
-/path/to/HOTEL_LOG_DIR/*.log {
-    daily
-    maxsize 10M
-    rotate 14
-    compress
-    missingok
-    notifempty
-    copytruncate
-}
-```
-
-`copytruncate` is required: the backend keeps the file open in append mode,
-so a plain rename would leave it writing into the rotated file.
+- **Health checks**: `GET /health` (`{"status":"ok"}` via `SELECT 1`), `GET /ws/status`, and authenticated in-process counters on `GET /api/system/health` (`settings:manage`; there is no Prometheus `/metrics` endpoint).
+- **Automated host backups**: `deploy.sh` installs `saliminn-backup.timer` (18:10 UTC) running `database-backup.sh` to create verified `nightly-*.dump` + `uploads-*.tar.gz` (retaining 14 nightly dumps, 5 predeploy dumps, 7 upload archives). `check-backup-health.sh` fires transition-deduped webhooks to `SALIMINN_ALERT_WEBHOOK` if `/opt/saliminn/backup-alert.env` is present ([../security.md](../security.md)).
+- **Log rotation**: `hotel-app-be` appends to `${HOTEL_LOG_DIR}/backend.log`; Linux hosts rotate it with `logrotate` using `copytruncate` (required because the process keeps the FD open).
 
 ---
 
 ## Troubleshooting
 
-### Backend won't start
-- **Symptom:** `FATAL: Database connection failed` or `Invalid JWT configuration`.
-- **Cause:** wrong/unreachable `DATABASE_URL`, `JWT_SECRET` under 32 chars, or missing `.env`.
-- **Fix:** verify `DATABASE_URL` and that PostgreSQL is reachable (check its firewall), set a ≥32-char `JWT_SECRET`, confirm `.env` exists in `hotel-app-be/`.
-
-### CORS errors
-- **Symptom:** browser console shows CORS errors; requests blocked.
-- **Cause:** frontend origin missing from `ALLOWED_ORIGINS`, or an http/https scheme mismatch.
-- **Fix:** add the origin to `ALLOWED_ORIGINS`; in development, go through the Vite proxy instead of calling the backend directly.
-
-### Desktop app issues
-- **Symptom:** sidecar won't start, PostgreSQL won't initialize, or "port already in use".
-- **Cause:** stale prepared artifacts, a port conflict, or a missing system dependency.
-- **Fix:** check logs under `~/Library/Application Support/HotelApp/logs/` (macOS), free the backend port, then re-run `bun run desktop:prepare:force`.
-
-### Performance issues
-- **Symptom:** slow API responses, high database CPU, or timeouts.
-- **Cause:** unindexed queries, an undersized connection pool, or one backend instance under load.
-- **Fix:** check `DATABASE_SLOW_STATEMENT_MS` logs and `pg_stat_activity`, tune `DATABASE_MAX_CONNECTIONS`, add indexes, or scale backend replicas behind a load balancer.
-
-### Common Error Codes
-
-| HTTP Status | Meaning | Common Causes |
-|-------------|---------|---------------|
-| 401 | Unauthorized | Missing/invalid JWT, expired token |
-| 403 | Forbidden | Insufficient RBAC permissions |
-| 422 | Validation Error | Invalid request body, missing required fields |
-| 429 | Rate Limited | Too many requests, wait and retry |
-| 500 | Internal Error | Backend exception, check application logs |
+- **Backend won't boot**: Check `DATABASE_URL`, `JWT_SECRET` (≥32 chars), `TOTP_ENCRYPTION_KEY` (required in production), non-localhost HTTPS `ALLOWED_ORIGINS` in prod, and `make db-patch`.
+- **Desktop sidecar/PG issues**: Inspect `~/Library/Application Support/HotelApp/logs/` and run `bun run desktop:prepare:force`.
+- **Slow queries**: Inspect `DATABASE_SLOW_STATEMENT_MS` logs and `pg_stat_statements`.

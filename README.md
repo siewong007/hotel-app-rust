@@ -1,102 +1,90 @@
 # Hotel Booking System
 
-A hotel property management system covering reservations, rooms, housekeeping, rates,
-payments, ledgers, invoicing, night audit, and a self-service guest portal where guests
-can book without an account. It ships as a web application and as a Tauri desktop app
-that bundles its own PostgreSQL. Three projects live in this repo — there is no root
-workspace, so run commands from each subdirectory.
+A hotel property management system covering reservations, rooms, housekeeping, maintenance, rates, payments, ledgers, invoicing, night audit, eKYC, loyalty, communications, and a self-service guest portal where guests can book without an account. It ships across four projects — web application, Tauri desktop app (with bundled PostgreSQL), native Android staff app, and a shared Rust API — with no root workspace, so run commands from each subdirectory.
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 19 + TypeScript (Vite, MUI, TanStack Query/Router) — Bun package manager |
-| Backend | Rust + Axum (SQLx, Tokio) |
-| Database | PostgreSQL 19 (`postgres:19beta3` image) |
-| API | REST/JSON under `/api`; gRPC-Web (tonic) for a few domains behind runtime flags |
-| Real-time | WebSocket (staff updates, loyalty, support) — no SSE endpoint |
-| Authentication | JWT (in-memory access token + HttpOnly refresh cookie), RBAC, TOTP 2FA, passkeys |
+| Frontend | React 19 + TypeScript (Vite 8, MUI 9, TanStack Query/Router/Table) — Bun 1.3.14 |
+| Backend | Rust 1.95.0 + Axum 0.8 (SQLx 0.9, Tokio, tonic 0.14) |
+| Database | PostgreSQL 19 (`postgres:19beta3` server/CI; `19beta2` embedded desktop) |
+| Desktop | Tauri 2 — backend sidecar + bundled PostgreSQL |
+| Android | Native Kotlin `2.2.21` + Jetpack Compose Material 3 (Retrofit, OkHttp, Biometrics, Credential Manager, WorkManager, Glance) |
+| API & Real-time | REST/JSON under `/api`, gRPC-Web (`/hotel.*`, partial opt-in rollout), WebSockets (`/api/updates/socket` + domain sockets; no SSE) |
+| Authentication | JWT (in-memory access token + HttpOnly refresh cookie / Keystore on Android), RBAC, TOTP 2FA (AES-256-GCM at rest), passkeys |
 | Payments | PayPal (signature-verified webhooks) + staff-recorded payments |
 | Deployment | Docker Compose + Caddy (TLS), deployed by GitHub Actions |
-| Desktop | Tauri 2 — backend sidecar + bundled PostgreSQL |
 
 ## Features
 
 **Guests**
 
-- A public landing page for the property (Salim Inn), in English, Bahasa Melayu, and
-  Simplified and Traditional Chinese
-- Browse rooms and offers, check availability
+- Public Salim Inn landing page (`/salim-inn/`) in English, Bahasa Melayu, and Simplified/Traditional Chinese
+- Browse rooms and offers, check live availability
 - Book single or multi-room stays without an account (public, rate-limited, PDPA consent-gated endpoints)
-- Manage single or group bookings via a secure access token: guest portal, payments, eKYC document
-  upload, self check-in
+- Manage single or group bookings via secure access token: guest portal, payments, eKYC upload, self check-in
 
-**Front desk**
+**Front desk & Mobile Operations (Web, Desktop, Android)**
 
-- View reservations and arrival/departure rosters
-- Check guests in/out; manage stay charges, deposits, and folio
-- Assign and manage rooms, housekeeping, and maintenance
-- Record payments, issue invoices, manage guest/city ledgers
+- Reservations, arrivals/departures, walk-ins, check-in/checkout, stay charges, deposits, folio printing
+- Room status board, housekeeping, maintenance tickets, global search, guest 360 CRM
+- Record payments, approve bank transfers, issue invoices, manage guest/city ledgers
 
 **Admin**
 
-- Hotel configuration, system settings, users, teams, RBAC roles/permissions
-- Rooms, room types, rates, booking channels, promotions, loyalty
-- Audit log, night audit, reports/insights, backup & restore (`hotel-backup` v1)
+- Hotel configuration, system settings, users, teams, RBAC roles/permissions (`manager` owns IAM & `data_transfer:*`)
+- Rooms, room types, rates, booking channels, campaigns/vouchers, guest segments, loyalty
+- Audit log (trigger-enforced append-only), eKYC review, night audit, reports/insights, backup & restore (`hotel-backup` v1)
 
-The canonical, per-feature delivery list is [docs/features.md](docs/features.md).
+Canonical per-feature status list: [docs/features.md](docs/features.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Browser["Browser"] --> React["React frontend"]
+    Browser["Web Browser"] --> React["React frontend"]
     Desktop["Tauri desktop"] --> React
     React -->|"HTTPS/JSON (/api)"| API["Rust / Axum backend"]
+    Android["Android staff app"] -->|"HTTPS/JSON (/api)"| API
     API --> DB[("PostgreSQL")]
     API -.->|"WebSocket updates"| React
+    API -.->|"WebSocket updates"| Android
     PayPal["PayPal"] -->|"signed webhooks"| API
 ```
 
-PostgreSQL is the single source of truth; the schema is a V1 baseline plus a
-checksum-verified patch catalog (no migration runner). The browser talks to the backend
-over HTTPS/JSON; WebSocket pushes real-time updates to staff screens (there is no SSE,
-and WebTransport is not part of v1). gRPC-Web already serves a few domains behind
-runtime flags and is being extended incrementally — REST remains the default everywhere
-else. The desktop app runs the same frontend and backend, with the API as a localhost
-sidecar against a bundled PostgreSQL.
+PostgreSQL is the single source of truth via a V1 baseline plus a checksum-verified patch catalog (`manifest.tsv`). Web and desktop clients share `/api/*` REST (plus opt-in gRPC-Web for select domains behind runtime flags), WebSockets push domain invalidations across replicas via `pg_notify`, and `hotel-android/` consumes REST + WebSockets directly with local SQLite offline caching and WorkManager background sync.
 
 ## Project structure
 
 ```text
 hotel-app-be/               # Rust backend API
-  src/modules/<domain>/     # routes → handlers → service → repository → models
-  src/core/                 # auth, DB pool, middleware, rate limiting
-  src/grpc/                 # tonic adapters for the gRPC-Web contexts
+  src/modules/<domain>/     # 40 domain dirs: routes → handlers → service → repository → models
+  src/core/                 # auth, DB pool, middleware, rate limiting, i18n, caches
+  src/grpc/                 # tonic adapters for gRPC-Web contexts
   src/bin/seed/             # deterministic demo/staging dataset (`make db-seed`)
-  database/postgres/        # 0001_v1_baseline.sql, seed.sql, patches/ catalog
-  tests/                    # integration tests (most need DATABASE_URL)
-hotel-web-fe/               # React frontend
-  src/features/<domain>/    # pages, components, hooks, api
-  src/api/                  # ky-based service layer + shared client
-  salim-inn/                # public landing page (standalone document)
-hotel-desktop/              # Tauri desktop app (sidecar backend + bundled PG)
+  database/postgres/        # 0001_v1_baseline.sql, seed.sql, patches/ catalog (head v32)
+  tests/                    # 83 integration test files (79 require DATABASE_URL)
+hotel-web-fe/               # React frontend (staff SPA, guest.html, salim-inn/)
+  src/features/<domain>/    # 26 feature modules
+  src/api/                  # ky client + 24 REST services + Connect-ES gRPC adapters
+hotel-desktop/              # Tauri 2 desktop app (sidecar backend + embedded PostgreSQL)
+hotel-android/              # Native Kotlin + Jetpack Compose Material 3 Android staff app
 proto/                      # gRPC contract of record (buf)
 deploy/                     # prod/staging compose files, Caddyfile, deploy scripts
-docs/                       # all documentation (index: docs/README.md)
+docs/                       # consolidated documentation (index: docs/README.md)
 infra/terraform/oci/        # OCI free-tier dev environment
 Makefile                    # task runner — `make help`
 ```
 
 ## Getting started
 
-Prerequisites: Rust 1.95.0 (pinned in `rust-toolchain.toml`), Bun 1.3 (CI and `.bun-version` pin 1.3.14), Docker,
-and `protoc` (the backend build compiles the gRPC contract).
+Prerequisites: Rust `1.95.0` (`rust-toolchain.toml`), Bun `1.3.14` (`.bun-version`), Docker, `protoc` (backend builds), plus JDK 17 + Android SDK 36 for `hotel-android/`.
 
 **Option A — Docker (full stack):**
 
 ```bash
-cp .env.example .env     # set POSTGRES_PASSWORD and JWT_SECRET — both ship blank and are required
+cp .env.example .env     # set POSTGRES_PASSWORD and JWT_SECRET (required)
 docker compose up -d     # frontend :80, API :3030, Postgres :5432
 curl http://localhost:3030/health
 ```
@@ -106,17 +94,17 @@ curl http://localhost:3030/health
 ```bash
 cd hotel-web-fe && bun install
 
-cp .env.example .env                                   # set POSTGRES_PASSWORD (required by compose)
-docker compose up -d postgres                          # 127.0.0.1:5432; auto-initializes schema on first boot
-docker compose run --rm db-patches                     # apply the patch catalog; the API refuses to start without it
+cp .env.example .env                                   # set POSTGRES_PASSWORD
+docker compose up -d postgres                          # 127.0.0.1:5432
+docker compose run --rm db-patches                     # apply patch catalog
 cp hotel-app-be/.env.example hotel-app-be/.env         # set DATABASE_URL and JWT_SECRET
 
 cd hotel-app-be && cargo run --bin hotel-app-be        # API on :3030
 cd hotel-web-fe && bun run start                       # Vite on :3000, proxies /api → 127.0.0.1:3030
+cd hotel-android && ./gradlew testDebugUnitTest assembleDebug  # Android debug APK (:3030 via 10.0.2.2)
 ```
 
-Optional demo data: point `DATABASE_URL` at the dev database and run `make db-seed`
-(`cd hotel-app-be && cargo run --bin seed -- --list` shows the scenarios).
+Optional demo data: `make db-seed` (`cd hotel-app-be && cargo run --bin seed -- --list`).
 
 **Database lifecycle** (no migration runner):
 
@@ -130,81 +118,62 @@ make db-seed       # optional deterministic staging dataset
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `POSTGRES_PASSWORD` | Docker Compose | DB password; ships blank — compose refuses to start without it |
+| `POSTGRES_PASSWORD` | Docker Compose | DB password (`:?` required) |
 | `JWT_SECRET` | Always | JWT signing secret, ≥ 32 chars; rotation invalidates staff tokens |
+| `TOTP_ENCRYPTION_KEY` | Production | 32-byte base64/hex or ≥32-char ASCII key for AES-256-GCM TOTP encryption at rest |
 | `DATABASE_URL` | Backend outside Docker | e.g. `postgres://hotel_admin:<pw>@127.0.0.1:5432/hotel_management` |
 | `APP_ENV` / `ENVIRONMENT` | Production | `development`/`staging`/`production` (`APP_ENV` wins); prod refuses insecure combos |
 | `ALLOWED_ORIGINS` | Production | Comma-separated CORS origins (HTTPS, non-localhost in prod) |
 | `BACKEND_PORT` | No | API port, default `3030` |
 
-Compose reads the root [.env.example](.env.example); the full backend reference —
-SMTP, PayPal, Turnstile, Google sign-in, session retention, pool tuning, all optional — is
-[hotel-app-be/.env.example](hotel-app-be/.env.example), and optional frontend build-time
-`VITE_*` variables live in [hotel-web-fe/.env.example](hotel-web-fe/.env.example). Never commit real `.env` files.
+See [.env.example](.env.example), [hotel-app-be/.env.example](hotel-app-be/.env.example), and [hotel-web-fe/.env.example](hotel-web-fe/.env.example). Never commit real `.env` files.
 
-## Development
+## Development & Verification
 
 ```bash
 # Backend (hotel-app-be/)
-cargo check --all-features                      # compile
-cargo clippy --all-features -- -D warnings      # lint — the CI gate, verbatim
-cargo fmt                                       # format
+cargo check --all-features && cargo fmt --check && cargo clippy --all-features -- -D warnings
 cargo test --all-features                       # needs DATABASE_URL or PG suites silently skip
 
 # Frontend (hotel-web-fe/)
 bun run typecheck && bun run lint:strict && bun run test && bun run build
 
+# Android (hotel-android/)
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --console=plain
+
 # Root shortcuts
-make lint format typecheck test build install-hooks check-all
+make lint format typecheck test build install-hooks check-all docs-check
 ```
 
-Schema changes go into the V1 baseline **and** a new checksum-verified patch under
-`hotel-app-be/database/postgres/patches/` registered in `manifest.tsv` — a loose
-`000N_*.sql` file is never executed. See
-[hotel-app-be/database/README.md](hotel-app-be/database/README.md).
+Schema changes go in both `0001_v1_baseline.sql` **and** a registered patch in `hotel-app-be/database/postgres/patches/manifest.tsv`. See [hotel-app-be/database/README.md](hotel-app-be/database/README.md).
 
 ## Documentation
 
-- [Feature registry](docs/features.md) — what exists, with per-feature delivery status
-- [Architecture](docs/architecture/overview.md) · [ADRs](docs/architecture/decision-records.md) · [request/data flow](docs/architecture/system-flows.md)
-- [API](docs/api/README.md) · generated [openapi.json](docs/api/openapi.json) (CI-enforced)
-- [Development guide](docs/development.md) — setup, commands, troubleshooting
-- [Database lifecycle and demo data](hotel-app-be/database/README.md)
-- [Deployment](docs/guides/deployment.md) · [VPS access](docs/guides/vps-access.md) · [PostgreSQL engine upgrade](docs/guides/postgres-engine-upgrade.md)
-- [Internationalization](docs/guides/internationalization.md) · [gRPC-Web transport](docs/architecture/grpc.md)
-- [Security](SECURITY.md) · [production operations](docs/security/production-operations.md)
-- [Desktop packaging](docs/guides/desktop-packaging.md) · [updater](hotel-desktop/UPDATER.md)
-- [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [full documentation index](docs/README.md)
+- [Feature registry](docs/features.md) — per-feature delivery status across Web, Backend, Desktop & Android
+- [Architecture](docs/architecture/overview.md) · [ADRs 001–016](docs/architecture/decision-records.md)
+- [API contract](docs/api/README.md) · generated [openapi.json](docs/api/openapi.json) (CI-enforced)
+- [Development guide](docs/development.md) · [Dependencies](docs/dependencies.md) · [Design system](docs/design-system.md)
+- [Database lifecycle & seed data](hotel-app-be/database/README.md) · [Data transfer (`hotel-backup` v1)](docs/guides/data-transfer.md)
+- [Deployment, VPS & PG19 upgrade](docs/guides/deployment.md) · [Desktop guide](docs/guides/desktop.md) · [Android guide](docs/guides/android.md)
+- [Internationalisation & glossary](docs/guides/internationalization.md) · [Admin guide (zh)](docs/guides/admin-user-guide-zh.md) · [Guest guide (zh)](docs/guides/guest-user-guide-zh.md)
+- [Security, retention & go-live readiness](docs/security.md) · [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Full documentation index](docs/README.md)
 
 ## Status
 
-- **Implemented:** everything marked *Delivered* in [docs/features.md](docs/features.md) —
-  single and multi-room group bookings, rooms, housekeeping, payments, ledgers, invoicing,
-  night audit, eKYC, versioned PDPA consent capture (`consent_records`), guest portal,
-  loyalty, promotions, communications (email), i18n (en/ms/zh/zh-TW), and the desktop app.
-- **In progress:** gRPC-Web migration (rooms, housekeeping, maintenance, guests done;
-  399 REST paths / 475 operations remain in the OpenAPI document); desktop OS signing/notarization
-  (wired, awaiting certificates); the PostgreSQL 19 GA move. Production is on `19beta3`;
-  patches 0015/0016/0021/0022 removed the schema's uses of features PostgreSQL 19 Beta 4
-  reverted and hardened partition append-only guards ahead of the move.
-- **Planned:** SMS notification channel. PayPal refund/dispute webhooks are verified and
-  audit-logged but not auto-applied — manual reconciliation today.
+- **Implemented:** Web staff PMS, Salim Inn public landing, guest portal + anonymous single/group bookings, Rust backend + PostgreSQL schema through patch `0032`, desktop app (`hotel-desktop/`), and native Android staff app (`hotel-android/`) — details in [docs/features.md](docs/features.md).
+- **In progress:** gRPC-Web rollout (5 services / 47 RPCs live behind opt-in flags; host deploy matchers need `/hotel.*` before production activation), desktop OS code-signing certs, Android release keystore distribution, and the PostgreSQL 19 GA migration (patches 0015/0016/0021/0022 cleared beta4 reverts).
+- **Planned / gated:** SMS notification channel, automated PayPal refund reconciliation, PDPA retention purge jobs (awaiting counsel sign-off), and live host backup/restore drill ([docs/security.md](docs/security.md)).
 
-Assessed as *ready with conditions*, not fully production-ready — see the
-[readiness assessment](docs/security/production-readiness-assessment.md).
+Assessed as *ready with conditions* — see [docs/security.md](docs/security.md).
 
 ## Important rules
 
-- PostgreSQL is the source of truth; booking overlap is blocked by a database exclusion
-  constraint — never bypass the booking transaction path.
-- Shipped patches are immutable: add a new version, never edit one. Additive changes go
-  in both the baseline and a registered patch.
-- Parameterized SQL only; sanitize free text with the existing utilities; multi-step
-  mutations run in transactions.
-- Backend PG tests silently skip without `DATABASE_URL` and each skip counts as a pass —
-  judge runs by wall-clock time, never by exit code or count alone.
-- Changes land via PR on `master` with green CI; production deploys run only from
-  `master`.
+- PostgreSQL is the source of truth; booking overlap is prevented by `bookings_no_room_date_overlap`.
+- Shipped patches are immutable: add a new version, never edit one. Additive changes go in both the baseline and a registered patch.
+- Parameterized SQL only; sanitize free text with the existing utilities; multi-step mutations run in transactions.
+- Backend PG tests silently skip without `DATABASE_URL` and each skip counts as a pass — judge runs by wall-clock time, never exit code or count alone.
+- Changes land via PR on `master` with green CI (`ci.yml`, `android-ci.yml`, `security.yml`).
 
 ## License
 

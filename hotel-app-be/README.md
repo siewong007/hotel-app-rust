@@ -1,8 +1,7 @@
 # hotel-app-be
 
 Rust backend API for the hotel administrative panel: Axum 0.8, SQLx 0.9, PostgreSQL 19.
-It serves the React frontend in web deployments and runs as a sidecar process inside the
-Tauri desktop app.
+It serves the React web frontend, runs as a sidecar inside the Tauri desktop app, and powers the native Kotlin/Compose Android staff app (`hotel-android/`).
 
 Project overview and the endpoint table are in the [root README](../README.md).
 Architecture essentials and agent routing are in [CLAUDE.md](../CLAUDE.md); layer
@@ -103,7 +102,7 @@ Never commit a real `.env` file or local credentials.
 With `HOTEL_DESKTOP_MODE` set, the backend binds `127.0.0.1` on a dynamically probed free
 port starting at `BACKEND_PORT`, and the Tauri shell passes an explicit `ALLOWED_ORIGINS`
 list rather than a wildcard. Build and packaging instructions are in
-[../hotel-desktop/BUILD_SPEED.md](../hotel-desktop/BUILD_SPEED.md).
+[../docs/guides/desktop.md](../docs/guides/desktop.md).
 
 ## Stopping local processes
 

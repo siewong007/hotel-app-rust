@@ -178,7 +178,7 @@ clients in `hotel-web-fe/src/gen/` are generated from them and enabled per
 context (`rooms`, `housekeeping`, `maintenance`, `guests`) by
 `src/api/grpc/flags.ts`. A disabled context calls REST — REST is the default
 and the fallback for every domain. The OpenAPI index above covers REST only.
-Contract rules, RPC map and rollout state: [`../architecture/grpc.md`](../architecture/grpc.md).
+Contract rules, RPC map and rollout state: [`../architecture/overview.md#grpc-web-transport-partial-rollout`](../architecture/overview.md#grpc-web-transport-partial-rollout).
 
 ## Realtime
 

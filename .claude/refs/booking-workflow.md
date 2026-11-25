@@ -4,8 +4,8 @@ Booking CRUD + check-in/checkout + void + group bookings + guest-portal
 self-service. Read `docs/architecture/overview.md` first. Code under
 `hotel-app-be/src/modules/bookings/` and `modules/booking_groups/`; frontend
 under `hotel-web-fe/src/features/bookings/` +
-`hotel-web-fe/src/routes/_authenticated/bookings/`. Verified 2026-11-18 against
-`master`.
+`hotel-web-fe/src/routes/_authenticated/bookings/`. Verified `2026-11-25` against
+`master` (incl. patch `0032`).
 
 ## Layers
 
@@ -31,17 +31,17 @@ under `hotel-web-fe/src/features/bookings/` +
 
 ## Status vocabulary
 
-`bookings.status` CHECK constraint (`bookings_status_check`):
+`bookings.status` CHECK constraint (`bookings_status_check`, updated in patch `0032`):
 `pending`, `pending_payment`, `pending_confirmation`, `confirmed`,
-`checked_in`, `auto_checked_in`, `checked_out`, `no_show`, `completed`,
-`comp_void`, `partial_complimentary`, `fully_complimentary`, `voided`.
+`checked_in`, `auto_checked_in`, `late_checkout`, `checked_out`, `no_show`,
+`completed`, `comp_void`, `partial_complimentary`, `fully_complimentary`, `voided`.
 `cancelled`, `complimentary`, `unpaid`/`paid` (that's `payment_status`) are
 **not** legal booking statuses.
 
-`late_checkout` is **not** in `bookings_status_check` — legacy branches in
-`modules/bookings/lifecycle.rs`, `modules/analytics/repository.rs`, and
-`modules/settings/repository.rs::mark_late_checkouts` still reference it. Don't
-copy the pattern.
+`bookings_no_room_date_overlap` (updated in patch `0032`) blocks room/date overlap
+across `pending`, `pending_payment`, `pending_confirmation`, `confirmed`,
+`checked_in`, `auto_checked_in`, `late_checkout`, `partial_complimentary`, and
+`fully_complimentary`.
 
 ## Routes (staff)
 

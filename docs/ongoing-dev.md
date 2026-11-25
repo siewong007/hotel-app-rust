@@ -1,111 +1,31 @@
 # Ongoing Development
 
-Single live tracker for open work. Keep entries short and **delete them when
-done** rather than striking them through. Shipped behavior belongs in the
-owning document (see [`README.md`](README.md)), and active plans live in
-[`working-notes/`](working-notes/) until they merge.
+Single live tracker for remaining open work (`2026-11-25`). Keep entries concise and **delete finished items** rather than striking them through. Shipped features belong in [features.md](features.md); security/readiness blockers belong in [security.md](security.md).
 
-Last pruned and re-verified against the code on 2026-11-18. Active plans live
-in [`working-notes/`](working-notes/) until they merge; earlier prune notes are
-in `git log -- docs/ongoing-dev.md`.
+## P0 — Infrastructure & Security Gates Remaining
 
-## P0 — broken or security-relevant
+- **PostgreSQL 19 GA upgrade (`19beta3` server/CI/compose; `19beta2` desktop).** Schema blockers from PG 19 Beta 4 (`hotel_graph` SQL/PGQ and `SPLIT PARTITION`) are already removed by patches `0015`/`0016`/`0021`/`0022` (applied to prod/staging `2026-10-06`). Execute the staged dump-and-restore onto PostgreSQL 19 GA per [guides/deployment.md](guides/deployment.md#postgresql-engine-upgrade-dump-and-restore) once ready, moving desktop `CONFIGURED_POSTGRES_BUILD_IDENTITY` in lockstep ([guides/desktop.md](guides/desktop.md)).
+- **Runtime DB privilege verification on live host.** Deploy scripts provision least-privilege `hotel_app` (`deploy/db-least-privilege.sql` + patches `0017`/`0024`); verify `SELECT current_user = 'hotel_app'` on production/staging backend connections.
+- **PDPA automated retention & eKYC erasure sign-off.** Automated hourly session purge and 24h staged-upload cleanup are active; automated eKYC post-stay image deletion, inactive-guest PII anonymization, `email_deliveries` purge, and owner-run `audit_logs` partition detach/drop await legal retention-period sign-off ([security.md#4-data-retention-policy-active--draft-matrix](security.md#4-data-retention-policy-active--draft-matrix)).
 
-- **PostgreSQL 19 track (H7, owner decision 2026-08-22: stay on the beta
-  track).** Production, staging, CI and compose run `postgres:19beta3`.
-  - **Schema blockers resolved 2026-10-06 / 2026-10-12.** 19 Beta 4 (2026-09-24)
-    reverted SQL/PGQ and `ALTER TABLE … SPLIT/MERGE PARTITION` ahead of the PG19
-    RC/GA releases. Patches 0015 (drops `hotel_graph`), 0016 + 0021 (moves late
-    audit-log partition rows without `SPLIT PARTITION`), and 0022 (partition
-    append-only guards) remove both dependencies.
-  - **Before the dump:** patches 0015/0016 must be applied **while a database is
-    still on 19beta3**. Done for production and staging on 2026-10-06 (runs
-    37440989198 and 37440989404). A beta3 dump that still holds the graph fails
-    to restore on beta4 or later; filter `PROPERTY GRAPH` out of `pg_restore -l`
-    if restoring a pre-0015 backup.
-  - **Then:** execute the dump-and-restore onto PostgreSQL 19 GA per
-    [`guides/postgres-engine-upgrade.md`](guides/postgres-engine-upgrade.md),
-    rehearsed on staging first. The desktop bundle (`19beta2`, see P2) moves in
-    the same push, and its pgdata version gate refuses mismatched data
-    directories.
-- eKYC PII follow-up (from the 2026-08-22 history rewrite): production server
-  copies of `uploads/ekyc/*` still need separate handling, and automated eKYC
-  image retention/erasure tooling (currently manual — see
-  [`security/data-retention-policy-draft.md`](security/data-retention-policy-draft.md))
-  awaits retention-period sign-off.
-- Security-eval items still open:
-  - **M10 least-privilege DB role rollout.** Release scripts provision the
-    restricted `hotel_app` runtime role (`deploy/db-least-privilege.sql` +
-    patches 0017 and 0024) and use separate runtime credentials; verify live
-    runtime `current_user = 'hotel_app'` on staging and production after deploy.
-  - **L14 desktop signing certificates.**
+## P1 — Decided, External / Operator Gated
 
-## P1 — decided, not yet executed
+- **Backup restore drill & webhook monitoring.** Configure `SALIMINN_ALERT_WEBHOOK` + external `/health` uptime probe and execute one quarterly isolated restore drill ([security.md#5-backup--quarterly-restore-drill](security.md#5-backup--quarterly-restore-drill)).
+- **Legal review & processor DPA register.** Legal sign-off on `2026-11-18` PDPA corpus, Sarawak Cap. 64 disclosures, and third-party processor/DPA register (`PayPal`, `Google`, `Cloudflare`, `SMTP`, AIC host).
 
-- (none)
+## P2 — Engineering Backlog
 
-## P2 — later
+- **Desktop OS signing certificates.** Minisign updater signing (`TAURI_SIGNING_PRIVATE_KEY`) is live; provision Windows PFX and Apple Developer ID + notarization secrets and verify signed installers end-to-end ([guides/desktop.md#4-platform-packaging-os-signing--ci](guides/desktop.md#4-platform-packaging-os-signing--ci)). Session persistence across desktop restarts remains an accepted limitation (SameSite cookie origin boundary).
+- **Android release signing keystore & distribution.** Debug/release APK builds compile and shrink cleanly (`android-ci.yml`); provisioning a production Play/enterprise upload keystore (`signingConfigs.release`) remains when preparing store/MDM distribution ([guides/android.md](guides/android.md)).
+- **Dependabot alert #13 (Linux desktop `glib 0.18.5` soundness).** `gtk 0.18` pins `glib ^0.18` across Tauri 2.x; unfixable until Tauri migrates to GTK 4.
+- **Notifications v2 remaining scope.** SMS channel (unbuilt), DB-editable transactional email templates, and attaching a PDF to checkout-receipt emails (currently HTML-only).
+- **UI/UX table consolidation.** `PageHeader` and `EmptyState` are partially rolled out; `DataTable` adoption across remaining legacy admin views remains open.
+- **gRPC host edge routing.** `deploy/Caddyfile` already routes `/hotel.*`, whereas the generated host site matchers in `deploy/deploy.sh` and `deploy/deploy-staging.sh` do not yet include `/hotel.*`. Add `/hotel.*` there before enabling `VITE_GRPC_CONTEXTS` in production ([architecture/overview.md#grpc-web-transport-partial-rollout](architecture/overview.md#grpc-web-transport-partial-rollout)).
+- **Staging demo-data ergonomic path.** Staging initializes baseline + `seed.sql` + patches only (`seed` binary not in backend container image, DB port not host-published).
+- **Automated restore & browser Playwright E2E CI depth.** Add full-DB restore boot smoke, web browser E2E runner, and load baseline tests.
 
-- **Desktop PostgreSQL lags the server.** The bundle is `19beta2`
-  (`CONFIGURED_POSTGRES_BUILD_IDENTITY`, `hotel-desktop/src-tauri/src/postgres.rs`),
-  while every server, CI and compose pin is `19beta3`. Move it with the GA
-  move (P0). That needs re-provisioning plus a pgdata rebuild, which the app
-  automates via "Restore from backup", not just a constant edit.
-- **Desktop signing.** The updater is armed through GitHub Releases
-  ([`hotel-desktop/UPDATER.md`](../hotel-desktop/UPDATER.md)); an absent
-  `TAURI_SIGNING_PRIVATE_KEY` hard-fails bundle builds. OS signing is wired
-  but env-gated: Windows PFX and Apple Developer ID plus notarization
-  credentials are still to be provisioned, and then a signed build must be
-  verified end to end (go-live checklist row 6). Session persistence across
-  desktop restarts stays an accepted limitation, because the refresh cookie
-  cannot cross the SameSite boundary. Fixing that is token-in-keychain work
-  and needs its own spec.
-- **Dependabot alert #13** (moderate: glib 0.18.5 `VariantStrIter`
-  unsoundness, `hotel-desktop/src-tauri`). It was dismissed 2026-09-04 as
-  "not used — we ship macOS + Windows". Linux bundles (deb, AppImage, rpm)
-  have shipped since 2026-09-19, so that reason no longer holds. It is still
-  unfixable from here: gtk 0.18 pins glib `^0.18` across Tauri 2.x. Reopen
-  the alert so its state is honest, and revisit when Tauri moves to GTK 4.
-- **Notifications v2, remaining:** SMS channel (separate spec), DB-editable
-  transactional templates, and a PDF attached to the checkout-receipt email.
-  The email is HTML-only today. The staff-side `paymentReceiptPdf.ts` is a
-  separate browser export.
-- **UI/UX consolidation follow-ups** (2026-09-14 pass):
-  1. PARTIAL. Bookings `CheckInDialog` composes rooms'
-     `ReservedCheckInDialog` (one shared form, atomic check-in payload).
-     `EnhancedCheckInModal` inside `UnifiedBookingModal` stays separate: it is
-     a richer workflow on the same payload.
-  2. PARTIAL. `PageHeader` is adopted across admin/system pages and Guest
-     Deliveries, and `EmptyState` is in `AuditLogPage`.
-     `StatusPill`/`EkycStatusCard`/`RoomStatusChip` stay deliberately distinct.
-     `DataTable` adoption is still wide open.
-- **gRPC edge routing.** Rooms, room types, housekeeping, maintenance and
-  guests have gRPC-Web clients behind per-context flags (default off). The
-  production edge does not route `/hotel.*`: neither `deploy/Caddyfile`'s
-  `@backend` matcher nor the site matchers generated by
-  `deploy/deploy{,-staging}.sh` include it. The flags therefore stay off
-  outside development. See [`architecture/grpc.md`](architecture/grpc.md).
-- **Staging has no demo-data path.** Staging deploys install the baseline and
-  bootstrap `seed.sql` only. The `seed` binary is not in the backend image,
-  and the staging PostgreSQL publishes no host port.
+## Standing Policy Decisions
 
-## Decisions needed (user)
-
-- (none)
-
-Standing policy (decisions with no other home):
-
-- **Branch protection on master.** Ruleset `master-protection` (id 21196959)
-  is `enforcement: active`. It has a `pull_request` rule and a
-  `required_status_checks` rule with 17 checks. Its bypass list is
-  `RepositoryRole: always`, so repository admins can still push straight to
-  master while everyone else must open a PR. Verified 2026-10-05 with
-  `gh api repos/siewong007/hotel-app-rust/rules/branches/master`; check again
-  before assuming either way.
-- **Guest portal forgot-password and max-booking-window: won't do.** Neither
-  feature is wanted, so do not re-propose them as gaps.
-- **Zero-balance un-invoiced ledger rows read "Draft", not "Paid".**
-  `getLedgerUiStatus` returns `'draft'` for `balance <= 0` rows whose stored
-  status never reached `'paid'`, matching the backend `ui_status='draft'`
-  bucket. `LedgerEntriesTab` has a matching "Draft" filter pill. Reversal rows,
-  whose status is hardcoded to `'paid'`, correctly stay "Paid".
+- **Branch protection (`master-protection`).** Active ruleset requires PR + 17 status checks for non-admins while allowing repo admin bypass (`RepositoryRole: always`).
+- **Guest portal forgot-password & max-booking-window: won't do.** Intentionally omitted by product decision.
+- **Zero-balance un-invoiced ledger rows read "Draft", not "Paid".** Matches `ui_status='draft'` backend semantics; reversal rows remain "Paid".

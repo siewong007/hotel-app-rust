@@ -65,7 +65,7 @@ contains a trailing space after "SSD". Always double-quote paths in shell comman
 > confirmed, say "unconfirmed" — do not fill gaps from memory.
 > ACCEPTANCE CRITERIA: (1) direct answer in first 3 lines; (2) every claim tagged
 > verified/inferred with source; (3) long findings written to
-> "docs/working-notes/reports/{topic}-{YYYY-MM-DD}.md" (or session scratchpad), not pasted.
+> the session scratchpad (never committed under `docs/`), not pasted.
 > REPORT FORMAT: answer, 3–5 key facts with tags, path to the report file. Max 15 lines.
 
 ## 5. REVIEW (fresh-context general-purpose, sonnet; opus for auth/money/schema)

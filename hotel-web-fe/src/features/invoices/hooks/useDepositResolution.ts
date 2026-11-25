@@ -19,7 +19,7 @@ import { MIN_STAFF_REASON_LENGTH } from '../utils/payments';
  * Derived deposit lifecycle for the checkout invoice. The payments ledger is
  * the sole money authority; `bookings.deposit_{paid,amount}` is a synced
  * mirror that a legacy booking can assert with no payment rows at all.
- * See docs/architecture/system-flows.md §Checkout deposit guard.
+ * See docs/architecture/overview.md §Checkout deposit guard.
  */
 export type DepositResolutionStatus =
   | 'none'

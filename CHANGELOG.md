@@ -1,8 +1,8 @@
 # Changelog
 
 Release history for the Hotel Management System — the backend API (`hotel-app-be`),
-the web application (`hotel-web-fe`) and the desktop application (`hotel-desktop`),
-which are versioned and released together.
+the web application (`hotel-web-fe`), the desktop application (`hotel-desktop`),
+and the native Android staff application (`hotel-android`), which version together at `0.3.0`.
 
 Entries describe what shipped in each release, grouped by user impact. Internal
 refactors, dependency bumps and tooling changes are omitted unless they affect
@@ -11,15 +11,14 @@ users, administrators, deployment or security. Published releases and downloads:
 
 ## Unreleased (since v0.3.0)
 
-Compiled 2026-11-18 from `git log v0.3.0..master`. The public face of the
-property arrives: a four-language landing page for Salim Inn with live Sibu
-weather and atmosphere relighting. Multi-room group bookings, arrival-day room
-holds, channel settlement locks, automatic session retention, and a revised
-manager/admin role hierarchy ship across the PMS, alongside an upgraded
-four-language Malaysian and Sarawakian legal and PDPA compliance corpus
-(`2026-11-18`).
+Updated `2026-11-25` from `v0.3.0..master`. Highlights include the native Kotlin/Jetpack Compose Material 3 Android staff application (`hotel-android/`), database schema patch `0032` full-audit fixes, Simplified Chinese admin and guest user guides, the public four-language Salim Inn landing page, multi-room group bookings (`booking_groups`), arrival-day room holds, channel settlement locks, automatic session retention, revised `manager`/`admin` role hierarchy, and an upgraded four-language Malaysian/Sarawakian legal and PDPA corpus (`2026-11-18`).
 
 ### Highlights
+
+- **Native Android staff application (`hotel-android/` + `.github/workflows/android-ci.yml`)**:
+  - Kotlin + Jetpack Compose Material 3 adaptive phone/tablet application covering Dashboard, Bookings (walk-ins, folios, check-in/out/void, Android `PrintManager` receipts), Rooms, Housekeeping, Maintenance, Guest 360 CRM, eKYC Review Queue, Pending Payment Approvals, Global Search, and Night Audit preview
+  - Staff-only login guard rejecting guest-only accounts, Android Keystore AES-GCM encrypted refresh cookie storage, `BiometricPrompt` cold-launch lock, Credential Manager passkeys & saved credentials, strict RBAC across navigation/deep-links/search/notifications/actions, WebSocket realtime sync, SQLite offline read cache + WorkManager mutation queue, Glance home-screen widget, and automated unit + live-backend E2E tests
+- **Simplified Chinese operational & guest manuals** (`docs/guides/admin-user-guide-zh.{md,pdf}`, `docs/guides/guest-user-guide-zh.{md,pdf}`) with full UI walkthrough screenshots
 
 - **Public landing page** (`/salim-inn/`, where cookie-less visitors to `/` now
   land):
@@ -120,28 +119,14 @@ four-language Malaysian and Sarawakian legal and PDPA compliance corpus
 - Database-enforced append-only row and `TRUNCATE` triggers protect
   `audit_logs` and all monthly/default partitions (`prevent_audit_log_mutation`).
 - Least-privilege runtime PostgreSQL role (`hotel_app`) provisioned on deploy.
+- Production startup enforces `TOTP_ENCRYPTION_KEY` presence and length/format (`32`-byte base64/hex or ≥32-char ASCII) under `ENVIRONMENT=production`.
 - `dompurify` raised to `^3.4.17` (GHSA-p98j-92pf-mc4p).
 
 ### Upgrade and deployment notes
 
-- **Schema patches 0009–0031** run in the deploy step:
-  - 0009: booking smoking preference
-  - 0010: `online_inventory:manage`
-  - 0011: `default_locale` plus `system_settings.default_value`
-  - 0012 and 0014: the new-reservations clock and its 07:00 default
-  - 0013: the staff-notifications table for databases created before it
-  - 0015: drops the SQL/PGQ `hotel_graph` property graph
-  - 0016 and 0021: late audit-log partition creation and row-move without `SPLIT PARTITION`
-  - 0017: automatic session retention settings and indexes
-  - 0018: arrival-day-only room holds (`reconcile_room_holds`)
-  - 0019 and 0020: payment void reason, closed-day reversal date, and reception void permission
-  - 0022: database-wide `audit_logs` append-only partition triggers
-  - 0023: channel settlement payment-method locks
-  - 0024: runtime role capability adjustments for `hotel_app`
-  - 0025, 0026, 0027 and 0029: `booking_groups` schema, group payment columns, per-room voucher split/resplit
-  - 0028: `job_runs` convergence patch for pre-existing live databases
-  - 0030: `public.hotel_currency()` defaults replacing hardcoded `'USD'`
-  - 0031: `manager` role priority elevation and user-management / `data_transfer:*` ownership transfer
+- **Schema patches 0009–0032** run in the deploy step:
+  - 0009–0031: smoking preference, `online_inventory:manage`, `default_locale`, new-reservations visibility clock, `staff_notifications`, PG19 SQL/PGQ & partition-split removals, session retention, arrival-day room holds, payment void reversals, `audit_logs` append-only triggers, channel settlement locks, runtime `hotel_app` privileges, `booking_groups`, `job_runs`, `hotel_currency()`, and `manager` ownership of user/team/role/`data_transfer:*` management.
+  - 0032 (`full-audit-schema-fixes`): adds `late_checkout` to `bookings_status_check` and overlap exclusion (`bookings_no_room_date_overlap` with complimentary statuses), fixes `customer_ledgers.guest_id` FK → `guests(id)`, guards active ledger reversals & room charges with partial unique indexes, adds `loyalty_rewards_inventory_non_negative`, drops duplicate `fk_room_changes_guest`, hardens `generate_folio_number()` & `generate_invoice_number()` (advisory lock + `BIGINT`), updates `get_unposted_bookings`, `run_night_audit`, room-status/housekeeping triggers, reporting views, and loyalty route access policies.
 - **Consent document generation `2026-11-18`:** `terms_of_service`,
   `privacy_notice`, `payment_terms`, and `ekyc_biometric` all advance to
   version `2026-11-18`; clients running older bundles are prompted to reload and
@@ -156,7 +141,7 @@ four-language Malaysian and Sarawakian legal and PDPA compliance corpus
   and `SPLIT/MERGE PARTITION`, both of which the schema used. Patches 0015 and
   0016 remove those uses. Apply them while a database still runs `19beta3`,
   before any dump-and-restore onto beta4, the RC or GA; see
-  [docs/guides/postgres-engine-upgrade.md](docs/guides/postgres-engine-upgrade.md).
+  [docs/guides/deployment.md](docs/guides/deployment.md#postgresql-engine-upgrade-dump-and-restore).
 - nginx sends relative redirects, so `/` no longer bounces through `http`.
   Deploys prune stale per-SHA release images during the disk pre-check.
 

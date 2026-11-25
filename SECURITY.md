@@ -19,7 +19,7 @@ Include:
 
 - A clear description of the issue.
 - Steps to reproduce or proof-of-concept details.
-- Affected component: backend, frontend, desktop app, database, CI, or documentation.
+- Affected component: backend, frontend, desktop app, Android app, database, CI, or documentation.
 - Potential impact and any known mitigations.
 - Your contact information for follow-up.
 
@@ -34,6 +34,7 @@ Relevant reports include, but are not limited to:
 - Unsafe file upload or path traversal behavior.
 - Cross-site scripting or unsafe frontend rendering.
 - Insecure desktop sidecar or bundled database behavior.
+- Bypass of Android staff-only guard, Keystore cookie encryption, biometric cold lock, or cleartext restriction.
 
 ## Out of Scope
 
@@ -56,3 +57,4 @@ The maintainer will make a best-effort review, confirm whether the issue is vali
 - Multi-replica deployments share rate limits, cache invalidation, and scheduler leadership through PostgreSQL, but still require sticky sessions for staged upload files, import-job polling, and WebSocket connections (see `docs/guides/deployment.md`).
 - Set `TRUST_PROXY_HEADERS=true` only behind a trusted TLS-terminating proxy that overwrites `X-Forwarded-For` and `X-Real-IP`.
 - The desktop bundle stores its generated local PostgreSQL credential in the app data directory with restrictive file permissions; do not expose or sync that directory to untrusted users.
+- The Android release build enforces `ALLOW_CLEARTEXT=false`, keeps JWT access tokens in memory, stores refresh cookies via Android Keystore (`EncryptedCookieJar`), rejects guest-only logins (`isGuestOnlyAccount`), and enforces backend `<resource>:<action>` permissions across screens/deep links ([docs/guides/android.md](docs/guides/android.md), [docs/security.md](docs/security.md)).

@@ -1,7 +1,6 @@
 # Dependencies
 
-Architecturally significant dependencies and the reasoning behind them — not a
-lockfile dump. Last reviewed 2026-11-18 (initial modernization pass: 2026-09-13).
+Architecturally significant dependencies and the reasoning behind them — not a lockfile dump. Last reviewed `2026-11-25`.
 
 ## Frontend (`hotel-web-fe`)
 
@@ -89,29 +88,28 @@ builds), `lazy_static` (replaced by `std::sync::LazyLock`).
 | tauri 2 + shell/updater/process plugins | Desktop shell | Updater shares the reqwest instance via feature unification |
 | reqwest 0.13 | Outbound HTTP | Same `rustls` feature set as backend; `charset`/`http2`/`system-proxy` kept for the updater |
 | tokio, serde/serde_json, thiserror 2, log/env_logger | Plumbing | |
-| tar 0.4, flate2 1 | Managed backup archives | Uploads `.tar.gz` bundling & extraction (`guides/desktop-backup-restore.md`) |
+| tar 0.4, flate2 1 | Managed backup archives | Uploads `.tar.gz` bundling & extraction (`guides/desktop.md`) |
 | rand 0.10, sha2 0.11, hex, bcrypt | Local crypto | Patch checksums, bootstrap credentials |
 | dirs 7 | Platform data dirs | Embedded PostgreSQL location |
 
-## 2026-09-13 modernization changes
+## Android (`hotel-android`)
 
-**Removed:** `@mui/lab` (unused), `react-to-print` (unused), `lazy_static`
-(stdlib `LazyLock`), `@types/babel__core` (Babel 8 ships types).
+Version catalog: `hotel-android/gradle/libs.versions.toml` (`agp 8.13.2`, `kotlin 2.2.21`, `compileSdk`/`targetSdk 36`, `minSdk 26`).
 
-**Upgraded:** TanStack Table 8→9 (feature-gated API migration in `DataTable`),
-web-vitals 4→6 (`onFID`→`onINP`), vitest 4→5 + coverage + jsdom 29→30,
-`@babel/core` 7→8; backend `jsonwebtoken` 10→11, `reqwest` 0.12→0.13,
-`totp-rs` 5→6, `constant_time_eq` 0.5→0.6, `dirs` 5→7; desktop `reqwest`
-0.12→0.13, `thiserror` 1→2, `rand` 0.8→0.10, `sha2` 0.10→0.11, `dirs` 5→7,
-edition 2021→2024.
+| Library | Purpose | Notes |
+|---|---|---|
+| Jetpack Compose BOM `2025.10.00` + Material 3 + `material3-window-size-class` | UI & adaptive navigation | Phone `NavigationBar` vs tablet `NavigationRail`; Material 3 icons |
+| `androidx.navigation:navigation-compose` `2.9.0` + `androidx.lifecycle` `2.9.0` | Navigation & ViewModels | Strict RBAC route & deep-link enforcement |
+| Retrofit `2.11.0` + OkHttp `4.12.0` + `kotlinx-serialization-json` `1.9.0` | HTTP + WebSocket | Reuses backend `/api/*` + `/api/updates/socket`; zero codegen plugins needed |
+| `androidx.datastore:datastore-preferences` `1.1.7` + Android SQLite | Preferences & offline store | Server config + offline read cache & pending mutation queue (`HotelLocalDatabase`) |
+| `androidx.biometric` `1.1.0` + `androidx.credentials` `1.5.0` | Biometric cold-lock & passkeys | Hardware-backed lock + Credential Manager saved logins/WebAuthn |
+| `androidx.work:work-runtime-ktx` `2.10.1` | Background sync & widget refresh | Connectivity-gated `SyncPendingMutationsWorker` + `WidgetRefreshWorker` |
+| `androidx.glance:glance-{appwidget,material3}` `1.1.1` | Home-screen widget | `HotelOpsWidget` operational metrics |
+| `androidx.core:core-splashscreen` `1.0.1` + `androidx.profileinstaller` `1.4.1` | Cold start UX | System splash integration + baseline profile optimization |
+| JUnit `4.13.2` + `kotlinx-coroutines-test` `1.10.2` + `okhttp-mockwebserver` | Testing | Offline ViewModel/network suite + env-gated `LiveBackendE2eTest` |
 
-**TLS trust store:** reqwest 0.13 replaced `rustls-tls` (bundled webpki roots)
-with `rustls` (rustls + aws-lc + platform verifier). The deploy image installs
-`ca-certificates`, and platform verification additionally honors enterprise
-TLS-inspection CAs — important for hotel networks.
+## Modernization & TLS Notes
 
-**sqlx 0.8→0.9:** the `SqlSafeStr` bound forced `AssertSqlSafe` wrappers at
-~175 dynamic-SQL call sites (all template-built SQL: constant fragments +
-`param!` placeholders — user input only ever travels via `.bind()`). Feature
-split: `runtime-tokio-rustls` → `runtime-tokio` + `tls-rustls-ring-webpki`
-(same ring+webpki DB TLS stack). Full suite green on live PostgreSQL.
+- **TLS trust store (`reqwest 0.13`)**: `rustls` uses `aws-lc` + platform cert verifier (honoring enterprise TLS-inspection CAs, paired with `ca-certificates` in containers); `lettre` uses `tokio1-rustls-tls` with zero OpenSSL runtime dependencies.
+- **`sqlx 0.9`**: Runtime-checked queries wrap template-built dynamic SQL in `AssertSqlSafe` (literals + `param!` placeholders only; values stay `.bind()`ed); DB TLS runs via `tls-rustls-ring-webpki`.
+- **Frontend toolchain pins**: `@mui/lab`, `react-to-print`, `eslint-plugin-react-compiler` (folded into `eslint-plugin-react-hooks` v7), and `lazy_static` (replaced by `std::sync::LazyLock`) were removed in `2026-09`.

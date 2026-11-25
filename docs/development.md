@@ -1,45 +1,37 @@
 # Development
 
-Verified setup and commands. Run each project's commands from its own
-directory — there is no root workspace.
+Verified setup and commands (`2026-11-25`). Run each project's commands from its own directory — there is no root workspace.
 
 ## Prerequisites
 
 | Tool | Version | Purpose |
 |---|---|---|
-| Rust + Cargo | 1.95.0 (edition 2024) | backend + desktop |
-| Bun | 1.3.14 | frontend/desktop package manager **and** script runtime — not npm, not node. CI pins this exact version (`ci.yml` → `oven-sh/setup-bun`) |
-| Node.js | optional | Nothing in the repo requires it: every script is invoked as `bun …` (the desktop `.mjs` scripts re-spawn via `process.execPath`, i.e. bun), and the CI frontend job installs no Node at all. Install it only if you want `node`/`npx` for ad-hoc tooling |
-| Docker (OrbStack/Desktop) | any recent | PostgreSQL for dev + backend tests |
-| PostgreSQL 19 | `postgres:19beta3` image | tracked beta until GA (see ongoing-dev note) |
+| Rust + Cargo | `1.95.0` (`rust-toolchain.toml`, edition 2024) | backend + desktop |
+| Bun | `1.3.14` (`.bun-version`, `ci.yml`) | frontend/desktop package manager & script runtime |
+| JDK + Android SDK | JDK `17` + Android SDK `36` + Gradle `8.13` (wrapper included) | native Android staff app (`hotel-android/`) |
+| Docker | any recent | PostgreSQL for dev + backend integration tests |
+| PostgreSQL 19 | `postgres:19beta3` image | tracked beta until GA ([ongoing-dev.md](ongoing-dev.md)) |
 
-Optional: `psql`/`pg_dump` on PATH for the schema-drift/patch-lifecycle tests
-(CI has them; locally they can be shimmed through the dev container — see
-Troubleshooting).
+Optional: `protoc` (`brew install protobuf`) for backend gRPC builds; `psql`/`pg_dump` (`libpq` on macOS) for patch/schema-drift tests.
 
 ## Install
 
 ```bash
 cd hotel-web-fe && bun install        # frontend deps
-cd ../hotel-desktop && bun install    # desktop deps (tauri scripts)
+cd ../hotel-desktop && bun install    # desktop scripts & Tauri CLI
 ```
 
-Backend needs no install step — `cargo` fetches on first build.
+Backend (`cargo`) and Android (`./gradlew`) fetch dependencies automatically on first run. Install repo git hooks once with `make install-hooks`.
 
 ## Environment
 
 Three example files, each scoped to its consumer:
 
-- `.env.example` (root) — what `docker compose` reads: `POSTGRES_*`, ports,
-  `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, image tags.
-- `hotel-app-be/.env.example` — the backend-process reference:
-  `DATABASE_URL`, `JWT_SECRET` (≥32 chars), `ALLOWED_ORIGINS`, `SMTP_*`,
-  `TOTP_ENCRYPTION_KEY`, `PASSKEY_RP_ID`, `GOOGLE_CLIENT_ID`, `TURNSTILE_*`,
-  `SESSION_*` retention overrides, pool tuning.
-- `hotel-web-fe/.env.example` — optional build-time frontend variables
-  (`VITE_API_URL`, `VITE_GOOGLE_CLIENT_ID`, `VITE_TURNSTILE_SITE_KEY`).
+- `.env.example` (root) — Docker Compose (`POSTGRES_*`, ports, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, image tags).
+- `hotel-app-be/.env.example` — full backend-process reference (`DATABASE_URL`, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, `ALLOWED_ORIGINS`, `SMTP_*`, `PASSKEY_RP_ID`, `GOOGLE_CLIENT_ID`, `TURNSTILE_*`, `SESSION_*`, pool tuning).
+- `hotel-web-fe/.env.example` — optional build-time `VITE_*` variables (`VITE_GOOGLE_CLIENT_ID`, `VITE_TURNSTILE_SITE_KEY`, `VITE_API_URL`, `VITE_BACKEND_TARGET`, `VITE_GRPC_CONTEXTS`, `VITE_APP_TARGET`, `VITE_DESKTOP_UPDATER_ENABLED`).
 
-Copy → `.env` and fill in. `docker compose` aborts on blank `:?` secrets.
+Copy → `.env` and fill in. `docker compose` aborts on blank `:?` secrets. Note that `hotel-app-be` debug/staging runs load `.env`, while Android debug APKs default to `http://10.0.2.2:3030` (customizable at runtime in-app).
 
 ## Run
 
@@ -48,6 +40,7 @@ make docker-up                                   # start postgres + (optionally)
 cd hotel-app-be && cargo run --bin hotel-app-be  # API on :3030 (bare `cargo run` errors: multiple bins)
 cd hotel-web-fe && bun run start                 # Vite dev on :3000, proxies /api → 127.0.0.1:3030
 cd hotel-desktop && bun run dev                  # Tauri dev: sidecar backend + embedded PG
+cd hotel-android && ./gradlew installDebug       # install Android staff app onto emulator/device
 ```
 
 ## Database
@@ -154,16 +147,22 @@ Desktop (`hotel-desktop/`):
 
 ```bash
 cd src-tauri && cargo check && cargo clippy --all-targets -- -D warnings
-bun run build          # installer(s) for the current OS; build:no-bundle = binary only
-bun run build:nsis     # Windows installer | build:deb / build:appimage / build:rpm on Linux
-bun run package:portable  # portable archive of the release output
+bun run test:scripts   # 31 script unit tests (provision-pgsql / sync)
+bun run build          # installer(s) for the current OS; build:fast = debug without installer
+bun run package:portable
 ```
 
-Cross-platform packaging (supported targets, signing, PostgreSQL provisioning,
-CI): `docs/guides/desktop-packaging.md`.
+Android (`hotel-android/` — see [guides/android.md](guides/android.md)):
 
-Root Makefile: `make check-all`, `make test-all`, `make lint-all`,
-`make help`.
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --console=plain
+# Live multi-role E2E against a running PostgreSQL 19 + hotel-app-be server:
+HOTEL_E2E_BASE_URL=http://127.0.0.1:13039 ./gradlew testDebugUnitTest --tests "com.hotelapp.staff.e2e.LiveBackendE2eTest" --rerun-tasks
+```
+
+Cross-platform desktop packaging, signing, and PostgreSQL provisioning: [guides/desktop.md](guides/desktop.md).
+
+Root Makefile: `make check-all`, `make test-all`, `make lint-all`, `make format`, `make build`, `make install-hooks`, `make docs-check`, `make help`.
 
 `make test-be` (also `make test-be-pg`) and `make test-all` reject a missing or
 blank `DATABASE_URL` before launching tests, including parallel Make runs.

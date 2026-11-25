@@ -48,6 +48,15 @@ sections, and pure helpers before changing behavior.
 - PostgreSQL initialization, status checks, and seed/bootstrap handling belong in separate modules when touched.
 - Desktop database resources are derived from backend resources by the sync scripts. Do not hand-edit synced resources without also updating the backend source and the script.
 
+### Android (`hotel-android/`)
+
+`feature/<domain>/<Screen>.kt` → `feature/<domain>/<Domain>ViewModel.kt` → `data/repository/<Domain>Repository.kt` → `data/api/<Domain>Api.kt` + `core/`.
+
+- Compose screens render state from `StateFlow` and emit user events; avoid network or SQLite logic in composables.
+- ViewModels coordinate repository calls, offline fallback banners, inline mutation errors, and RBAC checks (`StaffSession`).
+- Repositories wrap Retrofit APIs, `HotelLocalDatabase` SQLite caches, and `OfflineOpsCoordinator` pending mutation queues.
+- Core packages own auth (`SessionManager`, `StaffCredentialHelper`), config (`ServerConfigStore`), Material 3 theme (`core/design/`), formatters (`DateFormatter`, `MoneyFormatter`, `StatusFormatter`), network/WebSocket (`NetworkFactory`, `EncryptedCookieJar`, `RealtimeSocketClient`), `StaffNotificationManager`, and `FolioPrinter`.
+
 ## Folder structure targets
 
 All backend domains use the domain-module layout:
@@ -86,6 +95,15 @@ src/features/<domain>/
 Refactored desktop Rust moves toward `src-tauri/src/{commands,process,postgres}/` plus
 `config.rs` and `paths.rs`.
 
+Android sources live in `hotel-android/app/src/main/java/com/hotelapp/staff/`:
+
+```text
+core/{auth,config,design,format,network,notifications,print,storage,sync,ui}/
+data/{api,dto,repository}/
+feature/{auth,bookings,dashboard,ekyc,guests,housekeeping,maintenance,more,notifications,payments,rooms,search,server}/
+navigation/  widget/  HotelStaffApp.kt  MainActivity.kt
+```
+
 ## Naming conventions
 
 ### Rust
@@ -103,6 +121,11 @@ Refactored desktop Rust moves toward `src-tauri/src/{commands,process,postgres}/
 - Services: `<Domain>Service` in `<domain>.service.ts` until moved into feature-local `api.ts`.
 - Types and interfaces: `PascalCase`. Constants: `SCREAMING_SNAKE_CASE` for fixed values.
 - Event handlers: `handleX`. Boolean props/state: `isX`, `hasX`, `canX`, `shouldX`.
+
+### Kotlin / Android
+
+- Package folders lowercase; Composables & classes in `PascalCase` (`<Domain>Screen.kt`, `<Domain>ViewModel.kt`, `<Domain>Repository.kt`, `<Domain>Api.kt`).
+- State classes end in `UiState`; serialized backend fields declare explicit `@SerialName("snake_case")`.
 
 ## Testing expectations
 
@@ -122,6 +145,8 @@ and the attribute is stale.
 The frontend runs Vitest with Testing Library (`bun run test`). `typecheck`, `lint`, and
 `test` are three independent gates — vitest transpiles without type information, so code
 using APIs newer than `lib: ES2024` passes tests and fails typecheck.
+
+Android runs `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --console=plain` (`LiveBackendE2eTest` skips without `HOTEL_E2E_BASE_URL` and counts 65 offline tests + 2 E2E when configured).
 
 ## Dependency rules
 

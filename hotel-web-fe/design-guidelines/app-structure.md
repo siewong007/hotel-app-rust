@@ -2,8 +2,11 @@
 
 This design system serves a **hotel property-management system (PMS)**. One React
 frontend ships to two platforms with identical pages: the staff web app and a Tauri
-desktop app. Guest-facing routes serve guests on their own devices (mobile-first).
-When designing a screen, match the conventions of the area it belongs to below.
+desktop app. A separate native Kotlin/Jetpack Compose Material 3 Android staff app
+(`hotel-android/`, documented in `docs/guides/android.md`) consumes the same backend API
+using aligned dark/light/status semantics. Guest-facing routes serve guests on their own
+devices (mobile-first). When designing a screen, match the conventions of the area it
+belongs to below.
 
 Regenerated 2026-10-05 from `src/navigation/routeRegistry.tsx` and `navGroups.ts`. If
 the routes or the sidebar change, update this file and re-run the design-sync driver.

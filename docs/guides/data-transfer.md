@@ -172,7 +172,7 @@ One JSON object, emitted in a fixed key order. Downloaded as
   "exportId": "3f8a2c1e-7b9d-4e5f-9a1c-0d2e4f6a8b0c",
   "exportedAt": "2026-09-14T09:25:30.123456+00:00",
   "applicationVersion": "0.3.0",
-  "source": {"environment": "production", "databaseProvider": "postgresql", "schemaRevision": "1.27"},
+  "source": {"environment": "production", "databaseProvider": "postgresql", "schemaRevision": "1.32"},
   "manifest": {
     "entities": [
       {"name": "public.amenities", "primaryKey": ["id"], "columns": ["id", "name", "created_at"]}
@@ -189,7 +189,7 @@ One JSON object, emitted in a fixed key order. Downloaded as
     "public.bookings": []
   },
   "integrity": {
-    "entities": 77,
+    "entities": 76,
     "rows": 49069,
     "entityRows": {"public.amenities": 12, "public.bookings": 8021},
     "completedAt": "2026-09-14T09:25:31.700000+00:00"
@@ -212,7 +212,7 @@ Field by field:
 | `applicationVersion` | The backend's `CARGO_PKG_VERSION`. Preview warns when it differs from the importing build. It does **not** change per deploy (the cloud and a months-old desktop release can both say `0.3.0`), so it is no evidence the two schemas match — `source.schemaRevision` is. |
 | `source.environment` | The exporter's `ENVIRONMENT`/`APP_ENV`, lowercased: `development`, `staging`, or `production`. Preview warns when it differs from the destination's. |
 | `source.databaseProvider` | Always `"postgresql"`. |
-| `source.schemaRevision` | The source database's highest applied patch, `"<generation>.<version>"` from `hotel_schema_revisions` (e.g. `"1.27"`). Preview warns when it differs from the destination's and says which side is newer; absent on files from older builds (preview warns that it cannot compare). Deliberately a string: the upload sniff — in every released build — reads `"version":2…`/`3…` in the first 4 KB as a retired document, so a nested `"version":27` would make new exports unimportable. Older importers ignore the key. |
+| `source.schemaRevision` | The source database's highest applied patch, `"<generation>.<version>"` from `hotel_schema_revisions` (e.g. `"1.32"`). Preview warns when it differs from the destination's and says which side is newer; absent on files from older builds (preview warns that it cannot compare). Deliberately a string: the upload sniff — in every released build — reads `"version":2…`/`3…` in the first 4 KB as a retired document, so a nested `"version":27` would make new exports unimportable. Older importers ignore the key. |
 | `manifest.entities` | One entry per emitted entity, in the same alphabetical order `tables` uses: `name` (schema-qualified), `primaryKey` (column list; `[]` for keyless tables), `columns` (the exported columns, schema order). Carries **no** row counts — those land in `integrity`. |
 | `manifest.exclusions` | Every schema table **not** in the transferable set, with a reason code — nothing is silently omitted. See [Entity coverage](#entity-coverage). |
 | `manifest.omitted` | Standard scope only: the `SENSITIVE_TABLES` entity names left out of the file — names only, never rows. |
@@ -228,7 +228,7 @@ fails to parse at all.
 
 ## Entity coverage
 
-77 tables are transferable. The catalog lives in
+76 tables are transferable. The catalog lives in
 `modules/data_transfer/service.rs::TABLE_INSERT_ORDER` (parents before children), with
 `modules/data_transfer/repository.rs::KNOWN_TABLES` as a deliberately identical mirror
 that whitelist-checks every table name interpolated into SQL — a test fails if
@@ -239,7 +239,7 @@ schema.
 Each transferable table is additionally classified in `SENSITIVE_TABLES`
 (same file): the sensitive set carries guest identity/contact data, bookings,
 payments, ledgers, loyalty movement, operational history, support threads,
-consent records, and staff-linked records — 52 tables today. The remainder
+consent records, and staff-linked records — 51 tables today. The remainder
 (amenities, rate plans, room types, promotions definitions, …) is the
 non-sensitive set a `standard` export emits. The classification is explicit,
 not derived: the registry test fails when a new transferable table lands
@@ -253,8 +253,7 @@ Grouped by domain:
   `corporate_accounts`, `corporate_account_contacts`, `email_templates`,
   `rate_plans`, `reward_catalog`, `services`, `system_settings`
 - **Guests:** `guests`, `guest_documents`, `guest_notes`, `guest_preferences`,
-  `guest_segments`, `guest_complimentary_credits`, `guest_reviews`,
-  `user_guests`
+  `guest_segments`, `guest_complimentary_credits`, `guest_reviews`
 - **Consent & notifications:** `email_suppressions`,
   `notification_subscriptions`, `notification_consent_events`,
   `consent_records`, `staff_notifications`, `staff_notification_reads`
@@ -277,8 +276,8 @@ Grouped by domain:
   `self_checkin_events`
 - **Support:** `support_conversations`, `support_messages`, `support_events`
 
-32 tables are **protected** (`PROTECTED_TABLE_ORDER`, plus
-`public.audit_logs_default` in `EXCLUDED_TABLES`). They are excluded from
+34 entries are **excluded** (`EXCLUDED_TABLES`, backed by 33 tables in `PROTECTED_TABLE_ORDER` plus
+`public.audit_logs_default`). They are excluded from
 `standard`, `full` and `backup` documents and emitted in those files'
 `manifest.exclusions` with one of five reason codes. A `system` export carries
 them instead, and its manifest lists only what it genuinely left out — the
@@ -289,7 +288,7 @@ admin, step-up and encryption rather than available at `full`.
 
 | Reason | Tables | Why |
 |---|---|---|
-| `credentials_and_auth_state` | `public.users`, `public.roles`, `public.permissions`, `public.role_permissions`, `public.user_roles`, `public.user_permissions`, `public.teams`, `public.team_members`, `public.team_roles`, `public.route_access_policies` | Password hashes, TOTP seeds, RBAC and team role grants — exporting hands every export holder the credential store; importing could plant a forged `is_super_admin` or privileged team grant |
+| `credentials_and_auth_state` | `public.users`, `public.roles`, `public.permissions`, `public.role_permissions`, `public.user_roles`, `public.user_permissions`, `public.route_access_policies`, `public.teams`, `public.team_members`, `public.team_roles`, `public.user_guests` | Password hashes, TOTP seeds, RBAC/team grants, and delegated user–guest links — exporting hands every export holder the credential store; importing could plant a forged `is_super_admin` or privileged grant |
 | `session_or_token_material` | `public.refresh_tokens`, `public.user_sessions`, `public.passkeys`, `public.passkey_challenges`, `public.two_factor_challenges`, `public.guest_portal_sessions`, `public.payment_retry_capabilities` | Live sessions and token/challenge state |
 | `sensitive_ekyc_pii` | `public.ekyc_verifications`, `public.ekyc_decision_history`, `public.ekyc_access_events`, `public.ekyc_sensitive_reveals`, `public.ekyc_idempotency_keys`, `public.ekyc_notes`, `public.ekyc_reason_codes` | Identity documents and biometric evidence |
 | `ephemeral_queue_state` | `public.email_deliveries`, `public.support_action_idempotency_keys`, `public.support_guest_request_idempotency_keys` | Live send/request queues — re-importing would replay sends |
@@ -479,7 +478,7 @@ excluded one is checked per row against the destination's existing keys.
   `actor_user_id`, `assigned_to_user_id`, …, `AUDIT_USER_FK_COLUMNS`) —
   **remap to the importing admin**, so attribution survives the missing account.
 - *Nullable non-audit columns* become `NULL`.
-- *Required non-audit columns* (e.g. `user_guests.user_id`) — the row is
+- *Required non-audit columns* (when present on a transferable row referencing a missing excluded parent) — the row is
   skipped, counted, and reported in `relationshipProblems` on both the preview
   and the finished job's report. The importer never fabricates a user.
 

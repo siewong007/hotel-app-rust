@@ -39,9 +39,8 @@ CODEX="/Applications/Codex.app/Contents/Resources/codex"
   `--dangerously-bypass-hook-trust`.
 - `--ephemeral` = no session files persisted; drop it if you want
   `codex exec resume` to work later.
-- `-o FILE` writes only the final message — point it at
-  `docs/working-notes/reports/codex-<topic>-<YYYY-MM-DD>.md` (deleted on merge per
-  `docs/working-notes/README.md`) or the session scratchpad for throwaway output.
+- `-o FILE` writes only the final message — point it at the session
+  scratchpad (throwaway output stays out of `docs/`, per `docs/README.md`).
   Add `--json` only when you need the full event log.
 - `"$CODEX" exec review` runs Codex's own code review of the current repo —
   usable as an independent-vendor review pass.

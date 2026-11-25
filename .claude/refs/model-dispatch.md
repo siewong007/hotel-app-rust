@@ -63,9 +63,9 @@ Templates for each task type: `.claude/refs/delegation-templates.md`. Use them.
 ## Reporting contract (put this in every delegation prompt)
 
 Subagents return CONCLUSIONS and `file:line` references only. Anything long
-(logs, scan results, drafts, diffs) gets written to a file — active working notes
-under `docs/working-notes/` (deleted on merge) or `.claude/refs/`, throwaway output in the session
-scratchpad — and only the path comes back. Final message ≤15 lines unless the
+(logs, scan results, drafts, diffs) gets written to a file — persistent agent refs
+under `.claude/refs/` or throwaway output in the session
+scratchpad (never leave merged plans in `docs/`) — and only the path comes back. Final message ≤15 lines unless the
 template says otherwise. If a subagent replies with a wall of text, that is a
 failed delegation prompt; fix the prompt, not the agent.
 

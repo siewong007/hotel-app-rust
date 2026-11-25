@@ -3,7 +3,7 @@
 > **适用对象**：浏览 Salim Inn 酒店官网的访客、免注册快速下单的散客、注册会员及即将入住或已入住的宾客。  
 > **关联文档**：
 > - 管理员与酒店员工操作指南：[admin-user-guide-zh.md](admin-user-guide-zh.md)
-> - 国际化和术语规范（中英马三语对照）：[i18n-glossary.md](i18n-glossary.md)
+> - 国际化和术语规范（中英马对照）：[internationalization.md](internationalization.md)
 >
 > **阅读提示**：本指南严格对齐简体中文界面（`zh-CN`）与实际开放的宾客端功能。所有价格均以**马来西亚林吉特（MYR）**计价，时间以酒店当地时间（**`Asia/Kuching` UTC+8**）为准。
 

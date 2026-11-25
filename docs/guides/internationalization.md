@@ -1,193 +1,125 @@
-# Internationalisation
+# Internationalisation & Terminology
 
-How to add a translated string, translate an existing screen, and add a
-language. The design rationale is [ADR 012](../architecture/decision-records.md); this file
-is the working guide.
+Canonical guide for multi-language implementation, bundle parity enforcement, formatting rules, UI/locale coverage (`2026-11-25`), and the EN/ZH/MS/ZH-TW domain terminology glossary. Design rationale lives in [ADR 012](../architecture/decision-records.md#adr-012-hand-rolled-internationalisation-on-intl).
 
-Supported today: **English (`en`)**, **Bahasa Melayu (`ms`)**,
-**简体中文 (`zh`, `Intl` tag `zh-CN`)**, and **繁體中文 (`zh-TW`)**. The full
-coverage audit lives in
-[../reference/i18n-coverage-inventory.md](../reference/i18n-coverage-inventory.md).
+Supported locales: **English (`en`, source of truth)**, **Bahasa Melayu (`ms`)**, **简体中文 (`zh`, `Intl` tag `zh-CN`)**, and **繁體中文 (`zh-TW`)**.
 
-## Where things live
+---
+
+## 1. Where Things Live
 
 | Concern | Location |
 |---|---|
-| Locale registry (codes, `Intl` tags, native names, direction) | `hotel-web-fe/src/i18n/locales.ts` |
+| Locale registry (`LOCALES`, native names, direction) | `hotel-web-fe/src/i18n/locales.ts` |
 | Translation engine (lookup, plurals, interpolation) | `hotel-web-fe/src/i18n/translator.ts` |
-| Active locale, persistence, precedence | `hotel-web-fe/src/i18n/localeStore.ts` |
-| Web bundles | `hotel-web-fe/src/i18n/resources/<locale>/<namespace>.json` — `en` is bundled; `ms`/`zh`/`zh-TW` are one lazy chunk each (`ensureLocaleLoaded` in `resources/index.ts`) |
-| `Intl` formatters (number, percent, relative time) | `hotel-web-fe/src/i18n/format.ts` |
+| Active locale store & precedence | `hotel-web-fe/src/i18n/localeStore.ts` |
+| Web bundles (30 namespaces per locale) | `hotel-web-fe/src/i18n/resources/<locale>/<ns>.json` (`en` bundled; `ms`/`zh`/`zh-TW` lazy chunks via `ensureLocaleLoaded`) |
+| `Intl` formatters | `hotel-web-fe/src/i18n/format.ts` |
 | Language switcher | `hotel-web-fe/src/components/common/LanguageSwitcher.tsx` |
-| Server locale type + negotiation | `hotel-app-be/src/core/i18n.rs` |
-| Server catalogs (email copy) | `hotel-app-be/src/core/locales/<locale>.json` |
+| Server locale negotiation | `hotel-app-be/src/core/i18n.rs` |
+| Server email catalogs | `hotel-app-be/src/core/locales/<locale>.json` |
 
-## Using a translation in a component
+---
+
+## 2. Usage, Plurals & Adding Languages
 
 ```tsx
 import { useTranslation } from '../../i18n';
 
-const { t, locale, setLocale } = useTranslation('nav');
+const { t, tOr, locale, setLocale } = useTranslation('nav');
 
-t('routes.bookings.label');            // from the bound namespace
-t('common:actions.save');              // ns:key crosses namespaces
-t('common:count.nights', { count: 3 }); // plural + interpolation
+t('routes.bookings.label');
+t('common:actions.save');
+t('common:count.nights', { count: 3 });
+tOr('actions.book', 'Book'); // progressive fallback when bundle key not yet added
 ```
 
-Outside React — utils, interceptors, anything without hooks — import the bare
-`t` from `src/i18n`. It reads the locale at call time and will not re-render on
-its own, which is fine for one-shot calls and wrong for rendered text.
+Outside React components (interceptors, utils), import bare `t` from `src/i18n` for one-shot lookups.
 
-### Migrating a screen that already has hardcoded English
+- **Adding keys**: Add to `resources/en/<namespace>.json` and **every** other locale using `{{name}}` placeholders; `resources.test.ts` fails on drift.
+- **Plurals**: Suffix with `_other` (required) and `_zero` / `_one` per `Intl.PluralRules`. Malay and Chinese only use `other` (and optional `_zero`), so `_one` is intentionally omitted there.
+- **Adding a language**: Register in `LOCALES`, create all 30 JSON namespaces + `resources/index.ts`, add `hotel-app-be/src/core/locales/<code>.json` + `SUPPORTED_LOCALES`, widen `consent_records.locale` via baseline + catalog patch, extend `LocalizedText` (`src/features/legal/content/types.ts`), add help articles (`articles.<code>.ts`), and add a landing-page `Copy` module (`hotel-web-fe/salim-inn/src/content/`). RTL languages additionally set `dir: 'rtl'`.
 
-Use `tOr`, which renders the fallback when no bundle defines the key:
+### Language Resolution Order
 
-```tsx
-const { tOr } = useTranslation('guestPortal');
-tOr('actions.book', 'Book');
-```
+- **Web**: `?lang=<code>` URL param (persists to localStorage `locale`) → stored switcher choice → hotel `default_locale` setting → `navigator.languages` → `en`.
+- **Server (email)**: `guests.language_preference` → `default_locale` system setting (default `en`, patch `0011`) → `en`. `Locale::from_accept_language` handles `zh-Hant*`/`zh-TW`/`zh-HK`/`zh-MO` → `zh-TW` and `zh-Hans*`/`zh-CN`/`zh-SG`/`zh-MY`/`zh` → `zh`.
 
-The screen keeps reading correctly today, starts speaking Bahasa Melayu the
-moment someone adds `actions.book` to the bundles, and never shows a raw key to
-a user in between. This is the intended path for rolling i18n through the
-remaining feature screens: convert call sites first, add keys as translations
-arrive.
+---
 
-## Adding a string
+## 3. Surfaces Outside JSON Bundles
 
-1. Add the key to `resources/en/<namespace>.json`, nested however reads best.
-2. Add the same key to **every** other locale. `resources.test.ts` fails if you
-   do not, so a half-translated locale cannot ship quietly.
-3. Use `{{name}}` for variables. Numbers passed as variables are formatted for
-   the locale automatically.
+1. **Legal corpus (`hotel-web-fe/src/features/legal/content/`)**: Typed `LocalizedText` requires all four locales at compile time (`2026-11-18` generation; `en`/`ms` statutory floor, `zh`/`zh-TW` annotated for native legal sign-off).
+2. **Help articles (`hotel-web-fe/src/features/help/content/articles.<locale>.ts`)**: Resolved per locale via `ARTICLE_SETS` (`zh-TW` converted from `zh` and meriting a native review).
+3. **PDF exports**: jsPDF `zh`/`zh-TW` exports lazily embed Noto Sans CJK SC via `src/utils/pdfFont.ts`; `en`/`ms` use `helvetica`.
+4. **Salim Inn landing (`hotel-web-fe/salim-inn/`)**: Standalone Vite document with typed `Copy` (`src/content/{en,ms,zh,zhTW}.ts`), `data-i18n` parity tested in `salim-inn/src/i18n.test.ts`, sharing the browser `locale` storage key.
+5. **Formatting**: Dates use `src/utils/date.ts` (`hotel_today` / hotel timezone), numbers use `formatNumber`/`formatPercent`, and money uses `src/utils/currency.ts` (tracks property currency, deliberately independent of interface language). Server emails format dates via `Locale::format_date` (avoiding English-only `%b`).
 
-### Plurals
+---
 
-Suffix the key by plural category and pass `count`:
+## 4. Coverage & Test Gates (`2026-11-25`)
 
-```json
-"nights_zero": "No nights",
-"nights_one": "{{count}} night",
-"nights_other": "{{count}} nights"
-```
+- **30 namespaces per locale**: Flattened leaf keys measured `2026-11-25`: **`en` 8,130 · `ms` 8,073 · `zh` 8,058 · `zh-TW` 8,007** (`ms`/`zh`/`zh-TW` omit `_one` plural keys by design).
+- **Enforced CI gates**:
+  - `hotel-web-fe/src/i18n/resources.test.ts`: key completeness, no extra keys, plural category rendering, `{{var}}` placeholder parity, non-blank values, bundle registration on disk.
+  - `hotel-web-fe/src/i18n/keyUsage.test.ts`: every literal `t()`/`tOr()`/`translate*()`/`statusLabel()` exists in `en`.
+  - `hotel-web-fe/src/i18n/hardcoded.test.ts`: blocks un-allowlisted hardcoded JSX text/props.
+  - `hotel-app-be/src/core/i18n.rs`: backend email catalog key & placeholder parity.
+- **Accepted dynamic `tOr` & known caveats**: Dynamic enum/route lookups use `tOr` deliberately (~102 call sites across `CustomerLedger`, `NightAuditReportViews`, `DataTransfer`, `Support`, `GuestRelations`, `routeLabels`, `CommandPalette`, `UserMenu`). Known minors: `segments:page.activeGuestsMatch` lacks pluralization, `charts/format.ts` `fmtShortDate` uses day-first order, and `audit.service.ts` PDF body rows humanize backend enums via `formatStatusLabel`.
 
-`_other` is required as the catch-all; `_zero` is optional and wins on exactly
-zero. Categories come from `Intl.PluralRules`, so Malay — which has no singular
-category — legitimately omits `_one`, and the parity test knows that.
+---
 
-## Adding a language
+## 5. Terminology Glossary (`en` / `zh` / `ms` / `zh-TW`)
 
-1. Add an entry to `LOCALES` in `src/i18n/locales.ts` (code, `Intl` tag, native
-   name, English name, direction).
-2. Create `src/i18n/resources/<code>/` with every namespace, and register the
-   imports in `src/i18n/resources/index.ts`.
-3. Add `hotel-app-be/src/core/locales/<code>.json` and extend
-   `SUPPORTED_LOCALES` and `source_for` in `hotel-app-be/src/core/i18n.rs`.
-4. Widen the consent locale constraint (`consent_records.locale`) with a new
-   catalog patch, as patches 0004 (`zh`) and 0007 (`zh-TW`) did — a language
-   offered in the switcher but rejected on write would fail a guest's consent
-   submission.
-5. Add the code to `LocalizedText` in `src/features/legal/content/types.ts`;
-   `typecheck` then lists every legal string to translate.
-6. Add a help article set, and a landing-page `Copy` file plus its `lang.ts`
-   entry (see [Surfaces outside the bundle system](#surfaces-outside-the-bundle-system)).
+Sources of truth: `hotel-web-fe/src/i18n/resources/{en,ms,zh,zh-TW}/*.json` and `hotel-app-be/src/core/locales/`. `zh-TW` mirrors `zh` terminology in Traditional script unless noted.
 
-Run `bun run test src/i18n` and `cargo test --lib core::i18n`; both parity
-suites will name anything you missed.
+### Core Entities & Booking Lifecycle
 
-An RTL language additionally needs `dir: 'rtl'` in the registry — the provider
-already mirrors it onto `<html dir>` — plus a pass over any layout using
-directional margins rather than logical properties.
+| en | zh | ms | Notes |
+|---|---|---|---|
+| booking, reservation | 预订 | tempahan | `nav`, `status`, `email` |
+| guest | 客人 | tetamu | compound register uses 宾客 (宾客关系, 宾客门户) |
+| room / room type | 客房 (staff) / 房间 (guest) / 房型 | bilik / jenis bilik | register split |
+| check-in / check in | 入住 / 办理入住 | daftar masuk | never 登记入住 |
+| check-out | 退房 | daftar keluar | |
+| walk-in / no-show | 上门客 / 预订未到 | walk-in / tidak hadir | `zh-TW`: 現場散客 / 未入住 |
+| confirmed / pending / completed | 已确认 / 待处理 / 已完成 | disahkan / menunggu / selesai | `status` |
+| void (action) / voided (state) | 作废 / 已作废 | void / terbatal | keep verb vs state distinct |
+| folio / night audit | 账单 / 夜审 | folio / audit malam | `zh-TW`: 帳單 / 夜間稽核 |
+| tourism tax / extra bed | 旅游税 / 加床 | cukai pelancongan / katil tambahan | statutory RM10/night |
+| complimentary / free nights | 免费 / 免费房晚 | percuma / malam percuma | |
 
-## How the language is chosen
+### Operations, Finance & Marketing
 
-**Web**, highest priority first (`src/i18n/localeStore.ts`):
+| en | zh | ms | Notes |
+|---|---|---|---|
+| room status | 房态 | status bilik | |
+| available / occupied / reserved | 可售 / 占用中 / 已预订 | tersedia / diduduki / ditempah | guest portal uses 可订 |
+| clean / dirty / cleaning / inspected | 已清洁 / 待清洁 / 清洁中 / 已检查 | bersih / kotor / dibersihkan / diperiksa | |
+| housekeeping / maintenance | 客房服务 (zh-TW: 房務) / 维修 | pengemasan / penyelenggaraan | daily cleaning: 每日客房清洁 |
+| payment / payment approvals | 支付 (email: 付款) / 支付审批 | pembayaran / kelulusan pembayaran | |
+| deposit / refund | 押金 / 退款 | deposit / bayaran balik | |
+| ledger / company ledger | 台账 / 公司台账 | lejar / lejar syarikat | |
+| revenue / rates / promotions / campaign | 收益 / 房价 / 促销 / 营销活动 | hasil / kadar / promosi / kempen | |
+| offer(s) / voucher / loyalty | 优惠 / 优惠券 / 会员忠诚度 | tawaran / baucar / kesetiaan | 优惠 guest-facing, 促销 staff |
+| insights / reports | 经营分析 / 报表 | wawasan / laporan | |
 
-1. an explicit choice — a `?lang=<code>` link parameter (persisted like a
-   switcher pick, so a shared link wins and survives a refresh), then the
-   switcher choice stored under the `locale` key
-2. the hotel's `default_locale` setting, applied by `applyDefaultLocale` once
-   settings load
-3. `navigator.languages`
-4. `en`
+### Admin, Auth & Security
 
-An explicit choice always outranks an inferred one: a guest who picked Bahasa
-Melayu is not flipped back to English by a later settings sync.
+| en | zh | ms | Notes |
+|---|---|---|---|
+| administration / settings | 系统管理 / 设置 | pentadbiran / tetapan | |
+| access control / role / permission | 访问控制 / 角色 / 权限 | kawalan akses / peranan / kebenaran | |
+| audit log / data transfer | 审计日志 / 数据迁移 | log audit / pemindahan data | |
+| guest portal / identity (eKYC) | 宾客门户 / 身份认证 | portal tetamu / identiti | |
+| two-factor authentication | 双重身份验证 | pengesahan dua faktor | |
+| passkey / backup code | 通行密钥 / 备用码 | kunci laluan / kod sandaran | `zh-TW`: 密碼金鑰 / 備援碼 |
+| sign in / sign out / register | 登录 / 退出登录 / 注册 | log masuk / log keluar / daftar | |
 
-**Server**, for guest email:
+---
 
-1. `guests.language_preference`
-2. the `default_locale` system setting — seeded as `en` by patch 0011 and
-   editable on the Settings page; an unrecognised value reads as `en`
-3. `en`
+## 6. Tone, Grammar & Translator Rules
 
-The web client sends `Accept-Language` on every API call
-(`src/api/client.ts`). `Locale::from_accept_language` parses it, including
-q-values, and is the entry point for the handler that will record a first-time
-guest's language — no handler reads it yet.
-
-Chinese tags are matched by script and region, not just the `zh` prefix:
-`zh-TW`, `zh-HK`, `zh-MO`, and any `zh-Hant…` tag resolve to `zh-TW`;
-`zh-CN`, `zh-SG`, `zh-MY`, `zh-Hans…`, and bare `zh` resolve to `zh` —
-the same rule `matchLocale` applies to `navigator.languages` on the web.
-
-## Surfaces outside the bundle system
-
-Four kinds of copy are translated, but not through `resources/<locale>/*.json`.
-Each has its own guarantee:
-
-- **Legal corpus** (`src/features/legal/content/`) — terms, privacy notice,
-  payment terms, eKYC consent, and the consent prompts. Text is
-  `LocalizedText`, and **all four locales are required fields**, so a missing
-  translation is a type error rather than an English fallback. That is
-  deliberate: a consent record names the locale the guest read, and an English
-  fallback under a `zh` record would be false evidence. `en`/`ms` are the PDPA
-  s.7(2) floor; the `zh`/`zh-TW` text is marked `DRAFT — pending native/legal
-  review` in each file. Adding zh/zh-TW did **not** bump any consent version:
-  the en/ms wording that existing records pin is unchanged. Changing published
-  wording later is a content edit plus a version bump.
-- **Help articles** (`src/features/help/content/articles.<locale>.ts`) — one
-  article set per locale, resolved through `ARTICLE_SETS`.
-- **PDF exports** — jsPDF's built-in font is Latin-1 only, so a `zh`/`zh-TW`
-  export embeds Noto Sans CJK SC through `src/utils/pdfFont.ts`. The ~16 MB
-  font is fetched lazily, only for a Chinese export.
-- **Salim Inn landing page** (`hotel-web-fe/salim-inn/`) — a standalone
-  document outside the React app, with its own content model:
-  `src/content/en.ts` defines the `Copy` type, and `ms.ts`, `zh.ts` and
-  `zhTW.ts` must satisfy it, so a missing key fails `typecheck`.
-  `src/content/lang.ts` resolves `?lang=` → the shared `locale` storage key →
-  `navigator.languages` → `en`, using the same Chinese script/region rule as
-  the app. A choice made on the landing page therefore carries into the guest
-  portal. `index.html` keeps English as the no-JS/SEO baseline, and every
-  translatable element carries `data-i18n="<path>"`. `src/i18n.test.ts` fails
-  if any such path is missing from any locale. A new English string added to
-  `index.html` without a `data-i18n` key stays English in every language.
-
-## Formatting
-
-- **Dates** — `utils/date.ts` (`formatHotelDate`, `formatHotelDateTime`) renders
-  in the active interface language, in the hotel's timezone. Do not reach for
-  `toLocaleDateString` directly; the hotel-timezone rules in that module are
-  the reason it exists.
-- **Numbers** — `formatNumber` / `formatPercent` from `src/i18n`.
-- **Money** — `utils/currency.ts`, and it is deliberately **not** locale-aware.
-  Currency formatting follows the booking's currency code from hotel settings,
-  not the reader's interface language; the two must not fight.
-- **Server dates in email** — `Locale::format_date`, which reads month
-  abbreviations from the catalog. chrono's `%b` is English-only, and four of the
-  twelve Malay abbreviations differ (Mac, Mei, Ogo, Okt, Dis).
-
-## What the tests enforce
-
-`src/i18n/resources.test.ts` and the `core::i18n` unit tests both assert that:
-
-- every locale defines every key the default locale does, and no extras
-- every plural key can render every count its language can produce
-- a translation never interpolates a variable English does not provide (this is
-  what catches a `{{nama}}` typo before a guest sees literal braces)
-- no entry is blank
-- every bundle on disk is registered — an unimported bundle would silently
-  serve English
-
-Both suites have been mutation-checked: dropping a key or introducing a
-placeholder typo fails them at the intended assertion.
+- **Do not translate**: Acronyms (`eKYC`, `RBAC`, `API`, `KPI`, `2FA`, `PDF`, `QR`, `OTA`, `PMS`, `ADR`, `RevPAR`), OTA vendor names (`Booking.com`, `Agoda`, `Expedia`), `PayPal`, `Google`, formats (`JPEG`, `PNG`, `WebP`, `PDF`), internal API enum values, JSON keys, URLs, or `{{var}}` placeholder names.
+- **Mandarin (`zh`) conventions**: Use `您` (never `你`), hotel terms `入住` / `退房` / `房态` / `夜审`, compact nav labels (≤4 chars where natural), full-width punctuation (`。，；：、“”、《》`), spaces around CJK–Latin/digit boundaries (`30 晚`, `6 位验证码`, `eKYC 管理`), counter measure words (`晚`, `位客人`, `间客房`), and `_other` + `_zero` plural keys only (no `_one`). Email pattern keeps `{{year}}年{{month}}{{day_num}}日`.
+- **Open register watch items**: Standardize minor variants (`客群细分` vs `客人细分`, `总计` vs `总额`, `Audit Malam` vs English jargon in `ms/help`, `Daftar masuk auto`) when those UI surfaces are next revised, and update this section when settled.

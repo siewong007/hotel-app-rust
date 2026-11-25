@@ -20,7 +20,7 @@ pub fn run() {
         // Secure auto-update support. The updater verifies a minisign signature
         // against `plugins.updater.pubkey` in tauri.conf.json before applying any
         // downloaded artifact, so releases must be signed with the matching
-        // private key (see UPDATER.md). `process` stays registered only for its
+        // private key (see docs/guides/desktop.md). `process` stays registered only for its
         // capability grant (`process:default`, a valid FE-side restart fallback
         // via `plugin:process|restart`) — the Rust `restart_app` command goes
         // through `AppHandle::request_restart` so RunEvent::Exit teardown runs.

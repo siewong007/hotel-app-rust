@@ -77,6 +77,10 @@ make docker-up
    bun run lint:strict
    bun run test -- --run
    bun run build
+
+   # Android
+   cd hotel-android
+   ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --console=plain
    ```
 4. Submit a pull request
 
@@ -127,6 +131,11 @@ rules are in [AGENTS.md](AGENTS.md).
 - **Formatting:** Use `cargo fmt`
 - **Commands:** Keep Tauri commands thin; delegate to backend modules
 - **Resources:** Use sync scripts to keep desktop resources aligned with backend
+
+### Android (Kotlin / Jetpack Compose)
+
+- **Architecture:** `feature/<domain>/` (Compose UI + `ViewModel`) → `data/repository/` → `data/api/` (Retrofit + kotlinx.serialization), with cross-cutting security/network/sync/theme in `core/`
+- **RBAC & Security:** Gate all navigation destinations, deep links, search scopes, OS notifications, and action buttons via `StaffSession`; reject guest-only accounts in `AuthRepository`; run `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease`
 
 ## Testing Guidelines
 
@@ -246,20 +255,21 @@ it. [docs/README.md](docs/README.md) is the full map — the short version:
 - **CONTRIBUTING.md** — Contribution process: branching, PR checklist, commit conventions
 - **SECURITY.md** — Vulnerability reporting policy and contributor security boundaries
 - **CODE_OF_CONDUCT.md** — Community standards and enforcement
-- **docs/README.md** — Documentation index: which document owns which subject
-- **docs/features.md** — Feature registry; the only place delivery status is recorded
-- **docs/architecture/overview.md** — System architecture as it exists today
-- **docs/architecture/system-flows.md** — One-page system flow
-- **docs/architecture/decision-records.md** — Architecture Decision Records
-- **docs/api/README.md** — API contract, beside the generated `api/openapi.json`
-- **docs/guides/deployment.md** — Deployment guide
-- **docs/security/** — Production operations runbook and backup/restore drill
-- **docs/ongoing-dev.md** — The live tracker for open work
+- **docs/README.md** — Canonical documentation map (one file per subject)
+- **docs/features.md** — Feature registry; only place delivery status is recorded
+- **docs/architecture/overview.md** — System architecture, flows, gRPC-Web & Guest Relations CRM
+- **docs/architecture/decision-records.md** — Architecture Decision Records (ADRs 001–016)
+- **docs/api/README.md** — API contract beside generated `docs/api/openapi.json`
+- **docs/guides/deployment.md** — Deployment, staging, AIC VPS, patching & PG19 upgrade guide
+- **docs/guides/desktop.md** — Desktop packaging, build pipeline, updater & backup/restore
+- **docs/guides/android.md** — Native Android staff app architecture, security & CI
+- **docs/security.md** — Production operations, PDPA retention, restore drill, readiness & go-live checklist
+- **docs/ongoing-dev.md** — Live tracker for remaining open work
 - **hotel-app-be/database/README.md** — Schema, baseline, and seed lifecycle
 - **Inline documentation** — Rust docstrings (`///`) and TypeScript JSDoc
 
-New documents live under `docs/` in lower-case kebab-case (`desktop-packaging.md`,
-not `PACKAGING.md`), and must be added to `docs/README.md` in the same commit —
+New documents live under `docs/` in lower-case kebab-case (`data-transfer.md`,
+not `DATA_TRANSFER.md`), and must be added to `docs/README.md` in the same commit —
 an unlisted document has no owner. `make docs-check` gates relative links, and it
 runs on Linux: a case-only mismatch passes locally on macOS and fails in CI.
 

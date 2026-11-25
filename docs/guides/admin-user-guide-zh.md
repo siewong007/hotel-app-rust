@@ -3,12 +3,13 @@
 > **适用对象**：超级管理员、经理、管理员、合规管理员、高级审核员、eKYC 审核员、审计员、前台接待、客房服务、普通员工及只读支持人员。  
 > **关联文档**：
 > - 普通宾客操作指南（官网、在线预订、宾客门户、自助入住与 eKYC）：[guest-user-guide-zh.md](guest-user-guide-zh.md)
-> - 国际化和术语规范（中英马三语对照）：[i18n-glossary.md](i18n-glossary.md)
+> - 国际化和术语规范（中英马对照与覆盖基线）：[internationalization.md](internationalization.md)
 > - 数据迁移技术规范：`hotel-backup` v1：[data-transfer.md](data-transfer.md)
-> - 桌面端托管备份与恢复：[desktop-backup-restore.md](desktop-backup-restore.md)
+> - 桌面端安装、更新与托管备份恢复：[desktop.md](desktop.md)
+> - 原生 Android 员工端指南：[android.md](android.md)
 > - 系统功能总表与边界清单：[../features.md](../features.md)
 >
-> **术语与口径说明**：本指南严格对齐系统简体中文界面（`zh-CN`）与数据库权限策略（基线至补丁 `0031`）。全篇统一以**营业日**（由酒店设置中的时区驱动）与**酒店币种**（默认 `MYR`）为准。
+> **术语与口径说明**：本指南严格对齐系统简体中文界面（`zh-CN`）与数据库权限策略（基线至补丁 `0032`）。全篇统一以**营业日**（由酒店设置中的时区驱动）与**酒店币种**（默认 `MYR`）为准。
 
 ---
 
@@ -37,8 +38,9 @@
 本酒店管理系统（PMS）支持三种访问方式，页面与业务规则保持一致：
 
 - **Web 管理端**：通过浏览器登录，已登录员工访问 `/` 或 `/admin-portal` 进入管理工作台。
-- **桌面客户端（Tauri）**：内置本地后端与 PostgreSQL 数据库，支持离线单机运行、本地定时备份与自动更新（详见第 12 章）。
-- **手机与平板端**：响应式移动界面，自动切换底部主导航栏与底部操作抽屉，方便前台移动巡房与客房保洁操作。
+- **桌面客户端（Tauri）**：内置本地后端与 PostgreSQL 数据库，支持离线单机运行、本地定时备份与自动更新（详见第 12 章与 [desktop.md](desktop.md)）。
+- **原生 Android 员工端（`hotel-android/`）**：基于 Kotlin 与 Jetpack Compose Material 3 的员工端应用，支持工作台、预订/入住/账单打印、房态/保洁/维修、eKYC 审核、支付审批、全局搜索、离线队列与桌面小组件（详见 [android.md](android.md)）。
+- **手机与平板端**：响应式移动 Web 界面，自动切换底部主导航栏与底部操作抽屉，方便前台移动巡房与客房保洁操作。
 
 **全局实时同步（WebSocket）**：
 员工登录后，客户端会自动连接 `/api/updates/socket`。当后端触发以下 **6 个业务域**的数据变更时，当前打开的关联页面会自动刷新缓存，无需手动刷新网页：
@@ -1035,7 +1037,7 @@
 
 ### 12.3 本地托管自动备份与一键恢复
 
-> 命令行离线恢复与灾难恢复流程详见：[desktop-backup-restore.md](desktop-backup-restore.md)。
+> 命令行离线恢复与灾难恢复流程详见：[desktop.md](desktop.md#6-managed-local-backup--restore)。
 
 - **与 JSON 数据迁移的区别**：`hotel-backup` JSON 导出仅含表数据（`system` 以外不含系统表，且**均不含 `uploads/` 照片与 `private_uploads/` 凭证文件**）；而桌面**`本地备份`**是整机全量恢复点——每份备份由两个文件配对组成：
   - `hotel-backup-YYYYMMDD-HHMMSS.dump`（`hotel_management` 全库 `pg_dump` 归档，创建时自动校验完整性）

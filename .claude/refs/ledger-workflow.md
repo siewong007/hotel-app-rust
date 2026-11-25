@@ -1,7 +1,7 @@
 # Ledger Workflow (reference)
 
-Re-verified 2026-11-18 against `master`. Paths follow the domain-module
-layout — every domain lives under `hotel-app-be/src/modules/<domain>/`.
+Re-verified `2026-11-25` against `master` (incl. patch `0032`). Paths follow the
+domain-module layout — every domain lives under `hotel-app-be/src/modules/<domain>/`.
 Re-verify anchors with `grep -n "fn <name>"` before relying on one; line
 anchors rot.
 
@@ -25,7 +25,7 @@ convention).
 
 **Data model** (`modules/ledgers/models.rs`):
 
-- `customer_ledgers` — company info, `description`, `expense_type`, `amount`, `paid_amount`, `balance_due` (DB-derived), `status` ∈ {pending, partial, paid, overdue, void} (the `valid_status` CHECK allows `void`, **not** `cancelled`), `due_date`, `invoice_number`, optional `booking_id`/`guest_id`, accounting fields (`folio_type`, `transaction_type`, `post_type`, `is_reversal`, `original_transaction_id`, `void_at/by/reason`).
+- `customer_ledgers` — company info, `description`, `expense_type`, `amount`, `paid_amount`, `balance_due` (DB-derived), `status` ∈ {pending, partial, paid, overdue, void} (the `valid_status` CHECK allows `void`, **not** `cancelled`), `due_date`, `invoice_number`, optional `booking_id`/`guest_id` (FK to `public.guests(id) ON DELETE SET NULL`, fixed in patch `0032`), accounting fields (`folio_type`, `transaction_type`, `post_type`, `is_reversal`, `original_transaction_id`, `void_at/by/reason`). Unique indexes `uq_customer_ledgers_booking_room_charge` and `uq_customer_ledgers_active_reversal` exclude voided rows, and `generate_invoice_number()` uses an advisory lock + `BIGINT` sequence parsing (patch `0032`).
 - `customer_ledger_payments` — running payment history per ledger.
 
 Key functions (`modules/ledgers/repository.rs`):

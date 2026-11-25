@@ -113,3 +113,7 @@ with a spinner when the skeleton communicates the page structure better.
 - **Frosted glass is user-tunable** — `--hotel-glass-blur` (0–20px, default 10) and `--hotel-glass-alpha` on `:root` drive every blurred surface (filled toasts, `MuiBackdrop` scrims at ×0.5, portal nav). At 0 the alpha goes 100% so surfaces render solid instead of translucent. Set via Settings → Appearance → Background blur (`glassBlur` localStorage key, `GlassBlurContext`).
 - OTA channel badges (Agoda/Booking/Expedia/Airbnb) keep their brand colors — external identities, not app palette.
 - Loyalty tier colors (bronze/silver/gold/platinum metals) are tier identities — kept as hues, rendered as tints.
+
+## Android Material 3 (`hotel-android`)
+
+The native Android staff client (`hotel-android/app/src/main/java/com/hotelapp/staff/core/design/`) mirrors these dark/light/status semantics on Material 3 (`HotelStaffTheme`, adaptive dynamic-color support, edge-to-edge system bars via `enableEdgeToEdge()`, and `WindowWidthSizeClass` switching between `NavigationBar` on phones and `NavigationRail` on tablets). Status chips and cards share consistent semantic tone mappings (`success`, `warning`, `danger`, `info`, `neutral`), while folio printouts render light paper-formatted HTML via Android `PrintManager`.
