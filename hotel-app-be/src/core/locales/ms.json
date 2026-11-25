@@ -17,6 +17,9 @@
       "checkIn": "Daftar masuk",
       "checkOut": "Daftar keluar",
       "invoice": "Invois",
+      "roomCharges": "Caj bilik",
+      "tourismTax": "Cukai pelancongan",
+      "extraBed": "Katil tambahan",
       "totalCharged": "Jumlah dicaj",
       "reason": "Sebab",
       "linkValidUntil": "Pautan sah sehingga"

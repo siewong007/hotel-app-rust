@@ -17,6 +17,9 @@
       "checkIn": "Check-in",
       "checkOut": "Check-out",
       "invoice": "Invoice",
+      "roomCharges": "Room charges",
+      "tourismTax": "Tourism tax",
+      "extraBed": "Extra bed",
       "totalCharged": "Total charged",
       "reason": "Reason",
       "linkValidUntil": "Link valid until"

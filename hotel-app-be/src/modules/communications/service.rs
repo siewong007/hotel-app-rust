@@ -241,6 +241,7 @@ pub async fn test_send_campaign(
             subject: format!("[TEST] {}", campaign.subject),
             body_html,
             body_text: campaign.body_text.clone(),
+            attachments: Vec::new(),
         })
         .await
         .map_err(|e| ApiError::Internal(format!("Test send failed: {e}")))?;
