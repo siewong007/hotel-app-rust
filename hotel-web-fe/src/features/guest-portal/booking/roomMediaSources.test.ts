@@ -12,7 +12,7 @@ describe('room media', () => {
     expect(offerPhotos({ room_type_code: 'STDQ', images: [] }).urls).toEqual(['/salim-inn/gallery/guest-room.jpg']);
     expect(offerPhotos({ room_type_code: 'PENT', images: [] }).urls).toEqual([]);
   });
-  it('maps only the five modelled codes to the 3D room', () => {
+  it('maps only the five codes that have a bundled landing photo', () => {
     expect(modelCodeFor('FS')).toBe('FS');
     expect(modelCodeFor(' sup ')).toBe('SUP');
     expect(modelCodeFor('PENT')).toBeNull();

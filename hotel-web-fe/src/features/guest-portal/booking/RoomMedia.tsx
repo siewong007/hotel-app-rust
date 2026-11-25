@@ -2,8 +2,10 @@
 import React, { useRef, useState } from 'react';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import CloseIcon from '@mui/icons-material/Close';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import HotelIcon from '@mui/icons-material/Hotel';
-import { Box, IconButton } from '@mui/material';
+import { Box, Dialog, IconButton } from '@mui/material';
 import { useTranslation } from '../../../i18n';
 import type { GuestBookingOffer } from './types';
 import { offerPhotos } from './roomMediaSources';
@@ -19,6 +21,7 @@ export function RoomMedia({ offer }: { offer: GuestBookingOffer }) {
   // every uploaded photo broken: the bundled landing photo, then the placeholder
   const photos = working.length > 0 ? working : bundled && !failed.has(bundled) ? [bundled] : [];
   const [index, setIndex] = useState(0);
+  const [lightbox, setLightbox] = useState(false);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const current = Math.min(index, Math.max(0, photos.length - 1));
 
@@ -42,9 +45,11 @@ export function RoomMedia({ offer }: { offer: GuestBookingOffer }) {
             {photos.map((src, i) => (
               <Box key={src} component="img" src={src} loading="lazy" alt={t('book.roomImageAlt', { name: offer.room_type_name }) + (photos.length > 1 ? ` (${i + 1}/${photos.length})` : '')}
                 onError={() => setFailed((prev) => new Set(prev).add(src))}
-                sx={{ flex: '0 0 100%', width: '100%', height: '100%', objectFit: 'cover', scrollSnapAlign: 'start', display: 'block' }} />
+                onClick={() => setLightbox(true)}
+                sx={{ flex: '0 0 100%', width: '100%', height: '100%', objectFit: 'cover', scrollSnapAlign: 'start', display: 'block', cursor: 'zoom-in' }} />
             ))}
           </Box>
+          <IconButton aria-label={t('book.media.enlarge')} onClick={() => setLightbox(true)} sx={{ ...navSx, top: 8, right: 8, transform: 'none' }}><FullscreenIcon /></IconButton>
           {photos.length > 1 && (
             <>
               <IconButton aria-label={t('book.media.previous')} onClick={() => go(current - 1)} sx={{ ...navSx, left: 6 }}><ChevronLeftIcon /></IconButton>
@@ -57,6 +62,32 @@ export function RoomMedia({ offer }: { offer: GuestBookingOffer }) {
         </>
       ) : (
         <Box aria-hidden="true" sx={{ height: '100%', background: FALLBACK, display: 'grid', placeItems: 'center', color: 'var(--hotel-text-secondary)' }}><HotelIcon sx={{ fontSize: 48 }} /></Box>
+      )}
+      {photos.length > 0 && (
+        <Dialog
+          fullScreen open={lightbox} onClose={() => setLightbox(false)}
+          aria-label={offer.room_type_name}
+          onKeyDown={(e) => {
+            if (photos.length < 2) return;
+            if (e.key === 'ArrowLeft') go(current - 1);
+            if (e.key === 'ArrowRight') go(current + 1);
+          }}
+          slotProps={{ paper: { sx: { bgcolor: '#06110e', color: '#fff' } } }}
+        >
+          <Box sx={{ position: 'relative', height: '100%', display: 'grid', placeItems: 'center', p: { xs: 1, sm: 4 } }}>
+            <Box component="img" src={photos[current]} data-testid="room-lightbox-image"
+              alt={t('book.roomImageAlt', { name: offer.room_type_name }) + (photos.length > 1 ? ` (${current + 1}/${photos.length})` : '')}
+              sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+            <IconButton aria-label={t('book.media.close')} onClick={() => setLightbox(false)} sx={{ ...navSx, top: 12, right: 12, transform: 'none' }}><CloseIcon /></IconButton>
+            {photos.length > 1 && (
+              <>
+                <IconButton aria-label={t('book.media.previous')} onClick={() => go(current - 1)} sx={{ ...navSx, left: 12 }}><ChevronLeftIcon /></IconButton>
+                <IconButton aria-label={t('book.media.next')} onClick={() => go(current + 1)} sx={{ ...navSx, right: 12 }}><ChevronRightIcon /></IconButton>
+                <Box sx={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 14, opacity: 0.85 }}>{current + 1} / {photos.length}</Box>
+              </>
+            )}
+          </Box>
+        </Dialog>
       )}
     </Box>
   );

@@ -99,7 +99,9 @@
     "reviewStay": "核对您的住宿",
     "media": {
       "previous": "上一张照片",
-      "next": "下一张照片"
+      "next": "下一张照片",
+      "enlarge": "全屏查看照片",
+      "close": "关闭"
     },
     "roomImageAlt": "{{name}} 客房",
     "roomsLeft_one": "仅剩 {{count}} 间房",
