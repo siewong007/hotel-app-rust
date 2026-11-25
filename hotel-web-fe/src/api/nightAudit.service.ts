@@ -26,10 +26,7 @@ export class NightAuditService {
    * Run night audit for a specific date
    */
   static async runNightAudit(request: RunNightAuditRequest): Promise<NightAuditResponse> {
-    return await withRetry(
-      () => api.post('night-audit/run', { json: request }).json<NightAuditResponse>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.post('night-audit/run', { json: request }).json<NightAuditResponse>();
   }
 
   /**

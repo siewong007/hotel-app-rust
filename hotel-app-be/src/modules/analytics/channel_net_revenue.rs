@@ -580,7 +580,7 @@ async fn fetch_unposted_rows(
                     THEN (b.daily_rates ->> b.business_date::text)::DECIMAL
                 ELSE b.room_rate
             END AS nightly_rate,
-            COALESCE(b.extra_bed_charge, 0) AS extra_bed_charge,
+            ROUND(COALESCE(b.extra_bed_charge, 0) / GREATEST((b.check_out_date - b.check_in_date), 1), 2) AS extra_bed_charge,
             CASE
                 WHEN COALESCE(b.is_tourist, false) AND COALESCE(b.tourism_tax_amount, 0) > 0
                     THEN ROUND(COALESCE(b.tourism_tax_amount, 0) / GREATEST((b.check_out_date - b.check_in_date), 1), 2)
@@ -789,7 +789,7 @@ async fn fetch_statement_unposted_rows(
                     THEN (b.daily_rates ->> b.business_date::text)::DECIMAL
                 ELSE b.room_rate
             END AS nightly_rate,
-            COALESCE(b.extra_bed_charge, 0) AS extra_bed_charge,
+            ROUND(COALESCE(b.extra_bed_charge, 0) / GREATEST((b.check_out_date - b.check_in_date), 1), 2) AS extra_bed_charge,
             CASE
                 WHEN COALESCE(b.is_tourist, false) AND COALESCE(b.tourism_tax_amount, 0) > 0
                     THEN ROUND(COALESCE(b.tourism_tax_amount, 0) / GREATEST((b.check_out_date - b.check_in_date), 1), 2)
@@ -936,9 +936,7 @@ pub async fn generate_monthly_statement(
                     commission: Decimal::ZERO,
                     tax: Decimal::ZERO,
                 });
-        entry.amount += row.gross_room_revenue;
-        entry.commission += row.commission_amount;
-        entry.tax += row.service_tax + row.tourism_tax;
+        accumulate_statement_row(entry, &row);
     }
 
     let mut by_channel: HashMap<String, Vec<StatementBookingAggregate>> = HashMap::new();
@@ -966,7 +964,7 @@ pub async fn generate_monthly_statement(
             let statement_rows: Vec<serde_json::Value> = rows
                 .iter()
                 .map(|row| {
-                    let amount_paid = row.amount - row.commission - row.tax;
+                    let amount_paid = statement_amount_paid(row);
                     serde_json::json!({
                         "booking_id": row.booking_id,
                         "booking_number": row.booking_number,
@@ -1235,4 +1233,88 @@ pub async fn generate(
         "rows": rows.iter().map(row_to_json).collect::<Vec<_>>(),
         "channels": channels
     }))
+}
+
+fn accumulate_statement_row(entry: &mut StatementBookingAggregate, row: &ComputedRevenueRow) {
+    entry.amount += row.gross_room_revenue + row.service_tax + row.tourism_tax;
+    entry.commission += row.commission_amount;
+    entry.tax += row.service_tax + row.tourism_tax;
+}
+
+fn statement_amount_paid(row: &StatementBookingAggregate) -> Decimal {
+    row.amount - row.commission - row.tax
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn statement_amount_paid_equals_gross_room_revenue_minus_commission_across_nights() {
+        let d1 = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let d2 = NaiveDate::from_ymd_opt(2026, 6, 2).unwrap();
+        let d3 = NaiveDate::from_ymd_opt(2026, 6, 3).unwrap();
+
+        let extra_bed_per_night = (Decimal::new(6000, 2) / Decimal::from(2)).round_dp(2);
+        let base_night = Decimal::new(15000, 2);
+        let gross_night = base_night + extra_bed_per_night; // 180.00/night -> 360.00 over 2 nights
+        let commission_night = Decimal::new(2700, 2); // 15% of 180.00
+        let service_tax_night = Decimal::new(1440, 2); // 8% of 180.00
+        let tourism_tax_night = Decimal::new(1000, 2); // RM 10.00/night
+
+        let mut agg = StatementBookingAggregate {
+            booking_id: 1,
+            booking_number: "BK-1".into(),
+            ref_no: "OTA-1".into(),
+            guest_name: "Alice".into(),
+            check_in_date: d1,
+            check_out_date: d3,
+            booking_channel_id: Some(1),
+            booking_channel: "Agoda".into(),
+            channel_type: "ota".into(),
+            platform_name: "Agoda".into(),
+            commission_type: "percentage".into(),
+            commission_scope: "room_only".into(),
+            commission_value: Decimal::new(15, 0),
+            amount: Decimal::ZERO,
+            commission: Decimal::ZERO,
+            tax: Decimal::ZERO,
+        };
+
+        for biz in [d1, d2] {
+            let row = ComputedRevenueRow {
+                booking_id: 1,
+                booking_number: "BK-1".into(),
+                ota_reference: Some("OTA-1".into()),
+                guest_name: "Alice".into(),
+                room_number: "101".into(),
+                room_type: "Deluxe".into(),
+                check_in_date: d1,
+                check_out_date: d3,
+                business_date: biz,
+                booking_channel_id: Some(1),
+                booking_channel: "Agoda".into(),
+                channel_type: "ota".into(),
+                platform_name: "Agoda".into(),
+                gross_room_revenue: gross_night,
+                commission_type: "percentage".into(),
+                commission_scope: "room_only".into(),
+                commission_value: Decimal::new(15, 0),
+                commission_amount: commission_night,
+                net_hotel_revenue: gross_night - commission_night,
+                service_tax: service_tax_night,
+                tourism_tax: tourism_tax_night,
+                booking_status: "checked_in".into(),
+                posted_status: "unposted",
+            };
+            accumulate_statement_row(&mut agg, &row);
+        }
+
+        // Gross booking total = 360.00 room + 28.80 SST + 20.00 TTx = 408.80
+        assert_eq!(agg.amount, Decimal::new(40880, 2));
+        // Commission = 54.00, Tax = 48.80, Amount Paid = 360.00 - 54.00 = 306.00 (no double tax subtraction)
+        assert_eq!(agg.commission, Decimal::new(5400, 2));
+        assert_eq!(agg.tax, Decimal::new(4880, 2));
+        assert_eq!(statement_amount_paid(&agg), Decimal::new(30600, 2));
+    }
 }

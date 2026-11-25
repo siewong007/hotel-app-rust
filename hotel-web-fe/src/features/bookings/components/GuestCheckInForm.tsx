@@ -143,8 +143,6 @@ export const GuestCheckInForm: React.FC = () => {
 
   useEffect(() => {
     if (!token) return;
-    // Async fetch: every setState in the loader runs after an await.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadBookingData();
   }, [token, loadBookingData]);
 

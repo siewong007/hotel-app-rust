@@ -26,6 +26,10 @@ import {
 import { guestErrorMessage } from '../../utils/feedback';
 import { useTranslation } from '../../../../i18n';
 import { useAutoFocusError } from '../../../../hooks/useAutoFocusError';
+import { ConsentBlock } from '../../../legal/components/ConsentBlock';
+import { EKYC_CONSENTS, EKYC_KEY_POINTS } from '../../../legal/content';
+import { useLegalLocale } from '../../../legal/LegalLocaleContext';
+import { useConsent } from '../../../legal/useConsent';
 import { ErrorState, LoadingState, SectionHeading } from './PortalDashboardSections';
 import { formatPortalDate } from './dashboardUtils';
 
@@ -98,6 +102,8 @@ const EMPTY_FIELDS: EkycFieldValues = {
  */
 export function IdentitySection({ token }: { token: string }) {
   const { t } = useTranslation('guestPortal');
+  const consent = useConsent(EKYC_CONSENTS);
+  const { locale: legalLocale } = useLegalLocale();
   const [status, setStatus] = useState<GuestPortalEkycStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -185,7 +191,8 @@ export function IdentitySection({ token }: { token: string }) {
 
   const handleSubmit = async () => {
     setShowErrors(true);
-    if (errors.length > 0) {
+    consent.setShowErrors(true);
+    if (errors.length > 0 || !consent.allRequiredGranted) {
       setFormError(t('dashboard.identity.incompleteFields'));
       return;
     }
@@ -206,6 +213,7 @@ export function IdentitySection({ token }: { token: string }) {
       id_back_image: paths.id_back ?? null,
       selfie_image: paths.selfie as string,
       proof_of_address: paths.proof ?? null,
+      consents: consent.buildPayload(legalLocale).consents,
     };
     try {
       const saved = await GuestPortalDashboardService.submitEkycVerification(payload, token);
@@ -213,6 +221,7 @@ export function IdentitySection({ token }: { token: string }) {
       setFields(EMPTY_FIELDS);
       setPaths({});
       setShowErrors(false);
+      consent.setShowErrors(false);
     } catch (error) {
       setFormError(guestErrorMessage(error, t('dashboard.identity.submitFailed')));
     } finally {
@@ -419,6 +428,18 @@ export function IdentitySection({ token }: { token: string }) {
               {errorFor('idFront') ?? errorFor('selfie') ?? errorFor('idBack')}
             </Typography>
           ) : null}
+
+          <ConsentBlock
+            prompts={EKYC_CONSENTS}
+            state={consent}
+            keyPoints={EKYC_KEY_POINTS}
+            title={{
+              en: 'Consent to identity verification',
+              ms: 'Persetujuan pengesahan identiti',
+              zh: '同意身份验证',
+              'zh-TW': '同意身分驗證',
+            }}
+          />
 
           <Button
             type="submit"

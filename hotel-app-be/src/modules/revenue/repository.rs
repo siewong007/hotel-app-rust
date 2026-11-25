@@ -92,7 +92,7 @@ impl RevenueRepository {
                 (SELECT COUNT(*) FROM created
                     WHERE status IN ('voided', 'comp_void')) AS voided_created,
                 (SELECT COUNT(*) FROM created WHERE status = 'no_show') AS no_show_created,
-                (SELECT COUNT(*) FROM rooms WHERE status <> 'out_of_order') AS sellable_rooms
+                (SELECT COUNT(*) FROM rooms WHERE is_active = true AND COALESCE(status, 'available') NOT IN ('maintenance', 'out_of_order') AND ($3::bigint IS NULL OR room_type_id = $3)) AS sellable_rooms
             "#,
         )
         .bind(range.from)
@@ -183,6 +183,7 @@ impl RevenueRepository {
             JOIN bookings b ON b.id = bs.booking_id
             JOIN rooms r ON r.id = b.room_id
             WHERE bs.status <> 'void'
+              AND b.status NOT IN ('voided', 'comp_void', 'no_show')
               AND bs.service_date::date BETWEEN $1 AND $2
               AND ($3::bigint IS NULL OR r.room_type_id = $3)
               AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
@@ -213,6 +214,7 @@ impl RevenueRepository {
             JOIN bookings b ON b.id = bs.booking_id
             JOIN rooms r ON r.id = b.room_id
             WHERE bs.status <> 'void'
+              AND b.status NOT IN ('voided', 'comp_void', 'no_show')
               AND bs.service_date::date BETWEEN $1 AND $2
               AND ($3::bigint IS NULL OR r.room_type_id = $3)
               AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
@@ -315,11 +317,17 @@ impl RevenueRepository {
                 (SELECT COALESCE(SUM(p.amount), 0)
                  FROM payments p
                  WHERE p.status = 'completed'
+                   AND COALESCE(p.payment_type, 'booking') NOT IN ('deposit', 'refund', 'deposit_forfeited')
                    AND p.created_at::date BETWEEN $1 AND $2) AS collected,
-                (SELECT COALESCE(SUM(p.refund_amount), 0)
+                (SELECT COALESCE(SUM(
+                    CASE
+                        WHEN COALESCE(p.payment_type, '') = 'refund' AND p.status = 'refunded' THEN p.amount
+                        ELSE COALESCE(p.refund_amount, 0)
+                    END
+                 ), 0)
                  FROM payments p
-                 WHERE p.refund_amount IS NOT NULL
-                   AND p.refunded_at::date BETWEEN $1 AND $2) AS refunded,
+                 WHERE (COALESCE(p.payment_type, '') = 'refund' AND p.status = 'refunded' AND p.created_at::date BETWEEN $1 AND $2)
+                    OR (p.refund_amount IS NOT NULL AND p.refunded_at::date BETWEEN $1 AND $2)) AS refunded,
                 (SELECT COALESCE(SUM(i.balance_due), 0)
                  FROM invoices i
                  WHERE i.balance_due > 0

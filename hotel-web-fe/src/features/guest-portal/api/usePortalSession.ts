@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { queryKeys } from '../../../api/queryKeys';
 import { portalSessionScope } from '../../promotions/utils';
-import { clearPortalToken, getValidPortalToken } from './portalTokenStore';
+import { clearPortalToken, getPortalToken, getValidPortalToken } from './portalTokenStore';
 import { GuestPortalDashboardService } from './guestPortalDashboard.service';
 
 /**
@@ -19,12 +19,13 @@ export function usePortalSession() {
   // sign-out that always follows (see useGuestSignOut): navigating here first
   // would leave before that sign-out reached the server.
   const logout = useCallback(() => {
-    if (token) {
-      void GuestPortalDashboardService.logout(token).catch(() => {
+    const activeToken = getPortalToken() ?? token;
+    if (activeToken) {
+      void GuestPortalDashboardService.logout(activeToken).catch(() => {
         // Local cleanup still protects the current device if the network is unavailable.
       });
       queryClient.removeQueries({
-        queryKey: queryKeys.promotions.portal(portalSessionScope(token)),
+        queryKey: queryKeys.promotions.portal(portalSessionScope(activeToken)),
       });
     }
     clearPortalToken();

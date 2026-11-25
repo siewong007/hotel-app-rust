@@ -37,6 +37,7 @@ import type { ActionMenuItem } from '../../../../components/common/ActionsMenu';
 import { statusLabel, useTranslation } from '../../../../i18n';
 import { formatStatusLabel } from '../../../../utils/formatters';
 import { isPositiveMoney, toMoneyNumber } from '../../../../utils/money';
+import { isInHouseBookingStatus } from '../../../../constants/booking.constants';
 import { getHotelSettings } from '../../../../utils/hotelSettings';
 import { getBookedViaText, getBookingChannelInfo } from '../../utils/bookingChannel';
 import {
@@ -118,7 +119,8 @@ const BookingDetailsPanel: React.FC<BookingDetailsPanelProps> = ({
   const showPayment = !inGroup
     && !booking.is_complimentary
     && isPositiveMoney(getBookingBalance(booking))
-    && !['checked_in', 'checked_out', 'completed'].includes(booking.status);
+    && !isInHouseBookingStatus(booking.status)
+    && !['checked_out', 'completed'].includes(booking.status);
   const showInvoice = ['checked_out', 'completed'].includes(booking.status);
   const showRelease = canRelease(booking);
   const showVoid = canVoid(booking);

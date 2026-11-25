@@ -58,7 +58,12 @@ pub async fn updates_socket_handler(
             )));
         }
     }
+    if crate::core::auth::AuthService::check_role(&pool, actor_user_id, "guest").await? {
+        return Err(ApiError::Forbidden(
+            "Realtime operational feed is not available to guest accounts".to_string(),
+        ));
+    }
     Ok(websocket
         .protocols(["hotel-updates"])
-        .on_upgrade(move |socket| serve_socket(socket, hub)))
+        .on_upgrade(move |socket| serve_socket(socket, hub, pool, actor_user_id, session_id)))
 }

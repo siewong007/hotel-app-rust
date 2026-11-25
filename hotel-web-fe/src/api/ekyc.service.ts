@@ -286,20 +286,27 @@ export class EkycService {
     return await api.get(`ekyc/admin/applications/export${paramsToSearch(params)}`).blob();
   }
 
-  static async approveEkycVerification(verificationId: number): Promise<void> {
+  static async approveEkycVerification(
+    verificationId: number,
+    expectedVersion = 1,
+  ): Promise<void> {
     await this.performReviewAction(verificationId, {
       action: 'approve',
-      expected_version: 1,
+      expected_version: expectedVersion,
       reason_code: 'manual_override',
       reason: 'Legacy approval action',
       self_checkin_enabled: true,
     });
   }
 
-  static async rejectEkycVerification(verificationId: number, reason: string): Promise<void> {
+  static async rejectEkycVerification(
+    verificationId: number,
+    reason: string,
+    expectedVersion = 1,
+  ): Promise<void> {
     await this.performReviewAction(verificationId, {
       action: 'reject',
-      expected_version: 1,
+      expected_version: expectedVersion,
       reason_code: 'other',
       reason,
     });

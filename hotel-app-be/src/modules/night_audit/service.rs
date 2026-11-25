@@ -59,19 +59,22 @@ pub async fn run_with_user(
         ))
     })?;
 
-    let already_run = is_audit_completed(pool, audit_date).await;
-    if already_run {
+    let audit_run_id = if is_audit_completed(pool, audit_date).await {
         if input.force {
-            reset_audit(pool, audit_date).await?;
+            let mut tx = pool.begin().await.map_err(ApiError::from)?;
+            repo::reset_audit_tx(&mut tx, audit_date).await?;
+            let id = repo::run_audit_procedure_tx(&mut tx, audit_date, run_by).await?;
+            tx.commit().await.map_err(ApiError::from)?;
+            id
         } else {
             return Err(ApiError::BadRequest(format!(
                 "Night audit already completed for {}. Use force=true to rerun.",
                 audit_date
             )));
         }
-    }
-
-    let audit_run_id = run_audit_procedure(pool, audit_date, run_by).await?;
+    } else {
+        run_audit_procedure(pool, audit_date, run_by).await?
+    };
 
     match crate::services::invoice_numbers::backfill_missing_booking_invoices(pool).await {
         Ok(0) => {}

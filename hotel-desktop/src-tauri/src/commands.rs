@@ -5,7 +5,7 @@
 use rand::RngExt;
 use std::net::TcpListener;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::ShellExt;
@@ -19,8 +19,50 @@ static BACKEND_RUNNING: AtomicBool = AtomicBool::new(false);
 static BACKEND_STARTING: AtomicBool = AtomicBool::new(false);
 static BACKEND_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static BACKEND_PORT: AtomicU16 = AtomicU16::new(3030);
-static BACKEND_PROCESS: LazyLock<Arc<Mutex<Option<CommandChild>>>> =
+static BACKEND_GENERATION: AtomicU64 = AtomicU64::new(0);
+type ManagedBackendProcess = Arc<Mutex<Option<(u64, CommandChild)>>>;
+static BACKEND_PROCESS: LazyLock<ManagedBackendProcess> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+const PROD_ALLOWED_ORIGINS: &str = "tauri://localhost,http://tauri.localhost";
+#[allow(dead_code)]
+const DEV_ALLOWED_ORIGINS: &str = "tauri://localhost,http://tauri.localhost,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173";
+
+fn allowed_origins_env() -> &'static str {
+    if cfg!(debug_assertions) {
+        DEV_ALLOWED_ORIGINS
+    } else {
+        PROD_ALLOWED_ORIGINS
+    }
+}
+
+/// Ensures `BACKEND_STARTING` is always released if `start_backend_sidecar`
+/// returns early on error or is dropped.
+struct BackendStartingGuard {
+    active: bool,
+}
+
+impl BackendStartingGuard {
+    fn acquire() -> Option<Self> {
+        BACKEND_STARTING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self { active: true })
+    }
+
+    fn finish(mut self) {
+        self.active = false;
+        BACKEND_STARTING.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Drop for BackendStartingGuard {
+    fn drop(&mut self) {
+        if self.active {
+            BACKEND_STARTING.store(false, Ordering::SeqCst);
+        }
+    }
+}
 
 /// Status response for the application
 #[derive(serde::Serialize)]
@@ -79,13 +121,16 @@ fn generate_desktop_jwt_secret() -> String {
 
 /// Start the backend sidecar process
 pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String> {
-    if BACKEND_RUNNING.load(Ordering::SeqCst) || BACKEND_STARTING.load(Ordering::SeqCst) {
+    if BACKEND_RUNNING.load(Ordering::SeqCst) {
         log::info!("Backend is already running");
         return Ok(());
     }
+    let Some(starting_guard) = BackendStartingGuard::acquire() else {
+        log::info!("Backend is already starting");
+        return Ok(());
+    };
 
     log::info!("Starting backend sidecar...");
-    BACKEND_STARTING.store(true, Ordering::SeqCst);
     BACKEND_STOP_REQUESTED.store(false, Ordering::SeqCst);
 
     // Desktop mode owns the bundled PostgreSQL instance. Do not let a user or
@@ -115,25 +160,28 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
         .env("HOTEL_DESKTOP_MODE", "1")
         // KEEP IN SYNC: dev proxy prefixes in hotel-web-fe/vite.config.ts;
         // router merge in hotel-app-be/src/routes/mod.rs; dev http origins in
-        // src-tauri/capabilities/default.json remote.urls — parity enforced by
+        // src-tauri/capabilities/dev.json remote.urls — parity enforced by
         // hotel-desktop/scripts/origin-parity.test.mjs.
-        .env(
-            "ALLOWED_ORIGINS",
-            "tauri://localhost,http://tauri.localhost,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173",
-        )
+        .env("ALLOWED_ORIGINS", allowed_origins_env())
         .env("SKIP_EMAIL_VERIFICATION", "true")
         .env("TRUST_PROXY_HEADERS", "false")
         .env("RUST_LOG", "info");
 
+    let generation = BACKEND_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let (mut rx, child) = sidecar_command
         .spawn()
         .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
-    // Store the child process
+    // Replace any stale process handle before storing the new generation.
     {
         let mut process = BACKEND_PROCESS.lock().await;
-        *process = Some(child);
+        if let Some((_, previous)) = process.take() {
+            let _ = previous.kill();
+        }
+        *process = Some((generation, child));
     }
+
+    let (exit_tx, mut exit_rx) = tokio::sync::watch::channel(false);
 
     // Spawn a task to monitor the sidecar output
     let app_handle_clone = app_handle.clone();
@@ -152,11 +200,22 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
                 }
                 CommandEvent::Terminated(payload) => {
                     log::warn!("Backend process terminated with code: {:?}", payload.code);
+                    let _ = exit_tx.send(true);
+                    if BACKEND_GENERATION.load(Ordering::SeqCst) != generation {
+                        log::info!(
+                            "Ignoring stale backend-terminated event for generation {}",
+                            generation
+                        );
+                        break;
+                    }
                     BACKEND_RUNNING.store(false, Ordering::SeqCst);
                     BACKEND_STARTING.store(false, Ordering::SeqCst);
                     {
                         let mut process = BACKEND_PROCESS.lock().await;
-                        *process = None;
+                        if matches!(process.as_ref(), Some((proc_gen, _)) if *proc_gen == generation)
+                        {
+                            *process = None;
+                        }
                     }
 
                     // Emit event to frontend
@@ -179,15 +238,23 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
         }
     });
 
-    // Wait for backend to be ready
-    if let Err(e) = wait_for_backend_ready(backend_port).await {
-        BACKEND_STARTING.store(false, Ordering::SeqCst);
-        BACKEND_RUNNING.store(false, Ordering::SeqCst);
+    // Wait for backend to be ready; short-circuit immediately if this generation exits or is replaced.
+    if let Err(e) = wait_for_backend_ready(backend_port, generation, &mut exit_rx).await {
+        if BACKEND_GENERATION.load(Ordering::SeqCst) == generation {
+            BACKEND_RUNNING.store(false, Ordering::SeqCst);
+            let mut process = BACKEND_PROCESS.lock().await;
+            if matches!(process.as_ref(), Some((proc_gen, _)) if *proc_gen == generation)
+                && let Some((_, child)) = process.take()
+            {
+                let _ = child.kill();
+            }
+        }
+        starting_guard.finish();
         return Err(e);
     }
 
-    BACKEND_STARTING.store(false, Ordering::SeqCst);
     BACKEND_RUNNING.store(true, Ordering::SeqCst);
+    starting_guard.finish();
 
     // Every path that brings the backend up — initial start, manual restart,
     // restore, guided upgrade, crash backoff — goes through here, so this is
@@ -253,18 +320,34 @@ async fn restart_backend_with_backoff(app_handle: AppHandle) {
 }
 
 /// Wait for the backend to be ready (health check)
-async fn wait_for_backend_ready(port: u16) -> Result<(), String> {
+async fn wait_for_backend_ready(
+    port: u16,
+    generation: u64,
+    exit_rx: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<(), String> {
     let client = reqwest::Client::new();
     let health_url = format!("http://127.0.0.1:{}/health", port);
 
     for i in 0..30 {
+        if BACKEND_GENERATION.load(Ordering::SeqCst) != generation
+            || BACKEND_STOP_REQUESTED.load(Ordering::SeqCst)
+            || *exit_rx.borrow()
+        {
+            return Err("Backend process exited before becoming ready".to_string());
+        }
+
         match client.get(&health_url).send().await {
             Ok(response) if response.status().is_success() => {
                 log::info!("Backend is ready after {} seconds", i);
                 return Ok(());
             }
             _ => {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                    _ = exit_rx.changed() => {
+                        return Err("Backend process exited before becoming ready".to_string());
+                    }
+                }
             }
         }
     }
@@ -279,16 +362,17 @@ async fn wait_for_backend_ready(port: u16) -> Result<(), String> {
 pub async fn stop_backend_sidecar() -> Result<(), String> {
     log::info!("Stopping backend sidecar...");
     BACKEND_STOP_REQUESTED.store(true, Ordering::SeqCst);
+    BACKEND_GENERATION.fetch_add(1, Ordering::SeqCst);
 
     let mut process = BACKEND_PROCESS.lock().await;
-    if let Some(child) = process.take() {
+    if let Some((_, child)) = process.take() {
         child
             .kill()
             .map_err(|e| format!("Failed to kill backend process: {}", e))?;
-        BACKEND_RUNNING.store(false, Ordering::SeqCst);
-        BACKEND_STARTING.store(false, Ordering::SeqCst);
         log::info!("Backend sidecar stopped");
     }
+    BACKEND_RUNNING.store(false, Ordering::SeqCst);
+    BACKEND_STARTING.store(false, Ordering::SeqCst);
 
     Ok(())
 }
@@ -480,7 +564,7 @@ pub async fn open_data_folder() -> Result<(), String> {
 
 /// Open the managed backups folder in the OS file explorer so the user can
 /// copy dumps off-app. Deliberately folder-only: arbitrary destination paths
-/// stay refused (see ensure_within_data_dir).
+/// stay refused (see ensure_within_backups_dir).
 #[tauri::command]
 pub async fn open_backups_folder() -> Result<(), String> {
     let dir = crate::postgres::backups_directory();
@@ -640,4 +724,32 @@ pub async fn install_update(app_handle: AppHandle) -> Result<InstallOutcome, Str
 #[tauri::command]
 pub fn restart_app(app_handle: AppHandle) {
     app_handle.request_restart();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prod_allowed_origins_excludes_dev_localhost() {
+        assert_eq!(
+            PROD_ALLOWED_ORIGINS,
+            "tauri://localhost,http://tauri.localhost"
+        );
+        assert!(!PROD_ALLOWED_ORIGINS.contains("localhost:3000"));
+        assert!(!PROD_ALLOWED_ORIGINS.contains("localhost:5173"));
+        assert!(DEV_ALLOWED_ORIGINS.contains("http://127.0.0.1:3000"));
+        assert!(DEV_ALLOWED_ORIGINS.contains("http://localhost:5173"));
+    }
+
+    #[test]
+    fn backend_starting_guard_releases_on_early_drop() {
+        BACKEND_STARTING.store(false, Ordering::SeqCst);
+        {
+            let _guard = BackendStartingGuard::acquire().expect("first acquire");
+            assert!(BACKEND_STARTING.load(Ordering::SeqCst));
+            assert!(BackendStartingGuard::acquire().is_none());
+        }
+        assert!(!BACKEND_STARTING.load(Ordering::SeqCst));
+    }
 }

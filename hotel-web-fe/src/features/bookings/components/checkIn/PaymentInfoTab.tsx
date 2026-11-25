@@ -22,7 +22,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material';
 import { Visibility as VisibilityIcon, VisibilityOff as VisibilityOffIcon, Add as AddIcon, Payment as PaymentIcon, MoneyOff as MoneyOffIcon, PersonAdd as PersonAddIcon, Business as BusinessIcon } from '@mui/icons-material';
-import { isPositiveMoney, toMoneyNumber } from '../../../../utils/money';
+import { isPositiveMoney, subtractMoney, toMoneyNumber } from '../../../../utils/money';
 import { getHotelSettings } from '../../../../utils/hotelSettings';
 import type { Booking, BookingUpdateRequest, BookingWithDetails, Guest } from '../../../../types';
 import type { CompanyOption, ValidationErrors } from './checkInTypes';
@@ -144,6 +144,11 @@ export function PaymentInfoTab({
     );
     return filtered.length > 0 ? filtered : ['Cash'];
   }, [paymentMethods]);
+  const remainingDue =
+    booking.balance_due !== undefined && booking.balance_due !== null
+      ? Math.max(0, toMoneyNumber(booking.balance_due))
+      : Math.max(0, subtractMoney(toMoneyNumber(booking.total_amount), toMoneyNumber(booking.total_paid)));
+  const isAlreadyPaid = booking.payment_status === 'paid' || !isPositiveMoney(remainingDue);
   return (
       <Grid container spacing={2}>
         {/* Payment Section */}
@@ -153,13 +158,21 @@ export function PaymentInfoTab({
           </Typography>
           <Divider sx={{ mb: 2 }} />
         </Grid>
-        {isOnlineReservation && (
+        {isAlreadyPaid ? (
           <Grid size={12}>
             <Alert severity="success" sx={{ mb: 1 }}>
-              {t('checkIn.settledOnlineNotice', { platform: onlinePlatformName, amount: formatCurrency(toMoneyNumber(booking.total_amount)) })}
+              {t('payment.paid')} ({formatCurrency(toMoneyNumber(booking.total_paid ?? booking.total_amount))})
             </Alert>
           </Grid>
-        )}
+        ) : (
+          <>
+            {isOnlineReservation && (
+              <Grid size={12}>
+                <Alert severity="success" sx={{ mb: 1 }}>
+                  {t('checkIn.settledOnlineNotice', { platform: onlinePlatformName, amount: formatCurrency(toMoneyNumber(booking.total_amount)) })}
+                </Alert>
+              </Grid>
+            )}
         <Grid size={12}>
           <ToggleButtonGroup
             value={paymentChoice}
@@ -453,6 +466,8 @@ export function PaymentInfoTab({
               {t('checkIn.payLaterUnpaid')}
             </Alert>
           </Grid>
+        )}
+          </>
         )}
 
         {isOnlineReservation && (isPositiveMoney(booking.tourism_tax_amount) || isPositiveMoney(booking.extra_bed_charge)) && (

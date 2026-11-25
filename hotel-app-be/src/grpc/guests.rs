@@ -15,6 +15,7 @@ use crate::core::db::DbPool;
 use crate::core::middleware::check_permission;
 use crate::models::{GuestInput, GuestPaginationParams, GuestUpdateInput};
 use crate::modules::guests::{models as gm, service as svc};
+use crate::modules::realtime::hub::DataChangeHub;
 
 use super::auth::authenticate;
 use super::convert as c;
@@ -227,7 +228,7 @@ fn booking_pb(b: &gm::GuestBookingRow, cur: &str) -> pb::GuestBooking {
 
 fn credit_pb(cr: &gm::GuestCreditRow) -> pb::GuestRoomTypeCredit {
     pb::GuestRoomTypeCredit {
-        id: cr.id as i64,
+        id: cr.id,
         guest: c::guest_name(cr.guest_id),
         room_type: c::room_type_name(cr.room_type_id),
         room_type_name: cr.room_type_name.clone(),
@@ -259,6 +260,7 @@ fn room_credit_pb(cr: &gm::GuestRoomCreditRow) -> pb::GuestRoomTypeCredit {
 pub struct GuestGrpc {
     pool: DbPool,
     idem: std::sync::Arc<IdempotencyCache>,
+    data_change_hub: Option<DataChangeHub>,
 }
 
 impl GuestGrpc {
@@ -266,6 +268,21 @@ impl GuestGrpc {
         Self {
             pool,
             idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: None,
+        }
+    }
+
+    pub fn with_hub(pool: DbPool, data_change_hub: DataChangeHub) -> Self {
+        Self {
+            pool,
+            idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: Some(data_change_hub),
+        }
+    }
+
+    fn publish_change(&self) {
+        if let Some(ref hub) = self.data_change_hub {
+            hub.publish_data_changed("guests");
         }
     }
 
@@ -438,34 +455,41 @@ impl GuestService for GuestGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("CreateGuest", &req.request_id, || async {
-                let g = req.guest.clone().unwrap_or_default();
-                let guest_type = guest_type_model(g.guest_type());
-                let tourism_type = tourism_type_model(g.tourism_type());
-                let input = GuestInput {
-                    first_name: g.first_name.unwrap_or_default(),
-                    last_name: g.last_name.unwrap_or_default(),
-                    email: g.email,
-                    phone: g.phone,
-                    ic_number: g.ic_number,
-                    nationality: g.nationality,
-                    address_line1: g.address_line1,
-                    city: g.city,
-                    state_province: g.state_province,
-                    postal_code: g.postal_code,
-                    country: g.country,
-                    guest_type,
-                    tourism_type,
-                    discount_percentage: g.discount_percentage,
-                    company_name: g.company_name,
-                };
-                let guest = svc::create_guest(&self.pool, auth.user_id, input)
-                    .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::CreateGuestResponse {
-                    guest: Some(guest_pb(&guest)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "CreateGuest",
+                &req.request_id,
+                &req,
+                || async {
+                    let g = req.guest.clone().unwrap_or_default();
+                    let guest_type = guest_type_model(g.guest_type());
+                    let tourism_type = tourism_type_model(g.tourism_type());
+                    let input = GuestInput {
+                        first_name: g.first_name.unwrap_or_default(),
+                        last_name: g.last_name.unwrap_or_default(),
+                        email: g.email,
+                        phone: g.phone,
+                        ic_number: g.ic_number,
+                        nationality: g.nationality,
+                        address_line1: g.address_line1,
+                        city: g.city,
+                        state_province: g.state_province,
+                        postal_code: g.postal_code,
+                        country: g.country,
+                        guest_type,
+                        tourism_type,
+                        discount_percentage: g.discount_percentage,
+                        company_name: g.company_name,
+                    };
+                    let guest = svc::create_guest(&self.pool, auth.user_id, input)
+                        .await
+                        .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::CreateGuestResponse {
+                        guest: Some(guest_pb(&guest)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -479,72 +503,87 @@ impl GuestService for GuestGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("UpdateGuest", &req.request_id, || async {
-                let g = req.guest.clone().unwrap_or_default();
-                let guest_id = c::require_name(&g.name, "guests")?;
-                let mut input = GuestUpdateInput::default();
-                for path in &req
-                    .update_mask
-                    .as_ref()
-                    .map(|m| m.paths.clone())
-                    .unwrap_or_default()
-                {
-                    match path.as_str() {
-                        "first_name" => input.first_name = g.first_name.clone(),
-                        "last_name" => input.last_name = g.last_name.clone(),
-                        "email" => input.email = g.email.clone(),
-                        "phone" => input.phone = g.phone.clone(),
-                        "title" => input.title = g.title.clone(),
-                        "alt_phone" => input.alt_phone = g.alt_phone.clone(),
-                        "ic_number" => input.ic_number = g.ic_number.clone(),
-                        "nationality" => input.nationality = g.nationality.clone(),
-                        "address_line1" => input.address_line1 = g.address_line1.clone(),
-                        "city" => input.city = g.city.clone(),
-                        "state_province" => input.state_province = g.state_province.clone(),
-                        "postal_code" => input.postal_code = g.postal_code.clone(),
-                        "country" => input.country = g.country.clone(),
-                        // Accepted-but-ignored in REST — passed through so the
-                        // service's own ignore/apply rules stay authoritative.
-                        "is_active" => input.is_active = Some(g.is_active),
-                        "guest_type" => input.guest_type = guest_type_model(g.guest_type()),
-                        "tourism_type" => input.tourism_type = tourism_type_model(g.tourism_type()),
-                        "discount_percentage" => input.discount_percentage = g.discount_percentage,
-                        "company_name" => input.company_name = g.company_name.clone(),
-                        "vip_status" => input.vip_status = g.vip_status.clone(),
-                        "tags" => input.tags = Some(g.tags.clone()),
-                        "job_title" => input.job_title = g.job_title.clone(),
-                        "notes" => input.notes = g.notes.clone(),
-                        "special_requests" => input.special_requests = g.special_requests.clone(),
-                        "marketing_opt_in" => input.marketing_opt_in = g.marketing_opt_in,
-                        "communication_preference" => {
-                            input.communication_preference = g.communication_preference.clone()
-                        }
-                        "language_preference" => {
-                            input.language_preference = g.language_preference.clone()
-                        }
-                        "is_blacklisted" => input.is_blacklisted = g.is_blacklisted,
-                        "blacklist_reason" => input.blacklist_reason = g.blacklist_reason.clone(),
-                        "date_of_birth" => {
-                            input.date_of_birth = c::date_from_pb(g.date_of_birth.as_ref())?
-                        }
-                        "id_type" => input.id_type = g.id_type.clone(),
-                        "id_number" => input.id_number = g.id_number.clone(),
-                        "id_expiry" => input.id_expiry = c::date_from_pb(g.id_expiry.as_ref())?,
-                        "id_country" => input.id_country = g.id_country.clone(),
-                        other => {
-                            return Err(Status::invalid_argument(format!(
-                                "update_mask contains unsupported field '{other}'"
-                            )));
+            .run(
+                auth.user_id,
+                "UpdateGuest",
+                &req.request_id,
+                &req,
+                || async {
+                    let g = req.guest.clone().unwrap_or_default();
+                    let guest_id = c::require_name(&g.name, "guests")?;
+                    let mut input = GuestUpdateInput::default();
+                    for path in &req
+                        .update_mask
+                        .as_ref()
+                        .map(|m| m.paths.clone())
+                        .unwrap_or_default()
+                    {
+                        match path.as_str() {
+                            "first_name" => input.first_name = g.first_name.clone(),
+                            "last_name" => input.last_name = g.last_name.clone(),
+                            "email" => input.email = g.email.clone(),
+                            "phone" => input.phone = g.phone.clone(),
+                            "title" => input.title = g.title.clone(),
+                            "alt_phone" => input.alt_phone = g.alt_phone.clone(),
+                            "ic_number" => input.ic_number = g.ic_number.clone(),
+                            "nationality" => input.nationality = g.nationality.clone(),
+                            "address_line1" => input.address_line1 = g.address_line1.clone(),
+                            "city" => input.city = g.city.clone(),
+                            "state_province" => input.state_province = g.state_province.clone(),
+                            "postal_code" => input.postal_code = g.postal_code.clone(),
+                            "country" => input.country = g.country.clone(),
+                            // Accepted-but-ignored in REST — passed through so the
+                            // service's own ignore/apply rules stay authoritative.
+                            "is_active" => input.is_active = Some(g.is_active),
+                            "guest_type" => input.guest_type = guest_type_model(g.guest_type()),
+                            "tourism_type" => {
+                                input.tourism_type = tourism_type_model(g.tourism_type())
+                            }
+                            "discount_percentage" => {
+                                input.discount_percentage = g.discount_percentage
+                            }
+                            "company_name" => input.company_name = g.company_name.clone(),
+                            "vip_status" => input.vip_status = g.vip_status.clone(),
+                            "tags" => input.tags = Some(g.tags.clone()),
+                            "job_title" => input.job_title = g.job_title.clone(),
+                            "notes" => input.notes = g.notes.clone(),
+                            "special_requests" => {
+                                input.special_requests = g.special_requests.clone()
+                            }
+                            "marketing_opt_in" => input.marketing_opt_in = g.marketing_opt_in,
+                            "communication_preference" => {
+                                input.communication_preference = g.communication_preference.clone()
+                            }
+                            "language_preference" => {
+                                input.language_preference = g.language_preference.clone()
+                            }
+                            "is_blacklisted" => input.is_blacklisted = g.is_blacklisted,
+                            "blacklist_reason" => {
+                                input.blacklist_reason = g.blacklist_reason.clone()
+                            }
+                            "date_of_birth" => {
+                                input.date_of_birth = c::date_from_pb(g.date_of_birth.as_ref())?
+                            }
+                            "id_type" => input.id_type = g.id_type.clone(),
+                            "id_number" => input.id_number = g.id_number.clone(),
+                            "id_expiry" => input.id_expiry = c::date_from_pb(g.id_expiry.as_ref())?,
+                            "id_country" => input.id_country = g.id_country.clone(),
+                            other => {
+                                return Err(Status::invalid_argument(format!(
+                                    "update_mask contains unsupported field '{other}'"
+                                )));
+                            }
                         }
                     }
-                }
-                let guest = svc::update_guest(&self.pool, auth.user_id, guest_id, input)
-                    .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::UpdateGuestResponse {
-                    guest: Some(guest_pb(&guest)),
-                }))
-            })
+                    let guest = svc::update_guest(&self.pool, auth.user_id, guest_id, input)
+                        .await
+                        .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::UpdateGuestResponse {
+                        guest: Some(guest_pb(&guest)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -558,13 +597,20 @@ impl GuestService for GuestGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("DeleteGuest", &req.request_id, || async {
-                let guest_id = c::require_name(&req.name, "guests")?;
-                svc::delete_guest(&self.pool, guest_id)
-                    .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::DeleteGuestResponse {}))
-            })
+            .run(
+                auth.user_id,
+                "DeleteGuest",
+                &req.request_id,
+                &req,
+                || async {
+                    let guest_id = c::require_name(&req.name, "guests")?;
+                    svc::delete_guest_as(&self.pool, Some(auth.user_id), guest_id)
+                        .await
+                        .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::DeleteGuestResponse {}))
+                },
+            )
             .await
     }
 
@@ -579,8 +625,10 @@ impl GuestService for GuestGrpc {
         let req = request.into_inner();
         self.idem
             .run(
+                auth.user_id,
                 "ApplyTourismTypeFromLastCheckIn",
                 &req.request_id,
+                &req,
                 || async {
                     let guest_id = c::require_name(&req.name, "guests")?;
                     let currency = self.currency().await?;
@@ -591,6 +639,7 @@ impl GuestService for GuestGrpc {
                     )
                     .await
                     .map_err(to_status)?;
+                    self.publish_change();
                     let s = &res.source;
                     Ok(Response::new(pb::ApplyTourismTypeFromLastCheckInResponse {
                         conversion: Some(pb::GuestTourismConversion {
@@ -620,16 +669,23 @@ impl GuestService for GuestGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("TransferGuestPortalAccount", &req.request_id, || async {
-                let guest_id = c::require_name(&req.name, "guests")?;
-                let input = crate::models::TransferGuestPortalAccountInput {
-                    username: req.username.clone(),
-                };
-                svc::transfer_guest_portal_account(&self.pool, auth.user_id, guest_id, input)
-                    .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::TransferGuestPortalAccountResponse {}))
-            })
+            .run(
+                auth.user_id,
+                "TransferGuestPortalAccount",
+                &req.request_id,
+                &req,
+                || async {
+                    let guest_id = c::require_name(&req.name, "guests")?;
+                    let input = crate::models::TransferGuestPortalAccountInput {
+                        username: req.username.clone(),
+                    };
+                    svc::transfer_guest_portal_account(&self.pool, auth.user_id, guest_id, input)
+                        .await
+                        .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::TransferGuestPortalAccountResponse {}))
+                },
+            )
             .await
     }
 }

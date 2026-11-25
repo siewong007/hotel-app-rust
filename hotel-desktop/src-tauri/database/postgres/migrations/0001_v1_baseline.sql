@@ -507,8 +507,11 @@ COMMENT ON FUNCTION public.gen_uuidv7() IS 'Time-ordered native UUIDv7 for the P
 CREATE FUNCTION public.generate_folio_number() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+DECLARE
+    v_id_text TEXT;
 BEGIN
     IF NEW.folio_number IS NULL THEN
+        v_id_text := NEW.id::TEXT;
         NEW.folio_number := CASE NEW.folio_type
             WHEN 'guest_folio' THEN 'GF-'
             WHEN 'master_folio' THEN 'MF-'
@@ -516,7 +519,7 @@ BEGIN
             WHEN 'group_folio' THEN 'GP-'
             WHEN 'ar_ledger' THEN 'AR-'
             ELSE 'TX-'
-        END || TO_CHAR(CURRENT_DATE, 'YYYYMMDD') || '-' || LPAD(NEW.id::TEXT, 6, '0');
+        END || TO_CHAR(CURRENT_DATE, 'YYYYMMDD') || '-' || LPAD(v_id_text, GREATEST(LENGTH(v_id_text), 6), '0');
     END IF;
     IF NEW.net_amount IS NULL THEN
         NEW.net_amount := NEW.amount - COALESCE(NEW.tax_amount, 0) - COALESCE(NEW.service_charge, 0);
@@ -538,22 +541,30 @@ CREATE FUNCTION public.generate_invoice_number() RETURNS trigger
     AS $$
 DECLARE
     v_prefix TEXT;
-    v_next_seq INTEGER;
+    v_next_seq BIGINT;
+    v_seq_text TEXT;
 BEGIN
     IF NEW.invoice_number IS NULL THEN
         v_prefix := 'INV-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-';
 
-        SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM 12) AS INTEGER)), 0)
+        PERFORM pg_advisory_xact_lock(
+            hashtextextended('invoice_number:' || TO_CHAR(CURRENT_DATE, 'YYYYMM'), 0)
+        );
+
+        SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM 12) AS BIGINT)), 0)
           INTO v_next_seq
           FROM (
               SELECT invoice_number FROM invoices
                WHERE invoice_number LIKE v_prefix || '%'
+                 AND SUBSTRING(invoice_number FROM 12) ~ '^[0-9]+$'
               UNION ALL
               SELECT invoice_number FROM customer_ledgers
                WHERE invoice_number LIKE v_prefix || '%'
+                 AND SUBSTRING(invoice_number FROM 12) ~ '^[0-9]+$'
           ) combined;
 
-        NEW.invoice_number := v_prefix || LPAD((v_next_seq + 1)::TEXT, 4, '0');
+        v_seq_text := (v_next_seq + 1)::TEXT;
+        NEW.invoice_number := v_prefix || LPAD(v_seq_text, GREATEST(LENGTH(v_seq_text), 4), '0');
     END IF;
     RETURN NEW;
 END;
@@ -572,7 +583,12 @@ BEGIN
     SELECT
         b.id as booking_id,
         b.booking_number,
-        g.first_name || ' ' || g.last_name as guest_name,
+        CASE
+            WHEN NULLIF(BTRIM(g.first_name), '') IS NOT NULL
+                 AND NULLIF(BTRIM(g.last_name), '') IS NOT NULL
+            THEN BTRIM(g.first_name) || ' ' || BTRIM(g.last_name)
+            ELSE COALESCE(BTRIM(g.nick_name), '')
+        END as guest_name,
         r.room_number,
         b.check_in_date,
         b.check_out_date,
@@ -584,10 +600,10 @@ BEGIN
     WHERE b.is_posted = FALSE
     AND (
         (b.check_in_date <= p_audit_date AND b.check_out_date > p_audit_date)
-        OR (b.check_out_date = p_audit_date AND b.status = 'checked_out')
+        OR (b.check_out_date = p_audit_date AND b.status IN ('checked_out', 'completed'))
         OR (DATE(b.created_at) = p_audit_date OR DATE(b.updated_at) = p_audit_date)
     )
-    AND b.status NOT IN ('voided', 'no_show', 'confirmed', 'pending')
+    AND b.status IN ('checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
     ORDER BY b.check_in_date;
 END;
 $$;
@@ -757,10 +773,15 @@ DECLARE
     v_booking RECORD;
     v_tax_rate DECIMAL(5, 4) := 0.08;
     v_night_rate DECIMAL(10, 2);
+    v_allocated_net DECIMAL(10, 2);
     v_room_charge DECIMAL(10, 2);
     v_service_tax DECIMAL(10, 2);
     v_tourism_tax_per_night DECIMAL(10, 2);
     v_nights INTEGER;
+    v_billable_nights INTEGER;
+    v_night_discount DECIMAL(10, 2);
+    v_base_extra_bed DECIMAL(10, 2);
+    v_extra_bed_gross_per_night DECIMAL(10, 2);
     v_extra_bed_charge_per_night DECIMAL(10, 2);
     v_extra_bed_tax DECIMAL(10, 2);
     v_night_total DECIMAL(10, 2);
@@ -775,6 +796,7 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         v_tax_rate := 0.08;
     END;
+    v_tax_rate := COALESCE(v_tax_rate, 0.08);
 
     INSERT INTO night_audit_runs (audit_date, run_by, status)
     VALUES (p_audit_date, p_user_id, 'in_progress')
@@ -782,13 +804,18 @@ BEGIN
 
     FOR v_booking IN
         SELECT b.id, b.booking_number, b.status, b.room_rate, b.total_amount,
+               COALESCE(b.discount_amount, 0) as discount_amount,
                b.check_in_date, b.check_out_date, b.guest_id, b.room_id,
                b.daily_rates,
+               COALESCE(b.is_complimentary, false) as is_complimentary,
+               b.complimentary_start_date,
+               b.complimentary_end_date,
+               COALESCE(b.complimentary_nights, 0) as complimentary_nights,
                COALESCE(b.is_tourist, false) as is_tourist,
                COALESCE(b.tourism_tax_amount, 0) as tourism_tax_amount,
                COALESCE(b.extra_bed_charge, 0) as extra_bed_charge
         FROM bookings b
-        WHERE b.status NOT IN ('pending', 'confirmed', 'no_show', 'voided')
+        WHERE b.status IN ('checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
         AND b.check_in_date <= p_audit_date
         AND b.check_out_date > p_audit_date
         AND NOT EXISTS (
@@ -796,11 +823,41 @@ BEGIN
             WHERE napn.booking_id = b.id AND napn.audit_date = p_audit_date
         )
     LOOP
-        IF v_booking.daily_rates IS NOT NULL
-           AND v_booking.daily_rates ? p_audit_date::TEXT THEN
-            v_night_rate := (v_booking.daily_rates ->> p_audit_date::TEXT)::DECIMAL;
+        v_nights := GREATEST((v_booking.check_out_date - v_booking.check_in_date), 1);
+
+        IF v_booking.is_complimentary
+           AND ((v_booking.complimentary_start_date IS NOT NULL
+                 AND v_booking.complimentary_end_date IS NOT NULL
+                 AND p_audit_date >= v_booking.complimentary_start_date
+                 AND p_audit_date < v_booking.complimentary_end_date)
+                OR v_booking.total_amount <= 0) THEN
+            v_night_rate := 0;
         ELSE
-            v_night_rate := v_booking.room_rate;
+            SELECT vra.net_amount
+              INTO v_allocated_net
+              FROM voucher_redemption_allocations vra
+              JOIN voucher_redemptions vr ON vr.id = vra.redemption_id
+             WHERE vra.booking_id = v_booking.id
+               AND vra.stay_date = p_audit_date
+               AND vr.status = 'applied'
+             LIMIT 1;
+
+            IF FOUND THEN
+                v_night_rate := v_allocated_net;
+            ELSE
+                IF v_booking.daily_rates IS NOT NULL
+                   AND v_booking.daily_rates ? p_audit_date::TEXT THEN
+                    v_night_rate := (v_booking.daily_rates ->> p_audit_date::TEXT)::DECIMAL;
+                ELSE
+                    v_night_rate := v_booking.room_rate;
+                END IF;
+
+                IF v_booking.discount_amount > 0 THEN
+                    v_billable_nights := GREATEST(v_nights - LEAST(v_booking.complimentary_nights, v_nights), 1);
+                    v_night_discount := ROUND(v_booking.discount_amount / v_billable_nights, 2);
+                    v_night_rate := GREATEST(v_night_rate - v_night_discount, 0);
+                END IF;
+            END IF;
         END IF;
 
         v_room_charge := ROUND(v_night_rate / (1 + v_tax_rate), 2);
@@ -808,18 +865,24 @@ BEGIN
 
         v_tourism_tax_per_night := 0;
         IF v_booking.is_tourist AND v_booking.tourism_tax_amount > 0 THEN
-            v_nights := GREATEST((v_booking.check_out_date - v_booking.check_in_date), 1);
             v_tourism_tax_per_night := ROUND(v_booking.tourism_tax_amount / v_nights, 2);
         END IF;
 
+        v_extra_bed_gross_per_night := 0;
         v_extra_bed_charge_per_night := 0;
         v_extra_bed_tax := 0;
         IF v_booking.extra_bed_charge > 0 THEN
-            v_extra_bed_charge_per_night := ROUND(v_booking.extra_bed_charge / (1 + v_tax_rate), 2);
-            v_extra_bed_tax := v_booking.extra_bed_charge - v_extra_bed_charge_per_night;
+            v_base_extra_bed := ROUND(v_booking.extra_bed_charge / v_nights, 2);
+            IF p_audit_date = v_booking.check_out_date - 1 THEN
+                v_extra_bed_gross_per_night := GREATEST(v_booking.extra_bed_charge - v_base_extra_bed * (v_nights - 1), 0);
+            ELSE
+                v_extra_bed_gross_per_night := v_base_extra_bed;
+            END IF;
+            v_extra_bed_charge_per_night := ROUND(v_extra_bed_gross_per_night / (1 + v_tax_rate), 2);
+            v_extra_bed_tax := v_extra_bed_gross_per_night - v_extra_bed_charge_per_night;
         END IF;
 
-        v_night_total := v_night_rate + v_booking.extra_bed_charge + v_tourism_tax_per_night;
+        v_night_total := v_night_rate + v_extra_bed_gross_per_night + v_tourism_tax_per_night;
 
         INSERT INTO night_audit_posted_nights
             (booking_id, audit_date, room_rate, room_charge, service_tax, tourism_tax,
@@ -854,13 +917,15 @@ BEGIN
     -- Same-day checkout (hourly stays)
     FOR v_booking IN
         SELECT b.id, b.booking_number, b.status, b.room_rate, b.total_amount,
+               COALESCE(b.discount_amount, 0) as discount_amount,
                b.check_in_date, b.check_out_date, b.guest_id, b.room_id,
                b.daily_rates,
+               COALESCE(b.is_complimentary, false) as is_complimentary,
                COALESCE(b.is_tourist, false) as is_tourist,
                COALESCE(b.tourism_tax_amount, 0) as tourism_tax_amount,
                COALESCE(b.extra_bed_charge, 0) as extra_bed_charge
         FROM bookings b
-        WHERE b.status = 'checked_out'
+        WHERE b.status IN ('checked_out', 'completed')
         AND b.check_in_date = p_audit_date
         AND b.check_out_date = p_audit_date
         AND NOT EXISTS (
@@ -868,11 +933,32 @@ BEGIN
             WHERE napn.booking_id = b.id AND napn.audit_date = p_audit_date
         )
     LOOP
-        IF v_booking.daily_rates IS NOT NULL
-           AND v_booking.daily_rates ? p_audit_date::TEXT THEN
-            v_night_rate := (v_booking.daily_rates ->> p_audit_date::TEXT)::DECIMAL;
+        IF v_booking.is_complimentary AND v_booking.total_amount <= 0 THEN
+            v_night_rate := 0;
         ELSE
-            v_night_rate := v_booking.room_rate;
+            SELECT vra.net_amount
+              INTO v_allocated_net
+              FROM voucher_redemption_allocations vra
+              JOIN voucher_redemptions vr ON vr.id = vra.redemption_id
+             WHERE vra.booking_id = v_booking.id
+               AND vra.stay_date = p_audit_date
+               AND vr.status = 'applied'
+             LIMIT 1;
+
+            IF FOUND THEN
+                v_night_rate := v_allocated_net;
+            ELSE
+                IF v_booking.daily_rates IS NOT NULL
+                   AND v_booking.daily_rates ? p_audit_date::TEXT THEN
+                    v_night_rate := (v_booking.daily_rates ->> p_audit_date::TEXT)::DECIMAL;
+                ELSE
+                    v_night_rate := v_booking.room_rate;
+                END IF;
+
+                IF v_booking.discount_amount > 0 THEN
+                    v_night_rate := GREATEST(v_night_rate - v_booking.discount_amount, 0);
+                END IF;
+            END IF;
         END IF;
 
         v_room_charge := ROUND(v_night_rate / (1 + v_tax_rate), 2);
@@ -883,14 +969,16 @@ BEGIN
             v_tourism_tax_per_night := v_booking.tourism_tax_amount;
         END IF;
 
+        v_extra_bed_gross_per_night := 0;
         v_extra_bed_charge_per_night := 0;
         v_extra_bed_tax := 0;
         IF v_booking.extra_bed_charge > 0 THEN
-            v_extra_bed_charge_per_night := ROUND(v_booking.extra_bed_charge / (1 + v_tax_rate), 2);
-            v_extra_bed_tax := v_booking.extra_bed_charge - v_extra_bed_charge_per_night;
+            v_extra_bed_gross_per_night := v_booking.extra_bed_charge;
+            v_extra_bed_charge_per_night := ROUND(v_extra_bed_gross_per_night / (1 + v_tax_rate), 2);
+            v_extra_bed_tax := v_extra_bed_gross_per_night - v_extra_bed_charge_per_night;
         END IF;
 
-        v_night_total := v_night_rate + v_booking.extra_bed_charge + v_tourism_tax_per_night;
+        v_night_total := v_night_rate + v_extra_bed_gross_per_night + v_tourism_tax_per_night;
 
         INSERT INTO night_audit_posted_nights
             (booking_id, audit_date, room_rate, room_charge, service_tax, tourism_tax,
@@ -920,33 +1008,35 @@ BEGIN
 
         v_bookings_posted := v_bookings_posted + 1;
         v_revenue := v_revenue + v_night_total;
-        v_checkouts := v_checkouts + 1;
     END LOOP;
 
     SELECT COUNT(*) INTO v_checkins FROM bookings
-    WHERE status IN ('checked_in', 'auto_checked_in') AND check_in_date = p_audit_date;
+    WHERE status IN ('checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
+      AND check_in_date = p_audit_date;
 
     SELECT COUNT(*) INTO v_checkouts FROM bookings
-    WHERE status = 'checked_out'
+    WHERE status IN ('checked_out', 'completed')
     AND COALESCE((actual_check_out AT TIME ZONE COALESCE((SELECT value FROM system_settings WHERE key = 'timezone'), 'UTC'))::date, check_out_date) = p_audit_date;
 
-    SELECT COUNT(*) INTO v_total_rooms FROM rooms;
+    SELECT COUNT(*) INTO v_total_rooms FROM rooms WHERE is_active = true;
 
     SELECT
-        COUNT(*) FILTER (WHERE status = 'available' OR status = 'clean'),
+        COUNT(*) FILTER (WHERE status = 'available'),
         COUNT(*) FILTER (WHERE status = 'occupied'),
         COUNT(*) FILTER (WHERE status = 'reserved'),
         COUNT(*) FILTER (WHERE status IN ('maintenance', 'out_of_order')),
         COUNT(*) FILTER (WHERE status IN ('dirty', 'cleaning', 'reserved_dirty'))
     INTO v_rooms_available, v_rooms_occupied, v_rooms_reserved, v_rooms_maintenance, v_rooms_dirty
-    FROM rooms;
+    FROM rooms
+    WHERE is_active = true;
 
     SELECT COUNT(DISTINCT r.id) INTO v_rooms_occupied
     FROM rooms r
     JOIN bookings b ON r.id = b.room_id
-    WHERE b.status IN ('checked_in', 'auto_checked_in')
-    AND b.check_in_date <= p_audit_date
-    AND b.check_out_date > p_audit_date;
+    WHERE r.is_active = true
+      AND b.status IN ('checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
+      AND b.check_in_date <= p_audit_date
+      AND b.check_out_date > p_audit_date;
 
     IF v_total_rooms > 0 THEN
         v_occupancy_rate := ROUND((v_rooms_occupied::DECIMAL / v_total_rooms) * 100, 2);
@@ -969,7 +1059,7 @@ BEGIN
         rooms_reserved = v_rooms_reserved,
         rooms_maintenance = v_rooms_maintenance,
         rooms_dirty = v_rooms_dirty,
-        run_at = NOW()
+        run_at = CURRENT_TIMESTAMP
     WHERE id = v_audit_run_id;
 
     RETURN v_audit_run_id;
@@ -1202,8 +1292,15 @@ BEGIN
     VALUES (p_room_id, v_old_status, p_new_status, p_notes, p_start_date, p_end_date, p_user_id, p_user_id IS NULL);
     IF p_new_status IN ('dirty', 'cleaning', 'reserved_dirty') THEN
         INSERT INTO housekeeping_tasks (room_id, task_type, priority, status, created_by, notes)
-        VALUES (p_room_id, 'cleaning', 'normal', CASE WHEN p_new_status = 'cleaning' THEN 'in_progress' ELSE 'pending' END, p_user_id, p_notes)
-        ON CONFLICT DO NOTHING;
+        SELECT p_room_id, 'cleaning', 'normal',
+               CASE WHEN p_new_status = 'cleaning' THEN 'in_progress' ELSE 'pending' END,
+               p_user_id, p_notes
+        WHERE NOT EXISTS (
+            SELECT 1 FROM housekeeping_tasks ht
+             WHERE ht.room_id = p_room_id
+               AND ht.task_type = 'cleaning'
+               AND ht.status IN ('pending', 'in_progress')
+        );
     END IF;
 END;
 $$;
@@ -1264,28 +1361,34 @@ BEGIN
     IF v_count = 0 THEN
         INSERT INTO room_status_transitions (from_status, to_status, is_allowed) VALUES
         ('available', 'occupied', true), ('available', 'reserved', true),
-        ('available', 'reserved_dirty', true),
+        ('available', 'reserved_dirty', true), ('available', 'cleaning', true),
         ('available', 'dirty', true), ('available', 'maintenance', true),
         ('available', 'out_of_order', true),
         ('occupied', 'available', true), ('occupied', 'dirty', true),
-        ('occupied', 'maintenance', true), ('occupied', 'reserved', true),
-        ('occupied', 'reserved_dirty', true),
+        ('occupied', 'maintenance', true), ('occupied', 'out_of_order', true),
+        ('occupied', 'reserved', true), ('occupied', 'reserved_dirty', true),
         ('reserved', 'occupied', true), ('reserved', 'available', true),
         ('reserved', 'dirty', true), ('reserved', 'reserved_dirty', true),
-        ('reserved', 'maintenance', true),
-        ('dirty', 'available', true), ('dirty', 'maintenance', true),
+        ('reserved', 'cleaning', true), ('reserved', 'maintenance', true),
+        ('reserved', 'out_of_order', true),
+        ('dirty', 'available', true), ('dirty', 'cleaning', true),
+        ('dirty', 'maintenance', true), ('dirty', 'out_of_order', true),
         ('dirty', 'reserved', true), ('dirty', 'reserved_dirty', true),
         ('dirty', 'occupied', true),
         ('cleaning', 'available', true), ('cleaning', 'dirty', true),
-        ('cleaning', 'reserved_dirty', true), ('cleaning', 'maintenance', true),
+        ('cleaning', 'reserved', true), ('cleaning', 'reserved_dirty', true),
+        ('cleaning', 'maintenance', true), ('cleaning', 'out_of_order', true),
         ('reserved_dirty', 'reserved', true), ('reserved_dirty', 'dirty', true),
-        ('reserved_dirty', 'maintenance', true),
-        ('reserved_dirty', 'available', true),
+        ('reserved_dirty', 'cleaning', true), ('reserved_dirty', 'maintenance', true),
+        ('reserved_dirty', 'out_of_order', true), ('reserved_dirty', 'available', true),
+        ('reserved_dirty', 'occupied', true),
         ('maintenance', 'available', true), ('maintenance', 'dirty', true),
+        ('maintenance', 'reserved', true), ('maintenance', 'reserved_dirty', true),
         ('maintenance', 'out_of_order', true),
         ('out_of_order', 'available', true), ('out_of_order', 'maintenance', true),
-        ('out_of_order', 'dirty', true)
-        ON CONFLICT DO NOTHING;
+        ('out_of_order', 'dirty', true), ('out_of_order', 'reserved', true),
+        ('out_of_order', 'reserved_dirty', true)
+        ON CONFLICT (from_status, to_status) DO NOTHING;
     END IF;
 
     SELECT is_allowed INTO v_is_allowed FROM room_status_transitions
@@ -1849,7 +1952,7 @@ END),
     CONSTRAINT bookings_group_voucher_share_check CHECK ((group_voucher_share >= (0)::numeric)),
     CONSTRAINT bookings_payment_status_check CHECK (((payment_status)::text = ANY ((ARRAY['unpaid'::character varying, 'unpaid_deposit'::character varying, 'paid_rate'::character varying, 'partial'::character varying, 'paid'::character varying, 'refunded'::character varying, 'void'::character varying])::text[]))),
     CONSTRAINT bookings_smoking_preference_check CHECK (((smoking_preference)::text = ANY ((ARRAY['smoking'::character varying, 'non_smoking'::character varying])::text[]))),
-    CONSTRAINT bookings_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'pending_payment'::character varying, 'pending_confirmation'::character varying, 'confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying, 'checked_out'::character varying, 'no_show'::character varying, 'completed'::character varying, 'comp_void'::character varying, 'partial_complimentary'::character varying, 'fully_complimentary'::character varying, 'voided'::character varying])::text[]))),
+    CONSTRAINT bookings_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'pending_payment'::character varying, 'pending_confirmation'::character varying, 'confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying, 'checked_out'::character varying, 'no_show'::character varying, 'completed'::character varying, 'comp_void'::character varying, 'partial_complimentary'::character varying, 'fully_complimentary'::character varying, 'voided'::character varying])::text[]))),
     CONSTRAINT valid_complimentary_dates CHECK ((((complimentary_start_date IS NULL) AND (complimentary_end_date IS NULL)) OR ((complimentary_start_date IS NOT NULL) AND (complimentary_end_date IS NOT NULL) AND (complimentary_start_date >= check_in_date) AND (complimentary_end_date <= check_out_date) AND (complimentary_start_date < complimentary_end_date)))),
     CONSTRAINT valid_dates CHECK ((check_out_date >= check_in_date)),
     CONSTRAINT valid_occupancy CHECK ((((adults + children) + infants) > 0))
@@ -2274,7 +2377,7 @@ CREATE VIEW public.booking_summary AS
     b.payment_method,
     b.created_at,
         CASE
-            WHEN ((b.status)::text = 'checked_in'::text) THEN 'In House'::text
+            WHEN ((b.status)::text = ANY ((ARRAY['checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying])::text[])) THEN 'In House'::text
             WHEN (b.check_in_date = CURRENT_DATE) THEN 'Arriving Today'::text
             WHEN (b.check_out_date = CURRENT_DATE) THEN 'Departing Today'::text
             WHEN (b.check_in_date > CURRENT_DATE) THEN 'Future'::text
@@ -2622,7 +2725,7 @@ CREATE VIEW public.daily_arrivals AS
     sum((adults + children)) AS total_guests,
     array_agg(booking_number ORDER BY check_in_date) AS booking_numbers
    FROM public.bookings b
-  WHERE (((status)::text = ANY ((ARRAY['confirmed'::character varying, 'checked_in'::character varying])::text[])) AND (check_in_date >= CURRENT_DATE))
+  WHERE (((status)::text = ANY ((ARRAY['confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying, 'partial_complimentary'::character varying, 'fully_complimentary'::character varying])::text[])) AND (check_in_date >= CURRENT_DATE))
   GROUP BY check_in_date
   ORDER BY check_in_date;
 
@@ -2637,7 +2740,7 @@ CREATE VIEW public.daily_departures AS
     sum((adults + children)) AS total_guests,
     array_agg(booking_number ORDER BY check_out_date) AS booking_numbers
    FROM public.bookings b
-  WHERE (((status)::text = ANY ((ARRAY['confirmed'::character varying, 'checked_in'::character varying])::text[])) AND (check_out_date >= CURRENT_DATE))
+  WHERE (((status)::text = ANY ((ARRAY['confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying, 'partial_complimentary'::character varying, 'fully_complimentary'::character varying])::text[])) AND (check_out_date >= CURRENT_DATE))
   GROUP BY check_out_date
   ORDER BY check_out_date;
 
@@ -3332,7 +3435,7 @@ CREATE VIEW public.room_current_occupancy AS
         END AS is_occupied
    FROM ((public.rooms r
      LEFT JOIN public.room_types rt ON ((r.room_type_id = rt.id)))
-     LEFT JOIN public.bookings b ON (((r.id = b.room_id) AND ((b.status)::text = 'checked_in'::text) AND (CURRENT_DATE >= b.check_in_date) AND (CURRENT_DATE <= b.check_out_date))))
+     LEFT JOIN public.bookings b ON (((r.id = b.room_id) AND ((b.status)::text = ANY ((ARRAY['checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying])::text[])) AND (CURRENT_DATE >= b.check_in_date) AND (CURRENT_DATE <= b.check_out_date))))
   WHERE (r.is_active = true);
 
 
@@ -3693,6 +3796,7 @@ CREATE TABLE public.loyalty_rewards (
     terms_conditions text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT loyalty_rewards_inventory_non_negative CHECK (((inventory_count IS NULL) OR (inventory_count >= 0))),
     CONSTRAINT loyalty_rewards_points_cost_check CHECK ((points_cost > 0))
 );
 
@@ -4157,7 +4261,7 @@ CREATE VIEW public.occupancy_by_room_type AS
         END AS guest_occupancy_rate
    FROM ((public.room_types rt
      LEFT JOIN public.rooms r ON (((r.room_type_id = rt.id) AND (r.is_active = true))))
-     LEFT JOIN public.bookings b ON (((r.id = b.room_id) AND ((b.status)::text = 'checked_in'::text) AND (CURRENT_DATE >= b.check_in_date) AND (CURRENT_DATE <= b.check_out_date))))
+     LEFT JOIN public.bookings b ON (((r.id = b.room_id) AND ((b.status)::text = ANY ((ARRAY['checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying])::text[])) AND (CURRENT_DATE >= b.check_in_date) AND (CURRENT_DATE <= b.check_out_date))))
   WHERE (rt.is_active = true)
   GROUP BY rt.id, rt.name, rt.max_occupancy;
 
@@ -4171,7 +4275,7 @@ CREATE VIEW public.occupancy_stats AS
     count(DISTINCT r.id) AS total_rooms,
     count(DISTINCT
         CASE
-            WHEN ((b.status)::text = 'checked_in'::text) THEN r.id
+            WHEN ((b.status)::text = ANY ((ARRAY['checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying])::text[])) THEN r.id
             ELSE NULL::bigint
         END) AS occupied_rooms,
     count(DISTINCT
@@ -4181,11 +4285,11 @@ CREATE VIEW public.occupancy_stats AS
         END) AS available_rooms,
     round((((count(DISTINCT
         CASE
-            WHEN ((b.status)::text = 'checked_in'::text) THEN r.id
+            WHEN ((b.status)::text = ANY ((ARRAY['checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying])::text[])) THEN r.id
             ELSE NULL::bigint
         END))::numeric / (NULLIF(count(DISTINCT r.id), 0))::numeric) * (100)::numeric), 2) AS occupancy_percentage
    FROM (public.rooms r
-     LEFT JOIN public.bookings b ON (((r.id = b.room_id) AND ((b.status)::text = 'checked_in'::text) AND ((CURRENT_DATE >= b.check_in_date) AND (CURRENT_DATE <= b.check_out_date)))))
+     LEFT JOIN public.bookings b ON (((r.id = b.room_id) AND ((b.status)::text = ANY ((ARRAY['checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying])::text[])) AND (CURRENT_DATE >= b.check_in_date) AND (CURRENT_DATE <= b.check_out_date))))
   WHERE (r.is_active = true);
 
 
@@ -4710,7 +4814,7 @@ CREATE VIEW public.revenue_summary AS
             ELSE (0)::numeric
         END) AS collected_revenue
    FROM public.bookings b
-  WHERE ((status)::text <> ALL ((ARRAY['voided'::character varying, 'no_show'::character varying])::text[]))
+  WHERE ((status)::text <> ALL ((ARRAY['pending'::character varying, 'pending_payment'::character varying, 'pending_confirmation'::character varying, 'voided'::character varying, 'comp_void'::character varying, 'no_show'::character varying])::text[]))
   GROUP BY (date_trunc('month'::text, (check_in_date)::timestamp with time zone))
   ORDER BY (date_trunc('month'::text, (check_in_date)::timestamp with time zone)) DESC;
 
@@ -5845,7 +5949,7 @@ ALTER TABLE ONLY public.bookings
 --
 
 ALTER TABLE ONLY public.bookings
-    ADD CONSTRAINT bookings_no_room_date_overlap EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date, '[)'::text) WITH &&) WHERE (((status)::text = ANY ((ARRAY['pending'::character varying, 'pending_payment'::character varying, 'pending_confirmation'::character varying, 'confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying])::text[])));
+    ADD CONSTRAINT bookings_no_room_date_overlap EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date, '[)'::text) WITH &&) WHERE (((status)::text = ANY ((ARRAY['pending'::character varying, 'pending_payment'::character varying, 'pending_confirmation'::character varying, 'confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying, 'partial_complimentary'::character varying, 'fully_complimentary'::character varying])::text[])));
 
 
 --
@@ -8656,10 +8760,17 @@ CREATE UNIQUE INDEX uq_bookings_guest_portal_request ON public.bookings USING bt
 
 
 --
+-- Name: uq_customer_ledgers_active_reversal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_customer_ledgers_active_reversal ON public.customer_ledgers USING btree (original_transaction_id) WHERE ((COALESCE(is_reversal, false) = true) AND (original_transaction_id IS NOT NULL) AND (void_at IS NULL) AND ((status)::text <> 'void'::text));
+
+
+--
 -- Name: uq_customer_ledgers_booking_room_charge; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_customer_ledgers_booking_room_charge ON public.customer_ledgers USING btree (booking_id) WHERE (((post_type)::text = 'room_charge'::text) AND (COALESCE(is_reversal, false) = false) AND (booking_id IS NOT NULL));
+CREATE UNIQUE INDEX uq_customer_ledgers_booking_room_charge ON public.customer_ledgers USING btree (booking_id) WHERE (((post_type)::text = 'room_charge'::text) AND (COALESCE(is_reversal, false) = false) AND (booking_id IS NOT NULL) AND (void_at IS NULL) AND ((status)::text <> 'void'::text));
 
 
 --
@@ -8841,7 +8952,7 @@ CREATE TRIGGER trg_sync_booking_payment_status AFTER INSERT OR DELETE OR UPDATE 
 -- Name: bookings trg_sync_room_status_booking; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_sync_room_status_booking AFTER INSERT OR UPDATE OF status, check_in_date ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.sync_room_status_with_booking();
+CREATE TRIGGER trg_sync_room_status_booking AFTER INSERT OR UPDATE OF status, check_in_date, check_out_date, room_id ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.sync_room_status_with_booking();
 
 
 --
@@ -9460,7 +9571,7 @@ ALTER TABLE ONLY public.customer_ledgers
 --
 
 ALTER TABLE ONLY public.customer_ledgers
-    ADD CONSTRAINT customer_ledgers_guest_id_fkey FOREIGN KEY (guest_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    ADD CONSTRAINT customer_ledgers_guest_id_fkey FOREIGN KEY (guest_id) REFERENCES public.guests(id) ON DELETE SET NULL;
 
 
 --
@@ -9693,14 +9804,6 @@ ALTER TABLE ONLY public.reward_redemptions
 
 ALTER TABLE ONLY public.room_changes
     ADD CONSTRAINT fk_room_changes_booking FOREIGN KEY (booking_id) REFERENCES public.bookings(id) ON DELETE CASCADE;
-
-
---
--- Name: room_changes fk_room_changes_guest; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.room_changes
-    ADD CONSTRAINT fk_room_changes_guest FOREIGN KEY (guest_id) REFERENCES public.guests(id) ON DELETE SET NULL;
 
 
 --

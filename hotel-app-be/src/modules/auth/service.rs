@@ -29,6 +29,10 @@ use validator::Validate;
 
 /// Login refusal for an account with no password (created via Google sign-in).
 /// The frontend matches this exact text to show a translated message.
+/// Precomputed cost-10 bcrypt hash used for dummy verification when a login
+/// identifier is missing or inactive so timing matches real password checks.
+const DUMMY_PASSWORD_HASH: &str = "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
 pub const GOOGLE_SIGN_IN_ONLY_MESSAGE: &str = "This account uses Google sign-in";
 
 /// Re-authenticate an already-authenticated user before a high-value account
@@ -274,6 +278,7 @@ pub async fn login(
     let user = match user {
         Some(user) if user.is_active => user,
         Some(_) => {
+            let _ = AuthService::verify_password(&req.password, DUMMY_PASSWORD_HASH).await;
             let _ = AuditLog::log_login_failure(
                 pool,
                 &req.username,
@@ -287,6 +292,7 @@ pub async fn login(
             return Err(ApiError::Unauthorized("Invalid credentials".to_string()));
         }
         None => {
+            let _ = AuthService::verify_password(&req.password, DUMMY_PASSWORD_HASH).await;
             let _ = AuditLog::log_login_failure(
                 pool,
                 &req.username,
@@ -314,7 +320,7 @@ pub async fn login(
         .map_err(|_| ApiError::Internal("Password verification failed".to_string()))?;
 
     if !valid {
-        let remaining = record_failed_login(
+        let _remaining = record_failed_login(
             pool,
             user.id,
             &req.username,
@@ -323,10 +329,7 @@ pub async fn login(
             user_agent,
         )
         .await?;
-        return Err(ApiError::Unauthorized(format!(
-            "Invalid credentials. {} attempt(s) remaining before account lockout.",
-            remaining
-        )));
+        return Err(ApiError::Unauthorized("Invalid credentials".to_string()));
     }
 
     // Checked only after the password verifies: reporting an unverified
@@ -524,6 +527,12 @@ pub async fn login_with_google(
     }
 
     ensure_not_locked(pool, user.id, &user.username, ip_address, user_agent).await?;
+    let (two_factor_enabled, _) = AuthRepository::two_factor_state(pool, user.id).await?;
+    let has_totp = two_factor_enabled.unwrap_or(false);
+    let has_passkey = PasskeyRepository::passkey_count(pool, user.id).await? > 0;
+    if has_totp || has_passkey {
+        return Err(two_factor_required(pool, &user, has_totp, has_passkey).await?);
+    }
     let _ = AuthRepository::reset_login_attempts(pool, user.id).await;
     let response =
         issue_authenticated_response(pool, &user, ip_address, user_agent, client_timezone).await?;

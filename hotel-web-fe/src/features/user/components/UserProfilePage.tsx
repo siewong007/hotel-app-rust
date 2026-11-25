@@ -1,12 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { HTTPError } from 'ky';
 import { useSearchParams } from '../../../router';
-import { Alert, Box, Chip, Stack, Typography } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { LogoLoader } from '../../../components';
 import { useAuth } from '../../../auth/AuthContext';
 import type { UserSessionInfo } from '../../../types';
 import { ApiNotificationSeverity, emitApiNotification } from '../../../utils/apiNotifications';
 import TwoFactorSetup from '../../auth/components/TwoFactorSetup';
+import { useTwoFactorStatus } from '../../auth/hooks/useTwoFactorQueries';
+import { useAutoFocusError } from '../../../hooks/useAutoFocusError';
 import {
   useDeletePasskeyMutation,
   usePasskeysQuery,
@@ -39,6 +53,8 @@ const VISUALLY_HIDDEN = {
   width: '1px',
 } as const;
 
+const TOTP_CODE_LENGTH = 6;
+
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
 
@@ -47,11 +63,18 @@ const UserProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
-  const { registerPasskey, roles } = useAuth();
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const [stepUpPassword, setStepUpPassword] = useState('');
+  const [stepUpCode, setStepUpCode] = useState('');
+  const [stepUpError, setStepUpError] = useState<string | null>(null);
+  const stepUpErrorRef = useAutoFocusError(stepUpError);
+  const { registerPasskey, roles, logout } = useAuth();
 
   const profileQuery = useProfileQuery();
   const passkeysQuery = usePasskeysQuery();
   const sessionsQuery = useSessionsQuery();
+  const { data: twoFactorStatus } = useTwoFactorStatus({ suppressApiNotification: true });
+  const twoFactorEnabled = Boolean(twoFactorStatus?.enabled);
 
   const updateProfile = useUpdateProfileMutation();
   const updatePassword = useUpdatePasswordMutation();
@@ -116,6 +139,9 @@ const UserProfilePage: React.FC = () => {
     try {
       await updatePassword.mutateAsync(data);
       notify(t('security.passwordUpdated'), 'success');
+      // Password changes revoke all active sessions & passkeys server-side;
+      // transition cleanly to /login instead of trapping the user in a revoked session.
+      void logout({ redirectTo: '/login' });
     } catch (error) {
       // The backend returns 401 when the current password is wrong; the
       // generic coded-error message would misread that as a sign-in prompt.
@@ -131,19 +157,39 @@ const UserProfilePage: React.FC = () => {
     }
   };
 
-  const handleAddPasskey = async () => {
+  const closeStepUp = () => {
+    setStepUpOpen(false);
+    setStepUpPassword('');
+    setStepUpCode('');
+    setStepUpError(null);
+  };
+
+  const handleAddPasskey = () => {
     const passkeys = passkeysQuery.data ?? [];
     if (passkeys.length >= MAX_PASSKEYS) {
       notify(t('passkeys.limitReached', { max: MAX_PASSKEYS }), 'warning');
       return;
     }
     if (!profile) return;
+    setStepUpError(null);
+    setStepUpOpen(true);
+  };
 
+  const submitStepUp = async () => {
+    if (!profile) return;
+    setStepUpError(null);
     try {
-      await addPasskey.mutateAsync({ username: profile.username });
+      await addPasskey.mutateAsync({
+        username: profile.username,
+        stepUp: {
+          password: stepUpPassword || undefined,
+          totpCode: stepUpCode || undefined,
+        },
+      });
+      closeStepUp();
       notify(t('passkeys.registered'), 'success');
     } catch (error) {
-      notify(errorMessage(error, t('passkeys.registerFailed')), 'error');
+      setStepUpError(errorMessage(error, t('passkeys.registerFailed')));
     }
   };
 
@@ -311,6 +357,60 @@ const UserProfilePage: React.FC = () => {
           <DevicesTab sessions={sessionsQuery.data ?? []} onRevoke={handleRevokeSession} />
         </Box>
       </Box>
+
+      <Dialog open={stepUpOpen} onClose={closeStepUp} maxWidth="xs" fullWidth>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitStepUp();
+          }}
+        >
+          <DialogTitle>{t('passkeys.stepUpTitle')}</DialogTitle>
+          <DialogContent>
+            <Typography sx={{ mb: 2 }}>{t('passkeys.stepUpBody')}</Typography>
+            {stepUpError ? (
+              <Alert severity="error" role="alert" ref={stepUpErrorRef} tabIndex={-1} sx={{ mb: 2 }}>
+                {stepUpError}
+              </Alert>
+            ) : null}
+            <TextField
+              fullWidth
+              autoFocus
+              type="password"
+              label={t('passkeys.passwordLabel')}
+              autoComplete="current-password"
+              value={stepUpPassword}
+              onChange={(event) => setStepUpPassword(event.target.value)}
+            />
+            {twoFactorEnabled ? (
+              <>
+                <Typography variant="body2" sx={{ color: 'text.secondary', my: 1.5 }}>
+                  {t('passkeys.orAuthenticator')}
+                </Typography>
+                <TextField
+                  fullWidth
+                  label={t('passkeys.codeLabel')}
+                  value={stepUpCode}
+                  onChange={(event) =>
+                    setStepUpCode(event.target.value.replace(/\D/g, '').slice(0, TOTP_CODE_LENGTH))
+                  }
+                  slotProps={{ htmlInput: { inputMode: 'numeric', maxLength: TOTP_CODE_LENGTH } }}
+                />
+              </>
+            ) : null}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={closeStepUp}>{t('common:actions.cancel')}</Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={(!stepUpPassword && !stepUpCode) || addPasskey.isPending}
+            >
+              {addPasskey.isPending ? t('passkeys.waiting') : t('passkeys.continue')}
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
     </Box>
   );
 };

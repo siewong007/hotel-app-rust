@@ -12,6 +12,7 @@ use crate::core::db::DbPool;
 use crate::core::middleware::{check_any_permission, check_permission};
 use crate::modules::housekeeping::{models as hm, service as hk_service};
 use crate::modules::maintenance::{models as mm, service as mt_service};
+use crate::modules::realtime::hub::DataChangeHub;
 
 use super::auth::authenticate;
 use super::convert as c;
@@ -221,8 +222,11 @@ fn page_params(page_size: i32, page_token: &str) -> (Option<i64>, Option<i64>) {
 }
 
 fn next_page_token(page: i64, page_size: i64, total: i64) -> String {
-    if page_size > 0 && page * page_size < total {
-        (page + 1).to_string()
+    if page_size > 0
+        && page.checked_mul(page_size).is_some_and(|n| n < total)
+        && let Some(next_page) = page.checked_add(1)
+    {
+        next_page.to_string()
     } else {
         String::new()
     }
@@ -234,6 +238,7 @@ fn next_page_token(page: i64, page_size: i64, total: i64) -> String {
 pub struct HousekeepingGrpc {
     pool: DbPool,
     idem: std::sync::Arc<IdempotencyCache>,
+    data_change_hub: Option<DataChangeHub>,
 }
 
 impl HousekeepingGrpc {
@@ -241,6 +246,21 @@ impl HousekeepingGrpc {
         Self {
             pool,
             idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: None,
+        }
+    }
+
+    pub fn with_hub(pool: DbPool, data_change_hub: DataChangeHub) -> Self {
+        Self {
+            pool,
+            idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: Some(data_change_hub),
+        }
+    }
+
+    fn publish_change(&self) {
+        if let Some(ref hub) = self.data_change_hub {
+            hub.publish_data_changed("housekeeping");
         }
     }
 }
@@ -287,27 +307,34 @@ impl HousekeepingService for HousekeepingGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("CreateHousekeepingTask", &req.request_id, || async {
-                let t = req.task.clone().unwrap_or_default();
-                let room_id = c::require_name(&t.room, "rooms")?;
-                let input = hm::CreateHousekeepingTaskRequest {
-                    room_id,
-                    task_type: hk_type_str(t.task_type()),
-                    priority: hk_priority_str(t.priority()),
-                    assigned_to: c::parse_name(&t.assigned_to, "users")?,
-                    scheduled_date: c::date_from_pb(t.scheduled_date.as_ref())?,
-                    notes: (!t.notes.is_empty()).then(|| t.notes.clone()),
-                    inspection_notes: (!t.inspection_notes.is_empty())
-                        .then(|| t.inspection_notes.clone()),
-                    items_used: t.items_used.as_ref().map(c::value_to_json),
-                };
-                let task = hk_service::create_task(&self.pool, auth.user_id, input)
-                    .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::CreateHousekeepingTaskResponse {
-                    task: Some(task_pb(&task)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "CreateHousekeepingTask",
+                &req.request_id,
+                &req,
+                || async {
+                    let t = req.task.clone().unwrap_or_default();
+                    let room_id = c::require_name(&t.room, "rooms")?;
+                    let input = hm::CreateHousekeepingTaskRequest {
+                        room_id,
+                        task_type: hk_type_str(t.task_type()),
+                        priority: hk_priority_str(t.priority()),
+                        assigned_to: c::parse_name(&t.assigned_to, "users")?,
+                        scheduled_date: c::date_from_pb(t.scheduled_date.as_ref())?,
+                        notes: (!t.notes.is_empty()).then(|| t.notes.clone()),
+                        inspection_notes: (!t.inspection_notes.is_empty())
+                            .then(|| t.inspection_notes.clone()),
+                        items_used: t.items_used.as_ref().map(c::value_to_json),
+                    };
+                    let task = hk_service::create_task(&self.pool, auth.user_id, input)
+                        .await
+                        .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::CreateHousekeepingTaskResponse {
+                        task: Some(task_pb(&task)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -321,55 +348,62 @@ impl HousekeepingService for HousekeepingGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("UpdateHousekeepingTask", &req.request_id, || async {
-                let t = req.task.clone().unwrap_or_default();
-                let task_id = c::require_name(&t.name, "housekeepingTasks")?;
-                let mut input = hm::UpdateHousekeepingTaskRequest {
-                    priority: None,
-                    status: None,
-                    assigned_to: None,
-                    scheduled_date: None,
-                    notes: None,
-                    inspection_notes: None,
-                    items_used: None,
-                    clear_assignee: (req.clear_assignee).then_some(true),
-                };
-                for path in &req
-                    .update_mask
-                    .as_ref()
-                    .map(|m| m.paths.clone())
-                    .unwrap_or_default()
-                {
-                    match path.as_str() {
-                        "priority" => input.priority = hk_priority_str(t.priority()),
-                        "status" => input.status = hk_status_str(t.status()),
-                        "assigned_to" => {
-                            input.assigned_to = c::parse_name(&t.assigned_to, "users")?
-                        }
-                        "scheduled_date" => {
-                            input.scheduled_date = c::date_from_pb(t.scheduled_date.as_ref())?
-                        }
-                        "notes" => input.notes = Some(t.notes.clone()),
-                        "inspection_notes" => {
-                            input.inspection_notes = Some(t.inspection_notes.clone())
-                        }
-                        "items_used" => {
-                            input.items_used = t.items_used.as_ref().map(c::value_to_json)
-                        }
-                        other => {
-                            return Err(Status::invalid_argument(format!(
-                                "update_mask contains unsupported field '{other}'"
-                            )));
+            .run(
+                auth.user_id,
+                "UpdateHousekeepingTask",
+                &req.request_id,
+                &req,
+                || async {
+                    let t = req.task.clone().unwrap_or_default();
+                    let task_id = c::require_name(&t.name, "housekeepingTasks")?;
+                    let mut input = hm::UpdateHousekeepingTaskRequest {
+                        priority: None,
+                        status: None,
+                        assigned_to: None,
+                        scheduled_date: None,
+                        notes: None,
+                        inspection_notes: None,
+                        items_used: None,
+                        clear_assignee: (req.clear_assignee).then_some(true),
+                    };
+                    for path in &req
+                        .update_mask
+                        .as_ref()
+                        .map(|m| m.paths.clone())
+                        .unwrap_or_default()
+                    {
+                        match path.as_str() {
+                            "priority" => input.priority = hk_priority_str(t.priority()),
+                            "status" => input.status = hk_status_str(t.status()),
+                            "assigned_to" => {
+                                input.assigned_to = c::parse_name(&t.assigned_to, "users")?
+                            }
+                            "scheduled_date" => {
+                                input.scheduled_date = c::date_from_pb(t.scheduled_date.as_ref())?
+                            }
+                            "notes" => input.notes = Some(t.notes.clone()),
+                            "inspection_notes" => {
+                                input.inspection_notes = Some(t.inspection_notes.clone())
+                            }
+                            "items_used" => {
+                                input.items_used = t.items_used.as_ref().map(c::value_to_json)
+                            }
+                            other => {
+                                return Err(Status::invalid_argument(format!(
+                                    "update_mask contains unsupported field '{other}'"
+                                )));
+                            }
                         }
                     }
-                }
-                let task = hk_service::update_task(&self.pool, auth.user_id, task_id, input)
-                    .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::UpdateHousekeepingTaskResponse {
-                    task: Some(task_pb(&task)),
-                }))
-            })
+                    let task = hk_service::update_task(&self.pool, auth.user_id, task_id, input)
+                        .await
+                        .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::UpdateHousekeepingTaskResponse {
+                        task: Some(task_pb(&task)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -521,35 +555,41 @@ impl MaintenanceService for MaintenanceGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("CreateMaintenanceTicket", &req.request_id, || async {
-                let t = req.ticket.clone().unwrap_or_default();
-                if t.title.is_empty() {
-                    return Err(Status::invalid_argument("ticket.title is required"));
-                }
-                // Compute before the struct literal — enum accessors borrow
-                // all of t and can't run after t.title moves.
-                let category = mt_category_str(t.category());
-                let priority = mt_priority_str(t.priority());
-                let input = mm::CreateMaintenanceTicketRequest {
-                    room_id: c::parse_name(&t.room, "rooms")?,
-                    title: t.title,
-                    description: (!t.description.is_empty()).then(|| t.description.clone()),
-                    category,
-                    priority,
-                    assigned_to: c::parse_name(&t.assigned_to, "users")?,
-                    estimated_cost: c::money_to_decimal(t.estimated_cost.as_ref()),
-                    estimated_hours: c::decimal_from_pb(t.estimated_hours.as_ref())?,
-                    scheduled_date: c::ts_to_datetime(t.scheduled_date.as_ref())?,
-                    images: t.images.as_ref().map(c::value_to_json),
-                };
-                let ticket = mt_service::create_ticket(&self.pool, auth.user_id, input)
-                    .await
-                    .map_err(to_status)?;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::CreateMaintenanceTicketResponse {
-                    ticket: Some(ticket_pb(&ticket, &currency)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "CreateMaintenanceTicket",
+                &req.request_id,
+                &req,
+                || async {
+                    let t = req.ticket.clone().unwrap_or_default();
+                    if t.title.is_empty() {
+                        return Err(Status::invalid_argument("ticket.title is required"));
+                    }
+                    // Compute before the struct literal — enum accessors borrow
+                    // all of t and can't run after t.title moves.
+                    let category = mt_category_str(t.category());
+                    let priority = mt_priority_str(t.priority());
+                    let input = mm::CreateMaintenanceTicketRequest {
+                        room_id: c::parse_name(&t.room, "rooms")?,
+                        title: t.title,
+                        description: (!t.description.is_empty()).then(|| t.description.clone()),
+                        category,
+                        priority,
+                        assigned_to: c::parse_name(&t.assigned_to, "users")?,
+                        estimated_cost: c::money_to_decimal(t.estimated_cost.as_ref()),
+                        estimated_hours: c::decimal_from_pb(t.estimated_hours.as_ref())?,
+                        scheduled_date: c::ts_to_datetime(t.scheduled_date.as_ref())?,
+                        images: t.images.as_ref().map(c::value_to_json),
+                    };
+                    let ticket = mt_service::create_ticket(&self.pool, auth.user_id, input)
+                        .await
+                        .map_err(to_status)?;
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::CreateMaintenanceTicketResponse {
+                        ticket: Some(ticket_pb(&ticket, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -563,74 +603,83 @@ impl MaintenanceService for MaintenanceGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("UpdateMaintenanceTicket", &req.request_id, || async {
-                let t = req.ticket.clone().unwrap_or_default();
-                let ticket_id = c::require_name(&t.name, "maintenanceTickets")?;
-                let mut input = mm::UpdateMaintenanceTicketRequest {
-                    title: None,
-                    description: None,
-                    category: None,
-                    priority: None,
-                    status: None,
-                    assigned_to: None,
-                    estimated_cost: None,
-                    actual_cost: None,
-                    estimated_hours: None,
-                    actual_hours: None,
-                    scheduled_date: None,
-                    resolution_notes: None,
-                    images: None,
-                    clear_assignee: (req.clear_assignee).then_some(true),
-                };
-                for path in &req
-                    .update_mask
-                    .as_ref()
-                    .map(|m| m.paths.clone())
-                    .unwrap_or_default()
-                {
-                    match path.as_str() {
-                        "title" => input.title = Some(t.title.clone()),
-                        "description" => input.description = Some(t.description.clone()),
-                        "category" => input.category = mt_category_str(t.category()),
-                        "priority" => input.priority = mt_priority_str(t.priority()),
-                        "status" => input.status = mt_status_str(t.status()),
-                        "assigned_to" => {
-                            input.assigned_to = c::parse_name(&t.assigned_to, "users")?
-                        }
-                        "estimated_cost" => {
-                            input.estimated_cost = c::money_to_decimal(t.estimated_cost.as_ref())
-                        }
-                        "actual_cost" => {
-                            input.actual_cost = c::money_to_decimal(t.actual_cost.as_ref())
-                        }
-                        "estimated_hours" => {
-                            input.estimated_hours = c::decimal_from_pb(t.estimated_hours.as_ref())?
-                        }
-                        "actual_hours" => {
-                            input.actual_hours = c::decimal_from_pb(t.actual_hours.as_ref())?
-                        }
-                        "scheduled_date" => {
-                            input.scheduled_date = c::ts_to_datetime(t.scheduled_date.as_ref())?
-                        }
-                        "resolution_notes" => {
-                            input.resolution_notes = Some(t.resolution_notes.clone())
-                        }
-                        "images" => input.images = t.images.as_ref().map(c::value_to_json),
-                        other => {
-                            return Err(Status::invalid_argument(format!(
-                                "update_mask contains unsupported field '{other}'"
-                            )));
+            .run(
+                auth.user_id,
+                "UpdateMaintenanceTicket",
+                &req.request_id,
+                &req,
+                || async {
+                    let t = req.ticket.clone().unwrap_or_default();
+                    let ticket_id = c::require_name(&t.name, "maintenanceTickets")?;
+                    let mut input = mm::UpdateMaintenanceTicketRequest {
+                        title: None,
+                        description: None,
+                        category: None,
+                        priority: None,
+                        status: None,
+                        assigned_to: None,
+                        estimated_cost: None,
+                        actual_cost: None,
+                        estimated_hours: None,
+                        actual_hours: None,
+                        scheduled_date: None,
+                        resolution_notes: None,
+                        images: None,
+                        clear_assignee: (req.clear_assignee).then_some(true),
+                    };
+                    for path in &req
+                        .update_mask
+                        .as_ref()
+                        .map(|m| m.paths.clone())
+                        .unwrap_or_default()
+                    {
+                        match path.as_str() {
+                            "title" => input.title = Some(t.title.clone()),
+                            "description" => input.description = Some(t.description.clone()),
+                            "category" => input.category = mt_category_str(t.category()),
+                            "priority" => input.priority = mt_priority_str(t.priority()),
+                            "status" => input.status = mt_status_str(t.status()),
+                            "assigned_to" => {
+                                input.assigned_to = c::parse_name(&t.assigned_to, "users")?
+                            }
+                            "estimated_cost" => {
+                                input.estimated_cost =
+                                    c::money_to_decimal(t.estimated_cost.as_ref())
+                            }
+                            "actual_cost" => {
+                                input.actual_cost = c::money_to_decimal(t.actual_cost.as_ref())
+                            }
+                            "estimated_hours" => {
+                                input.estimated_hours =
+                                    c::decimal_from_pb(t.estimated_hours.as_ref())?
+                            }
+                            "actual_hours" => {
+                                input.actual_hours = c::decimal_from_pb(t.actual_hours.as_ref())?
+                            }
+                            "scheduled_date" => {
+                                input.scheduled_date = c::ts_to_datetime(t.scheduled_date.as_ref())?
+                            }
+                            "resolution_notes" => {
+                                input.resolution_notes = Some(t.resolution_notes.clone())
+                            }
+                            "images" => input.images = t.images.as_ref().map(c::value_to_json),
+                            other => {
+                                return Err(Status::invalid_argument(format!(
+                                    "update_mask contains unsupported field '{other}'"
+                                )));
+                            }
                         }
                     }
-                }
-                let ticket = mt_service::update_ticket(&self.pool, auth.user_id, ticket_id, input)
-                    .await
-                    .map_err(to_status)?;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::UpdateMaintenanceTicketResponse {
-                    ticket: Some(ticket_pb(&ticket, &currency)),
-                }))
-            })
+                    let ticket =
+                        mt_service::update_ticket(&self.pool, auth.user_id, ticket_id, input)
+                            .await
+                            .map_err(to_status)?;
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::UpdateMaintenanceTicketResponse {
+                        ticket: Some(ticket_pb(&ticket, &currency)),
+                    }))
+                },
+            )
             .await
     }
 }

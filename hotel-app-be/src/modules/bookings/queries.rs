@@ -49,6 +49,7 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
         -- card could never exceed the room count.
         b.adults, b.children,
         COALESCE(NULLIF(b.room_rate, 0), COALESCE(r.custom_price, rt.base_price)) as room_rate,
+        b.discount_amount,
         b.total_amount, b.status,
         -- payment_status is derived live from the payments table so the chip
         -- never goes out of sync with the live total_paid / balance_due
@@ -56,7 +57,6 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
         -- ignored unless the booking is voided or complimentary.
         CASE
             WHEN b.status = 'voided' THEN 'voided'
-            WHEN COALESCE(b.is_complimentary, FALSE) THEN COALESCE(b.payment_status, 'paid')
             WHEN b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) <= 0 THEN 'paid'
             WHEN COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0)) >= COALESCE(bk_charge.amount, b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
             WHEN COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0)) > 0 THEN 'partial'
@@ -104,21 +104,34 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
         FROM customer_ledgers cl
         WHERE cl.booking_id = b.id
           AND cl.post_type = 'room_charge'
+          AND cl.status <> 'void'
           AND COALESCE(cl.is_reversal, FALSE) = FALSE
         ORDER BY cl.created_at DESC
         LIMIT 1
     ) bk_charge ON TRUE
     LEFT JOIN LATERAL (
         SELECT
-            SUM(p.amount) FILTER (
-                WHERE p.status = 'completed'
-                  AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')
+            GREATEST(
+                COALESCE(SUM(p.amount) FILTER (
+                    WHERE p.status = 'completed'
+                      AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                ), 0)
+                - COALESCE(SUM(p.amount) FILTER (
+                    WHERE p.status <> 'void'
+                      AND COALESCE(p.payment_type, 'booking') = 'refund'
+                      AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+                ), 0),
+                0
             ) AS completed_paid,
             SUM(p.amount) FILTER (
                 WHERE p.status <> 'void'
-                  AND (p.status = 'refunded' OR COALESCE(p.payment_type, 'booking') = 'refund')
+                  AND COALESCE(p.payment_type, 'booking') = 'refund'
             ) AS refunded,
-            bool_or(p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund') AS has_refund
+            bool_or(
+                p.status <> 'void'
+                  AND COALESCE(p.payment_type, 'booking') = 'refund'
+                  AND COALESCE(p.notes, '') NOT LIKE 'Room charge refunded%'
+            ) AS has_refund
         FROM payments p
         WHERE p.booking_id = b.id
     ) bk_pay ON TRUE
@@ -172,6 +185,7 @@ pub const GET_BOOKING_BY_ID_QUERY: &str = r#"
         -- Occupancy -- keep in step with GET_BOOKINGS_BASE_QUERY above.
         b.adults, b.children,
         COALESCE(NULLIF(b.room_rate, 0), COALESCE(r.custom_price, rt.base_price)) as room_rate,
+        b.discount_amount,
         b.total_amount, b.status,
         -- payment_status is derived live from the payments table so the chip
         -- never goes out of sync with the live total_paid / balance_due
@@ -179,10 +193,9 @@ pub const GET_BOOKING_BY_ID_QUERY: &str = r#"
         -- ignored unless the booking is voided or complimentary.
         CASE
             WHEN b.status = 'voided' THEN 'voided'
-            WHEN COALESCE(b.is_complimentary, FALSE) THEN COALESCE(b.payment_status, 'paid')
             WHEN b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) <= 0 THEN 'paid'
-            WHEN COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)) >= COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
-            WHEN COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)) > 0 THEN 'partial'
+            WHEN COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) >= COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
+            WHEN COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) > 0 THEN 'partial'
             ELSE 'unpaid'
         END AS payment_status, b.payment_method, b.source, b.booking_channel_id,
         bc.name AS booking_channel_name, bc.channel_type AS booking_channel_type,
@@ -190,10 +203,10 @@ pub const GET_BOOKING_BY_ID_QUERY: &str = r#"
         b.ota_reference, b.remarks, b.special_requests, b.is_complimentary, b.complimentary_reason,
         b.complimentary_start_date, b.complimentary_end_date, b.original_total_amount, b.complimentary_nights,
         b.deposit_paid, b.deposit_amount, b.room_card_deposit,
-        COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)) AS total_paid,
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND (p.status = 'refunded' OR COALESCE(p.payment_type, 'booking') = 'refund')), 0) AS total_refunded,
-        CASE WHEN COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) - COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)) > 0 THEN COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) - COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)) ELSE 0 END AS balance_due,
-        EXISTS(SELECT 1 FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund') AS deposit_refunded,
+        COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) AS total_paid,
+        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund'), 0) AS total_refunded,
+        CASE WHEN COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) - COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) > 0 THEN COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) - COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) ELSE 0 END AS balance_due,
+        EXISTS(SELECT 1 FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') NOT LIKE 'Room charge refunded%') AS deposit_refunded,
         b.company_id, b.company_name, b.payment_note,
         b.created_at, b.is_posted, b.posted_date,
         b.is_tourist, b.tourism_tax_amount, b.extra_bed_count, b.extra_bed_charge,

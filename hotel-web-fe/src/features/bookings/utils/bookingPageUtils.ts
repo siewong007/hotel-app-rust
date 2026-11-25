@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import type { BookingWithDetails, Company, Room } from '../../../types';
 import { dateFormatter } from '../../../i18n/format';
-import { formatLocalDate, parseLocalDate } from '../../../utils/date';
+import { formatLocalDate, parseLocalDate, toHotelDateString } from '../../../utils/date';
 import { isPositiveMoney, toMoneyNumber } from '../../../utils/money';
-import { isRoomHoldingReservationStatus } from '../../../constants/booking.constants';
+import { isInHouseBookingStatus, isRoomHoldingReservationStatus } from '../../../constants/booking.constants';
 
 export type BookingView =
   | 'all'
@@ -53,14 +53,17 @@ export const getDateOnly = (value?: string) => (value || '').split('T')[0];
 
 export const getNights = (booking: BookingWithDetails | null) => {
   if (!booking?.check_in_date || !booking?.check_out_date) return 0;
-  const checkIn = new Date(booking.check_in_date);
-  const checkOut = new Date(booking.check_out_date);
-  return Math.max(1, Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
+  const checkIn = parseLocalDate(booking.check_in_date);
+  const checkOut = parseLocalDate(booking.check_out_date);
+  if (Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) return 0;
+  return Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
 };
 
 export const formatShortDate = (value?: string) => {
   if (!value) return '-';
-  return dateFormatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(value));
+  const parsed = parseLocalDate(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return dateFormatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(parsed);
 };
 
 export const formatShortMonth = (value?: string) => {
@@ -157,12 +160,13 @@ export interface BookingViewSlices {
 export const getBookingViewSlices = (bookings: BookingWithDetails[], todayIso: string): BookingViewSlices => ({
   arriving: bookings.filter(
     (booking) => getDateOnly(booking.check_in_date) === todayIso
-      && !['checked_in', 'checked_out', 'completed', 'voided'].includes(booking.status),
+      && !isInHouseBookingStatus(booking.status)
+      && !['checked_out', 'completed', 'voided'].includes(booking.status),
   ),
   departing: bookings.filter(
-    (booking) => getDateOnly(booking.check_out_date) === todayIso && booking.status === 'checked_in',
+    (booking) => getDateOnly(booking.check_out_date) === todayIso && isInHouseBookingStatus(booking.status),
   ),
-  inHouse: bookings.filter((booking) => booking.status === 'checked_in'),
+  inHouse: bookings.filter((booking) => isInHouseBookingStatus(booking.status)),
   // Every room-holding reservation, so unpaid (`pending_payment`) and
   // awaiting-confirmation holds are counted too. Mirrors the backend's
   // `board_view_filter("upcoming")`.
@@ -186,13 +190,11 @@ export const getBookingViewSlices = (bookings: BookingWithDetails[], todayIso: s
 // Helper function to determine if a booking can be checked in/out
 export const canCheckIn = (booking: BookingWithDetails) => {
   const status = booking.status;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const checkInDate = new Date(booking.check_in_date);
-  checkInDate.setHours(0, 0, 0, 0);
+  const todayKey = toHotelDateString(new Date());
+  const checkInKey = getDateOnly(booking.check_in_date);
 
   // Allow check-in for confirmed/pending bookings on or after check-in date
-  return (status === 'confirmed' || status === 'pending') && today >= checkInDate;
+  return (status === 'confirmed' || status === 'pending') && Boolean(checkInKey && todayKey && checkInKey <= todayKey);
 };
 
 // True when checking in before the hotel's configured check-in time, i.e. the
@@ -207,7 +209,7 @@ export const isEarlyCheckIn = (booking: BookingWithDetails, checkInTime?: string
   return new Date() < scheduledCheckIn;
 };
 
-export const canCheckOut = (booking: BookingWithDetails) => booking.status === 'checked_in';
+export const canCheckOut = (booking: BookingWithDetails) => isInHouseBookingStatus(booking.status);
 
 export const canVoid = (booking: BookingWithDetails) => booking.status !== 'voided';
 
@@ -223,7 +225,7 @@ export const canRelease = (booking: BookingWithDetails) =>
 export const canReactivate = (booking: BookingWithDetails) => booking.status === 'voided';
 
 export const statusDotColor = (status?: string) => {
-  if (status === 'checked_in') return 'var(--hotel-info)';
+  if (isInHouseBookingStatus(status)) return 'var(--hotel-info)';
   if (status === 'pending') return 'var(--hotel-warning)';
   if (status === 'voided') return 'var(--hotel-danger)';
   if (status === 'checked_out' || status === 'completed') return 'var(--hotel-neutral)';

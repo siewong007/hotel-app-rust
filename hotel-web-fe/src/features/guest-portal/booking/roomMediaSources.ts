@@ -1,10 +1,8 @@
-// Room-type media for the portal's Choose step: which photos a card shows and
-// whether the 3D model (the landing's configurator room) covers the type.
+// Room-type media for the portal's Choose step: which photos a card shows.
 import { apiUrl } from '../../../desktop/runtimeApi';
 import type { GuestBookingOffer } from './types';
 
-/** Room-type codes the landing's three.js room is laid out for
- *  (salim-inn/src/interiors/roomLayouts.ts). */
+/** Room-type codes the landing ships a bundled photo for. */
 export const MODEL_CODES = ['STDQ', 'DLX', 'SUP', 'FR', 'FS'] as const;
 export type ModelCode = (typeof MODEL_CODES)[number];
 

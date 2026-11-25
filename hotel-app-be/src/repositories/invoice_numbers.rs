@@ -16,10 +16,14 @@ where
             r#"
             SELECT MAX(seq) FROM (
                 SELECT CAST(SUBSTRING(invoice_number FROM 12) AS BIGINT) AS seq
-                FROM invoices WHERE invoice_number LIKE $1
+                FROM invoices
+                WHERE invoice_number LIKE $1
+                  AND SUBSTRING(invoice_number FROM 12) ~ '^[0-9]+$'
                 UNION ALL
                 SELECT CAST(SUBSTRING(invoice_number FROM 12) AS BIGINT) AS seq
-                FROM customer_ledgers WHERE invoice_number LIKE $1
+                FROM customer_ledgers
+                WHERE invoice_number LIKE $1
+                  AND SUBSTRING(invoice_number FROM 12) ~ '^[0-9]+$'
             ) combined
             "#,
         )
@@ -47,10 +51,12 @@ where
             SELECT CAST(SUBSTRING(invoice_number FROM 12) AS BIGINT) AS seq
             FROM invoices
             WHERE invoice_number LIKE 'INV-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-%'
+              AND SUBSTRING(invoice_number FROM 12) ~ '^[0-9]+$'
             UNION ALL
             SELECT CAST(SUBSTRING(invoice_number FROM 12) AS BIGINT) AS seq
             FROM customer_ledgers
             WHERE invoice_number LIKE 'INV-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-%'
+              AND SUBSTRING(invoice_number FROM 12) ~ '^[0-9]+$'
         ) combined
         "#,
     )
@@ -65,7 +71,8 @@ pub async fn bookings_missing_invoices(pool: &DbPool) -> Result<Vec<(i64, String
             r#"
             SELECT b.id, TO_CHAR(b.created_at, 'YYYYMM')
             FROM bookings b
-            WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.booking_id = b.id)
+            WHERE b.status NOT IN ('pending_payment', 'voided', 'no_show', 'comp_void')
+              AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.booking_id = b.id)
             ORDER BY b.created_at
             "#,
         )
@@ -85,7 +92,8 @@ pub async fn insert_booking_invoice(
             r#"
             INSERT INTO invoices (
                 invoice_number, booking_id, billing_name, billing_email,
-                subtotal, total_amount, line_items, status, invoice_type
+                subtotal, tax_amount, discount_amount, total_amount,
+                line_items, status, invoice_type
             )
             SELECT $1, b.id,
                    -- Must stay equivalent to models::guest::display_guest_name:
@@ -102,8 +110,12 @@ pub async fn insert_booking_invoice(
                        ELSE COALESCE(BTRIM(g.nick_name), '')
                    END,
                    g.email,
-                   b.total_amount,
-                   b.total_amount,
+                   COALESCE(b.subtotal, b.total_amount + COALESCE(b.discount_amount, 0))
+                       + COALESCE(b.extra_bed_charge, 0),
+                   COALESCE(b.tourism_tax_amount, 0),
+                   COALESCE(b.discount_amount, 0),
+                   b.total_amount + COALESCE(b.tourism_tax_amount, 0)
+                       + COALESCE(b.extra_bed_charge, 0),
                    '[]'::jsonb,
                    'issued',
                    'booking'

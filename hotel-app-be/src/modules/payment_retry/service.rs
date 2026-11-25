@@ -278,9 +278,26 @@ pub async fn describe_recovery(
         methods.push("paypal".to_string());
     }
 
+    let booking_group_id = crate::modules::bookings::booking_group_id(pool, booking.id).await?;
+    let amount_due = match booking_group_id {
+        Some(group_id) => {
+            crate::modules::payments::service::group_remaining_balance(pool, group_id)
+                .await
+                .unwrap_or(booking.total_amount)
+        }
+        None => crate::modules::payments::repository::PaymentRepository::workflow_summary_row(
+            pool, booking.id,
+        )
+        .await?
+        .map(|summary| {
+            (summary.billable_total() - summary.net_room_paid()).max(rust_decimal::Decimal::ZERO)
+        })
+        .unwrap_or(booking.total_amount),
+    };
+
     Ok(super::handlers::PaymentRecoveryView {
         booking_number: booking.booking_number.clone(),
-        amount_due: booking.total_amount.to_string(),
+        amount_due: amount_due.to_string(),
         currency: booking
             .currency
             .clone()
@@ -290,16 +307,43 @@ pub async fn describe_recovery(
         payment_id: capability.replacement_payment_id,
         receipt_uploadable,
         paypal_client_id: crate::core::config::get().paypal.public_client_id(),
-        already_submitted: capability.is_consumed(),
+        already_submitted: capability.is_consumed()
+            && !receipt_uploadable_or_reusable(pool, &capability).await,
     })
+}
+
+async fn payment_is_reusable(pool: &DbPool, payment_id: i64) -> bool {
+    matches!(
+        crate::modules::payments::repository::PaymentRepository::get_payment_for_review(
+            pool,
+            payment_id,
+        )
+        .await
+        .ok()
+        .flatten()
+        .map(|p| p.status),
+        Some(ref s) if matches!(s.as_str(), "failed" | "void" | "rejected")
+    )
+}
+
+async fn receipt_uploadable_or_reusable(
+    pool: &DbPool,
+    capability: &PaymentRetryCapability,
+) -> bool {
+    match capability.replacement_payment_id {
+        Some(payment_id) if capability.expires_at > Utc::now() => {
+            payment_is_reusable(pool, payment_id).await
+        }
+        _ => false,
+    }
 }
 
 /// Raise a bank-transfer claim against the booking named by this capability.
 ///
 /// A second submission does not create a second payment: a spent capability
-/// resolves to the payment it already produced. The authoritative guards live
-/// in `create_bank_transfer_claim_for_capability`, which consumes the
-/// capability inside the same transaction as the insert.
+/// resolves to the payment it already produced unless that replacement
+/// failed/voided and the link is still unexpired. For a group booking, raises a
+/// group bank-transfer claim across every unpaid room in the group.
 pub async fn recover_with_bank_transfer(
     pool: &DbPool,
     presented: &str,
@@ -307,17 +351,40 @@ pub async fn recover_with_bank_transfer(
     let capability = resolve_capability(pool, presented).await?;
 
     if let Some(existing) = capability.replacement_payment_id {
-        return Ok(crate::models::PaymentActionResponse {
-            payment_id: existing,
-            status: "pending".to_string(),
-            booking_status: Some("pending_confirmation".to_string()),
-        });
+        if capability.expires_at > Utc::now() && payment_is_reusable(pool, existing).await {
+            let _ = PaymentRetryRepository::restore(pool, capability.id, existing).await?;
+        } else {
+            return Ok(crate::models::PaymentActionResponse {
+                payment_id: existing,
+                status: "pending".to_string(),
+                booking_status: Some("pending_confirmation".to_string()),
+            });
+        }
     }
 
     let booking =
         crate::modules::bookings::helpers::fetch_booking_by_id(pool, capability.booking_id)
             .await
             .map_err(|_| unavailable())?;
+    if let Some(group_id) = crate::modules::bookings::booking_group_id(pool, booking.id).await? {
+        let group_res =
+            crate::modules::payments::service::create_group_bank_transfer_claim_for_capability(
+                pool,
+                booking.guest_id,
+                group_id,
+                capability.id,
+            )
+            .await?;
+        let lead_payment_id =
+            group_res.payment_ids.first().copied().ok_or_else(|| {
+                ApiError::Internal("Group claim produced no payments".to_string())
+            })?;
+        return Ok(crate::models::PaymentActionResponse {
+            payment_id: lead_payment_id,
+            status: group_res.status,
+            booking_status: Some("pending_confirmation".to_string()),
+        });
+    }
     crate::modules::payments::service::create_bank_transfer_claim_for_capability(
         pool,
         &booking,
@@ -329,8 +396,9 @@ pub async fn recover_with_bank_transfer(
 /// Create a PayPal order against the booking named by this capability.
 ///
 /// A duplicate submission does not authorise a second order: a spent capability
-/// resolves to the payment it already produced, and that payment's existing
-/// order id is returned so the guest finishes the order they already have.
+/// resolves to the payment it already produced (unless that prior replacement
+/// failed/voided and the link is unexpired), and that payment's existing order
+/// id is returned so the guest finishes the order they already have.
 pub async fn recover_with_paypal(
     pool: &DbPool,
     presented: &str,
@@ -338,26 +406,41 @@ pub async fn recover_with_paypal(
     let capability = resolve_capability(pool, presented).await?;
 
     if let Some(existing) = capability.replacement_payment_id {
-        // Resume rather than authorise again: the guest may simply have
-        // reloaded between approving in PayPal's window and coming back.
-        let order_id =
-            crate::modules::payments::repository::PaymentRepository::find_gateway_order_id(
-                pool, existing,
-            )
-            .await?
-            .ok_or_else(|| {
-                ApiError::Conflict("A payment is already in progress for this booking.".to_string())
-            })?;
-        return Ok(crate::models::PaypalCreateOrderResponse {
-            order_id,
-            payment_id: existing,
-        });
+        if capability.expires_at > Utc::now() && payment_is_reusable(pool, existing).await {
+            let _ = PaymentRetryRepository::restore(pool, capability.id, existing).await?;
+        } else {
+            // Resume rather than authorise again: the guest may simply have
+            // reloaded between approving in PayPal's window and coming back.
+            let order_id =
+                crate::modules::payments::repository::PaymentRepository::find_gateway_order_id(
+                    pool, existing,
+                )
+                .await?
+                .ok_or_else(|| {
+                    ApiError::Conflict(
+                        "A payment is already in progress for this booking.".to_string(),
+                    )
+                })?;
+            return Ok(crate::models::PaypalCreateOrderResponse {
+                order_id,
+                payment_id: existing,
+            });
+        }
     }
 
     let booking =
         crate::modules::bookings::helpers::fetch_booking_by_id(pool, capability.booking_id)
             .await
             .map_err(|_| unavailable())?;
+    if let Some(group_id) = crate::modules::bookings::booking_group_id(pool, booking.id).await? {
+        return crate::modules::payments::service::create_group_paypal_order_for_capability(
+            pool,
+            booking.guest_id,
+            group_id,
+            capability.id,
+        )
+        .await;
+    }
     crate::modules::payments::service::create_paypal_order_for_capability(
         pool,
         &booking,
@@ -391,6 +474,16 @@ pub async fn capture_recovered_paypal(
         crate::modules::bookings::helpers::fetch_booking_by_id(pool, capability.booking_id)
             .await
             .map_err(|_| unavailable())?;
+    if let Some(group_id) = crate::modules::bookings::booking_group_id(pool, booking.id).await? {
+        return crate::modules::payments::service::capture_group_paypal_payment(
+            pool,
+            booking.guest_id,
+            group_id,
+            order_id,
+            payment_id,
+        )
+        .await;
+    }
     crate::modules::payments::service::capture_paypal_payment(pool, &booking, order_id, payment_id)
         .await
 }

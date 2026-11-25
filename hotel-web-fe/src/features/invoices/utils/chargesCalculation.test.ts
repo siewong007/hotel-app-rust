@@ -254,5 +254,47 @@ describe('calculateChargesFromInputs', () => {
     expect(emptyCharges.roomCardDeposit).toBe(50);
     expect(emptyCharges.grandTotal).toBe(0);
     expect(emptyCharges.subtotal).toBe(0);
+    expect(emptyCharges.discountAmount).toBe(0);
+    expect(emptyCharges.complimentaryDeduction).toBe(0);
+  });
+
+  it('deducts discount_amount and complimentary nights cleanly before computing totals', () => {
+    const settings = buildSettings({ service_tax_rate: 8, tourism_tax_rate: 10 });
+    const booking = buildBooking({
+      price_per_night: 108,
+      check_in_date: '2026-07-10',
+      check_out_date: '2026-07-12', // 2 nights => 216 gross
+      discount_amount: 21.6,
+      complimentary_nights: 1,
+      guest_tourism_type: 'foreign',
+    });
+
+    const result = calculateChargesFromInputs(booking, 0, settings, {});
+
+    expect(result.complimentaryDeduction).toBe(108);
+    expect(result.discountAmount).toBe(21.6);
+    expect(result.tourismTax).toBe(10); // only 1 billable night
+    expect(result.roomCharges + result.serviceTax).toBe(86.4);
+    expect(result.grandTotal).toBe(96.4);
+  });
+
+  it('zeroes room charges on fully_complimentary stays', () => {
+    const settings = buildSettings({ service_tax_rate: 8, tourism_tax_rate: 10 });
+    const booking = buildBooking({
+      status: 'fully_complimentary',
+      is_complimentary: true,
+      price_per_night: 108,
+      check_in_date: '2026-07-10',
+      check_out_date: '2026-07-12',
+      guest_tourism_type: 'foreign',
+    });
+
+    const result = calculateChargesFromInputs(booking, 0, settings, {});
+
+    expect(result.complimentaryDeduction).toBe(216);
+    expect(result.roomCharges).toBe(0);
+    expect(result.serviceTax).toBe(0);
+    expect(result.tourismTax).toBe(0);
+    expect(result.grandTotal).toBe(0);
   });
 });

@@ -85,12 +85,12 @@ export const UrgentTransferAlert: React.FC = () => {
 
   const openReceipt = async (entry: PendingPaymentEntry) => {
     setError(null);
-    const popup = window.open('', '_blank');
+    const popup = window.open('', '_blank', 'noopener,noreferrer');
     try {
       const blob = await PaymentApprovalsService.downloadReceipt(entry.id);
       const url = URL.createObjectURL(blob);
       if (popup) popup.location.href = url;
-      else window.open(url, '_blank');
+      else window.open(url, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (caught) {
       popup?.close();

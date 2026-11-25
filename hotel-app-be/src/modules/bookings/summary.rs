@@ -90,13 +90,14 @@ pub fn board_view_filter(view: &str) -> Option<BoardViewFilter> {
     let (predicate, needs_balance_joins) = match view.trim() {
         "arriving" => (
             "b.check_in_date = CURRENT_DATE \
-             AND b.status NOT IN ('checked_in', 'checked_out', 'completed')"
+             AND b.status NOT IN ('checked_in', 'auto_checked_in', 'checked_out', 'completed', 'voided', 'no_show', 'comp_void')"
                 .to_string(),
             false,
         ),
-        "in_house" => ("b.status = 'checked_in'".to_string(), false),
+        "in_house" => ("b.status IN ('checked_in', 'auto_checked_in')".to_string(), false),
         "departing" => (
-            "b.check_out_date = CURRENT_DATE AND b.status = 'checked_in'".to_string(),
+            "b.check_out_date = CURRENT_DATE AND b.status IN ('checked_in', 'auto_checked_in')"
+                .to_string(),
             false,
         ),
         // Every room-holding reservation, so unpaid and awaiting-confirmation
@@ -109,14 +110,14 @@ pub fn board_view_filter(view: &str) -> Option<BoardViewFilter> {
         ),
         "normal_balance" => (
             format!(
-                "NOT {IS_COMPANY} AND b.check_out_date < CURRENT_DATE AND {}",
+                "b.status NOT IN ('voided', 'no_show', 'comp_void') AND NOT {IS_COMPANY} AND b.check_out_date < CURRENT_DATE AND {}",
                 has_balance()
             ),
             true,
         ),
         "company_balance" => (
             format!(
-                "{IS_COMPANY} AND b.check_out_date + INTERVAL '{months} month' <= CURRENT_DATE AND {}",
+                "b.status NOT IN ('voided', 'no_show', 'comp_void') AND {IS_COMPANY} AND b.check_out_date + INTERVAL '{months} month' <= CURRENT_DATE AND {}",
                 has_balance()
             ),
             true,
@@ -125,7 +126,8 @@ pub fn board_view_filter(view: &str) -> Option<BoardViewFilter> {
         // disjoint on `is_company`.
         "balance" => (
             format!(
-                "((NOT {IS_COMPANY} AND b.check_out_date < CURRENT_DATE) \
+                "b.status NOT IN ('voided', 'no_show', 'comp_void') \
+                 AND ((NOT {IS_COMPANY} AND b.check_out_date < CURRENT_DATE) \
                   OR ({IS_COMPANY} AND b.check_out_date + INTERVAL '{months} month' <= CURRENT_DATE)) \
                  AND {}",
                 has_balance()
@@ -150,15 +152,24 @@ pub const BALANCE_LATERAL_JOINS: &str = r#"
         FROM customer_ledgers cl
         WHERE cl.booking_id = b.id
           AND cl.post_type = 'room_charge'
+          AND cl.status <> 'void'
           AND COALESCE(cl.is_reversal, FALSE) = FALSE
         ORDER BY cl.created_at DESC
         LIMIT 1
     ) bk_charge ON TRUE
     LEFT JOIN LATERAL (
         SELECT
-            SUM(p.amount) FILTER (
-                WHERE p.status = 'completed'
-                  AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')
+            GREATEST(
+                COALESCE(SUM(p.amount) FILTER (
+                    WHERE p.status = 'completed'
+                      AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                ), 0)
+                - COALESCE(SUM(p.amount) FILTER (
+                    WHERE p.status <> 'void'
+                      AND COALESCE(p.payment_type, 'booking') = 'refund'
+                      AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+                ), 0),
+                0
             ) AS completed_paid
         FROM payments p
         WHERE p.booking_id = b.id
@@ -276,7 +287,7 @@ mod tests {
         // aggregate carries the list query's own expression, not a rewrite.
         assert!(sql.contains("bk_charge.paid_amount"));
         assert!(sql.contains(
-            "COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')"
+            "COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')"
         ));
         assert!(sql.contains("cl.post_type = 'room_charge'"));
     }

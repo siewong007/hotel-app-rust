@@ -461,7 +461,7 @@ pub struct GuestBookingRow {
 /// service used to hand-build with `json!`.
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct GuestCreditRow {
-    pub id: i32,
+    pub id: i64,
     pub guest_id: i64,
     pub room_type_id: i64,
     pub room_type_name: String,

@@ -769,7 +769,7 @@ impl GuestRepository {
 
     pub async fn has_checked_in_booking(pool: &DbPool, guest_id: i64) -> Result<bool, ApiError> {
         let id: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM bookings WHERE guest_id = $1 AND status = 'checked_in' LIMIT 1",
+            "SELECT id FROM bookings WHERE guest_id = $1 AND status IN ('checked_in', 'auto_checked_in', 'late_checkout') LIMIT 1",
         )
         .bind(guest_id)
         .fetch_optional(pool)
@@ -779,12 +779,27 @@ impl GuestRepository {
     }
 
     pub async fn hard_delete(pool: &DbPool, guest_id: i64) -> Result<(), ApiError> {
+        let mut tx = pool.begin().await.map_err(ApiError::from)?;
+        let active: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM bookings WHERE guest_id = $1 AND status IN ('checked_in', 'auto_checked_in', 'late_checkout') LIMIT 1 FOR UPDATE",
+        )
+        .bind(guest_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+        if active.is_some() {
+            return Err(ApiError::BadRequest(
+                "Cannot delete guest who is currently checked in. Please complete the checkout first."
+                    .to_string(),
+            ));
+        }
         sqlx::query("DELETE FROM guests WHERE id = $1")
             .bind(guest_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
-            .map(|_| ())
-            .map_err(ApiError::from)
+            .map_err(ApiError::from)?;
+        tx.commit().await.map_err(ApiError::from)?;
+        Ok(())
     }
 
     pub async fn guest_bookings(
@@ -1110,23 +1125,138 @@ impl GuestRepository {
         password_hash: &str,
         role: &str,
     ) -> Result<i64, ApiError> {
-        sqlx::query_scalar("SELECT upgrade_guest_to_user($1, $2, $3, $4)")
-            .bind(guest_id)
-            .bind(username)
-            .bind(password_hash)
-            .bind(role)
-            .fetch_one(pool)
+        let mut tx = pool.begin().await.map_err(ApiError::from)?;
+
+        let guest_row = sqlx::query(
+            r#"
+            SELECT id, email, phone, nick_name, first_name, last_name
+            FROM guests
+            WHERE id = $1 AND deleted_at IS NULL
+            FOR UPDATE
+            "#,
+        )
+        .bind(guest_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("Guest not found or deleted".to_string()))?;
+
+        let email: Option<String> = guest_row.try_get("email").ok().flatten();
+        let email = email
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .ok_or_else(|| {
+                ApiError::BadRequest("Guest must have an email address to upgrade".to_string())
+            })?
+            .to_string();
+
+        let existing_link: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM users WHERE guest_id = $1 AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(guest_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+        if existing_link.is_some() {
+            return Err(ApiError::BadRequest(
+                "Guest already has a linked user account".to_string(),
+            ));
+        }
+
+        let duplicate: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM users WHERE (LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)) AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(username.trim())
+        .bind(&email)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+        if duplicate.is_some() {
+            return Err(ApiError::BadRequest(
+                "User with this username or email already exists".to_string(),
+            ));
+        }
+
+        let first_name: Option<String> = guest_row.try_get("first_name").ok().flatten();
+        let last_name: Option<String> = guest_row.try_get("last_name").ok().flatten();
+        let nick_name: String = guest_row.try_get("nick_name").unwrap_or_default();
+        let phone: Option<String> = guest_row.try_get("phone").ok().flatten();
+        let full_name = match (
+            first_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            last_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        ) {
+            (Some(f), Some(l)) => format!("{f} {l}"),
+            (Some(f), None) => f.to_string(),
+            _ if !nick_name.trim().is_empty() => nick_name.trim().to_string(),
+            _ => username.trim().to_string(),
+        };
+
+        let new_user_id: i64 = sqlx::query_scalar(
+            r#"
+            INSERT INTO users (
+                uuid, username, email, password_hash, full_name, phone,
+                user_type, guest_id, is_active, is_verified, created_at
+            )
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, 'guest', $7, true, true, CURRENT_TIMESTAMP)
+            RETURNING id
+            "#,
+        )
+        .bind(crate::core::db::generate_uuid())
+        .bind(username.trim())
+        .bind(&email)
+        .bind(password_hash)
+        .bind(&full_name)
+        .bind(phone)
+        .bind(guest_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            if let sqlx::Error::Database(db_err) = &e
+                && db_err.code().as_deref() == Some("23505")
+            {
+                ApiError::BadRequest("User with this email already exists".to_string())
+            } else {
+                ApiError::from(e)
+            }
+        })?;
+
+        let role_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM roles WHERE LOWER(name) = LOWER($1) LIMIT 1")
+                .bind(role)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::from)?;
+        if let Some(role_id) = role_id {
+            sqlx::query(
+                "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(new_user_id)
+            .bind(role_id)
+            .execute(&mut *tx)
             .await
-            .map_err(|e| {
-                let err_msg = e.to_string();
-                if err_msg.contains("already exists") {
-                    ApiError::BadRequest("User with this email already exists".to_string())
-                } else if err_msg.contains("not found") {
-                    ApiError::NotFound("Guest not found or deleted".to_string())
-                } else {
-                    ApiError::Database(err_msg)
-                }
-            })
+            .map_err(ApiError::from)?;
+        }
+
+        sqlx::query(
+            "INSERT INTO user_guests (user_id, guest_id, relationship_type, can_book_for, can_view_bookings, can_modify) \
+             VALUES ($1, $2, 'self', true, true, true) \
+             ON CONFLICT (user_id, guest_id) DO NOTHING",
+        )
+        .bind(new_user_id)
+        .bind(guest_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+
+        tx.commit().await.map_err(ApiError::from)?;
+        Ok(new_user_id)
     }
 
     pub async fn transfer_portal_account(
@@ -1228,7 +1358,10 @@ impl GuestRepository {
             .map_err(ApiError::from)
     }
 
-    pub async fn guest_credits(pool: &DbPool, guest_id: i64) -> Vec<GuestCreditRow> {
+    pub async fn guest_credits(
+        pool: &DbPool,
+        guest_id: i64,
+    ) -> Result<Vec<GuestCreditRow>, ApiError> {
         sqlx::query_as::<_, GuestCreditRow>(
             r#"
             SELECT
@@ -1238,8 +1371,8 @@ impl GuestRepository {
                 rt.name as room_type_name,
                 rt.code as room_type_code,
                 gcc.nights_available,
-                gcc.created_at,
-                gcc.updated_at
+                COALESCE(gcc.created_at, CURRENT_TIMESTAMP) AS created_at,
+                COALESCE(gcc.updated_at, CURRENT_TIMESTAMP) AS updated_at
             FROM guest_complimentary_credits gcc
             INNER JOIN room_types rt ON gcc.room_type_id = rt.id
             WHERE gcc.guest_id = $1 AND gcc.nights_available > 0
@@ -1249,7 +1382,7 @@ impl GuestRepository {
         .bind(guest_id)
         .fetch_all(pool)
         .await
-        .unwrap_or_default()
+        .map_err(ApiError::from)
     }
 
     pub async fn legacy_credit_total(pool: &DbPool, guest_id: i64) -> i32 {

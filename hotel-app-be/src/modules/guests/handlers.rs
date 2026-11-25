@@ -65,9 +65,10 @@ pub async fn apply_tourism_type_from_last_check_in_handler(
 
 pub async fn delete_guest_handler(
     State(pool): State<DbPool>,
+    Extension(user_id): Extension<i64>,
     Path(guest_id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    svc::delete_guest(&pool, guest_id).await?;
+    svc::delete_guest_as(&pool, Some(user_id), guest_id).await?;
 
     Ok(Json(serde_json::json!({
         "success": true,

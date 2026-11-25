@@ -64,6 +64,7 @@ impl RevenueService {
             prior,
             mut daily,
             mut channels,
+            prior_channels,
             service_revenue,
             prior_service_revenue,
             daily_service,
@@ -74,15 +75,17 @@ impl RevenueService {
             RevenueRepository::stay_sums(pool, &previous, query.room_type_id, query.channel_id),
             RevenueRepository::daily(pool, &range, query.room_type_id, query.channel_id),
             RevenueRepository::channel_mix(pool, &range, query.room_type_id, query.channel_id),
+            RevenueRepository::channel_mix(pool, &previous, query.room_type_id, query.channel_id),
             RevenueRepository::service_sums(pool, &range, query.room_type_id, query.channel_id),
             RevenueRepository::service_sums(pool, &previous, query.room_type_id, query.channel_id),
             RevenueRepository::daily_service(pool, &range, query.room_type_id, query.channel_id),
             RevenueRepository::room_type_performance(pool, &range, query.channel_id),
             RevenueRepository::pipeline(pool, &range, today),
         )?;
-        let direct_share = direct_share(&channels);
-        let current_kpis = kpis(&current, days, direct_share, service_revenue);
-        let previous_kpis = kpis(&prior, days, Decimal::ZERO, prior_service_revenue);
+        let direct_share_now = direct_share(&channels);
+        let prior_direct_share = direct_share(&prior_channels);
+        let current_kpis = kpis(&current, days, direct_share_now, service_revenue);
+        let previous_kpis = kpis(&prior, days, prior_direct_share, prior_service_revenue);
         merge_daily_service(&mut daily, &daily_service);
         fill_daily(&mut daily, current.sellable_rooms);
         fill_channel_shares(&mut channels);

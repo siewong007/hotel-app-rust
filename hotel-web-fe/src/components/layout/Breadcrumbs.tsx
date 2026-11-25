@@ -6,6 +6,7 @@ import {
   findRouteDefinition,
   navigationRouteDefinitions,
   type AppRouteDefinition,
+  type NavGroup,
 } from '../../navigation/routeRegistry';
 import { useRouteLabels } from '../../navigation/routeLabels';
 
@@ -17,12 +18,32 @@ import { useRouteLabels } from '../../navigation/routeLabels';
  */
 const DASHBOARD_PATHS = new Set(['/', '/admin-portal']);
 
+/**
+ * File-based staff sub-routes excluded from the sidebar registry so they are
+ * still labelled with their nav group and translated breadcrumb.
+ */
+const FILE_ROUTE_BREADCRUMBS: Record<
+  string,
+  Pick<AppRouteDefinition, 'id' | 'navGroup' | 'navLabel' | 'breadcrumbLabel'>
+> = {
+  '/guest-relations/follow-ups': {
+    id: 'guest-relations-follow-ups',
+    navGroup: 'guests',
+    navLabel: 'Follow-up Queue',
+    breadcrumbLabel: 'Follow-up Queue',
+  },
+};
+
 /** A record id segment (`/bookings/1002`, `/channels/12`, a UUID) — not a label. */
 const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 const resolveRoute = (pathname: string): AppRouteDefinition | undefined => {
   if (DASHBOARD_PATHS.has(pathname)) {
     return navigationRouteDefinitions.find((route) => route.id === 'dashboard');
+  }
+  const fileRoute = FILE_ROUTE_BREADCRUMBS[pathname];
+  if (fileRoute) {
+    return { path: pathname, ...fileRoute } as AppRouteDefinition;
   }
   // Prefer the navigation definition so crumbs carry nav metadata;
   // findRouteDefinition then covers non-nav auth pages such as /profile.

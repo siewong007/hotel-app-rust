@@ -57,6 +57,23 @@ const unsubscribeRoute = createRoute({
   },
 });
 
+const PaymentRecoveryPage = lazyRoute(
+  () => import('../features/payment-recovery/PaymentRecoveryPage'),
+);
+
+const paymentRecoveryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'booking/recover-payment/$token',
+  component: function PaymentRecoveryGuestRoute() {
+    const { token } = paymentRecoveryRoute.useParams();
+    return (
+      <Suspense fallback={<LogoLoader variant="page" />}>
+        <PaymentRecoveryPage token={token} />
+      </Suspense>
+    );
+  },
+});
+
 const PortalDashboardPage = lazyRoute(
   () => import('../features/guest-portal/components/PortalDashboardPage'),
 );
@@ -89,10 +106,11 @@ const routeTree = rootRoute.addChildren([
   page('register', () => import('../features/auth/components/RegisterPage'), true),
   page('verify-email', () => import('../features/auth/components/EmailVerificationPage'), true),
   page('complete-profile', () => import('../features/auth/components/CompleteProfilePage')),
-  page('guest-checkin', () => import('../features/bookings/components/GuestCheckInLanding'), true),
-  page('guest-checkin/verify', () => import('../features/bookings/components/GuestCheckInVerify'), true),
-  page('guest-checkin/form', () => import('../features/bookings/components/GuestCheckInForm'), true),
-  page('guest-checkin/confirm', () => import('../features/bookings/components/GuestCheckInConfirmation'), true),
+  page('guest-checkin', () => import('../features/bookings/components/GuestCheckInLanding')),
+  page('guest-checkin/verify', () => import('../features/bookings/components/GuestCheckInVerify')),
+  page('guest-checkin/form', () => import('../features/bookings/components/GuestCheckInForm')),
+  page('guest-checkin/confirm', () => import('../features/bookings/components/GuestCheckInConfirmation')),
+  paymentRecoveryRoute,
   guestPortalRoute,
   createRoute({
     getParentRoute: () => rootRoute,

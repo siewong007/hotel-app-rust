@@ -108,6 +108,8 @@
     "tourismTaxDay": "Tourism Tax — {{date}}",
     "saveRates": "Save Rates",
     "approvedBy": "Approved by {{name}} · {{at}}",
+    "complimentaryDeduction": "Complimentary Deduction",
+    "discountDeduction": "Discount",
     "voidPayment": "Void payment",
     "voided": {
       "heading": "Voided payments",

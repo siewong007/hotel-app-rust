@@ -11,10 +11,17 @@ import {
   BookingStatusType,
   BookingWithDetails,
 } from '../types';
+import { isInHouseBookingStatus } from '../constants/booking.constants';
 import { multiplyMoney, sumMoney, toMoneyNumber } from './money';
 import { formatStatusLabel } from './formatters';
+import { parseLocalDate, toHotelDateString } from './date';
 import { dateFormatter } from '../i18n/format';
 import { formatCurrency as formatHotelCurrency } from './currency';
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const parseCalendarOrInstant = (value: string): Date =>
+  DATE_ONLY_RE.test(value.trim()) ? parseLocalDate(value.trim()) : new Date(value);
 
 /**
  * Validate booking dates
@@ -24,10 +31,8 @@ export const validateBookingDates = (
   checkOut: string
 ): BookingValidation => {
   const errors: string[] = [];
-  const checkInDate = new Date(checkIn);
-  const checkOutDate = new Date(checkOut);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const checkInDate = parseLocalDate(checkIn);
+  const checkOutDate = parseLocalDate(checkOut);
 
   // Check if dates are valid
   if (isNaN(checkInDate.getTime())) {
@@ -47,7 +52,7 @@ export const validateBookingDates = (
   }
 
   // Maximum stay validation (e.g., 30 days)
-  const daysDiff = Math.ceil(
+  const daysDiff = Math.round(
     (checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)
   );
 
@@ -116,11 +121,11 @@ export const validateBookingRequest = (
  * Calculate number of nights between dates
  */
 export const calculateNights = (checkIn: string, checkOut: string): number => {
-  const checkInDate = new Date(checkIn);
-  const checkOutDate = new Date(checkOut);
+  const checkInDate = parseLocalDate(checkIn);
+  const checkOutDate = parseLocalDate(checkOut);
 
   const diffTime = checkOutDate.getTime() - checkInDate.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
   return diffDays;
 };
@@ -141,7 +146,7 @@ export const calculateTotalAmount = (
  * Format date for display
  */
 export const formatDateForDisplay = (dateString: string): string => {
-  const date = new Date(dateString);
+  const date = parseLocalDate(dateString);
   return dateFormatter({
     weekday: 'short',
     year: 'numeric',
@@ -218,15 +223,15 @@ export const getPaymentStatusColor = (
  * Check if booking can be voided
  */
 export const canVoidBooking = (booking: Booking): boolean => {
-  const validStatuses = [BookingStatus.CONFIRMED, BookingStatus.PENDING, BookingStatus.CHECKED_IN, 'confirmed', 'pending', 'checked_in'];
-  return validStatuses.includes(booking.status);
+  const validStatuses = [BookingStatus.CONFIRMED, BookingStatus.PENDING, 'confirmed', 'pending'];
+  return validStatuses.includes(booking.status) || isInHouseBookingStatus(booking.status);
 };
 
 /**
  * Check if booking can be modified
  */
 export const canModifyBooking = (booking: Booking): boolean => {
-  const checkInDate = new Date(booking.check_in_date);
+  const checkInDate = parseCalendarOrInstant(booking.check_in_date);
   const now = new Date();
   const hoursDiff = (checkInDate.getTime() - now.getTime()) / (1000 * 60 * 60);
 
@@ -241,7 +246,7 @@ export const canModifyBooking = (booking: Booking): boolean => {
  * Check if booking is active (checked in but not checked out)
  */
 export const isBookingActive = (booking: Booking): boolean => {
-  return booking.status === BookingStatus.CHECKED_IN || booking.status === 'checked_in';
+  return isInHouseBookingStatus(booking.status);
 };
 
 /**
@@ -275,8 +280,8 @@ export const sortBookingsByDate = (
   bookings: BookingWithDetails[]
 ): BookingWithDetails[] => {
   return [...bookings].sort((a, b) => {
-    const dateA = new Date(a.check_in_date);
-    const dateB = new Date(b.check_in_date);
+    const dateA = parseLocalDate(a.check_in_date);
+    const dateB = parseLocalDate(b.check_in_date);
     return dateB.getTime() - dateA.getTime();
   });
 };
@@ -297,10 +302,15 @@ export const filterUpcomingBookings = (
   bookings: BookingWithDetails[]
 ): BookingWithDetails[] => {
   const now = new Date();
+  const todayKey = toHotelDateString(now);
+  const validStatuses = [BookingStatus.CONFIRMED, BookingStatus.PENDING, 'confirmed', 'pending'];
   return bookings.filter((booking) => {
-    const checkInDate = new Date(booking.check_in_date);
-    const validStatuses = [BookingStatus.CONFIRMED, BookingStatus.PENDING, 'confirmed', 'pending'];
-    return checkInDate > now && validStatuses.includes(booking.status);
+    if (!validStatuses.includes(booking.status)) return false;
+    const raw = booking.check_in_date.trim();
+    if (DATE_ONLY_RE.test(raw)) {
+      return Boolean(todayKey && raw > todayKey);
+    }
+    return new Date(raw) > now;
   });
 };
 

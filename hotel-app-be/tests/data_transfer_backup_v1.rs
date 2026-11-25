@@ -767,9 +767,9 @@ async fn restore_clears_the_selection_and_expanded_dependents() {
 }
 
 /// File rows referencing a `users.id` this database never had: audit columns
-/// (`teams.created_by`/`updated_by`) remap to the importing admin; a
-/// required, non-audit reference (`user_guests.user_id`) skips the row and is
-/// counted in `relationshipProblems` — preview and job report both.
+/// (`guest_segments.created_by`/`updated_by`) remap to the importing admin; a
+/// required, non-audit reference (`staff_notification_reads.user_id`) skips the
+/// row and is counted in `relationshipProblems` — preview and job report both.
 #[tokio::test]
 async fn missing_user_refs_remap_or_skip_and_are_reported() {
     use hotel_app_be::models::{
@@ -781,11 +781,15 @@ async fn missing_user_refs_remap_or_skip_and_are_reported() {
         return;
     };
     let _fixture = FIXTURE_LOCK.lock().await;
-    sqlx::query("DELETE FROM user_guests WHERE id IN (920944011, 920944012)")
+    sqlx::query("DELETE FROM staff_notification_reads WHERE notification_id = 920944013")
         .execute(&pool)
         .await
         .expect("fixture pre-clean must run");
-    sqlx::query("DELETE FROM teams WHERE id = 920944001")
+    sqlx::query("DELETE FROM staff_notifications WHERE id = 920944013")
+        .execute(&pool)
+        .await
+        .expect("fixture pre-clean must run");
+    sqlx::query("DELETE FROM guest_segments WHERE id = 920944001")
         .execute(&pool)
         .await
         .expect("fixture pre-clean must run");
@@ -797,45 +801,43 @@ async fn missing_user_refs_remap_or_skip_and_are_reported() {
         .await
         .expect("missing-user probe must run");
     assert!(absent, "the fixture user id must not exist");
-    // Seed our own guest — a fresh baseline+seed database has none.
+    let real_notification: i64 = 920_944_013;
     sqlx::query(
-        "INSERT INTO guests (id, nick_name) OVERRIDING SYSTEM VALUE \
-         VALUES (920944013, 'dt-missing-refs') \
-         ON CONFLICT (id) DO UPDATE SET nick_name = EXCLUDED.nick_name",
+        "INSERT INTO staff_notifications (id, audience_permission, kind, title) \
+         OVERRIDING SYSTEM VALUE VALUES ($1, 'bookings:read', 'test', 'DT Missing Refs') \
+         ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title",
     )
+    .bind(real_notification)
     .execute(&pool)
     .await
-    .expect("guest fixture must insert");
-    let real_guest: i64 = 920_944_013;
+    .expect("notification fixture must insert");
 
     let file = v1_document(&[
         V1Entity {
-            name: "public.teams",
+            name: "public.guest_segments",
             primary_key: &["id"],
             rows: vec![json!({
                 "id": 920_944_001_i64,
-                "code": "dt_remap_team",
-                "name": "DT Remap Team",
+                "name": "DT Remap Segment",
+                "slug": "dt_remap_segment",
+                "rules": {},
                 "created_by": missing_user,
                 "updated_by": missing_user
             })],
         },
         V1Entity {
-            name: "public.user_guests",
-            primary_key: &["id"],
+            name: "public.staff_notification_reads",
+            primary_key: &["notification_id", "user_id"],
             rows: vec![
                 // Required non-audit ref to a missing user — must be skipped.
                 json!({
-                    "id": 920_944_011_i64,
-                    "user_id": missing_user,
-                    "guest_id": real_guest
+                    "notification_id": real_notification,
+                    "user_id": missing_user
                 }),
                 // Same table, resolvable refs — must insert normally.
                 json!({
-                    "id": 920_944_012_i64,
-                    "user_id": admin_id,
-                    "guest_id": real_guest,
-                    "linked_by": admin_id
+                    "notification_id": real_notification,
+                    "user_id": admin_id
                 }),
             ],
         },
@@ -848,17 +850,17 @@ async fn missing_user_refs_remap_or_skip_and_are_reported() {
     let preview = data_transfer_jobs::preview_import(&pool, upload.upload_id, None)
         .await
         .expect("preview must answer");
-    let user_guests = preview
+    let notification_reads = preview
         .entities
         .iter()
-        .find(|entity| entity.name == "public.user_guests")
-        .expect("user_guests must appear in the preview");
-    assert_eq!(user_guests.skipped, Some(1));
-    assert_eq!(user_guests.new, Some(2));
+        .find(|entity| entity.name == "public.staff_notification_reads")
+        .expect("staff_notification_reads must appear in the preview");
+    assert_eq!(notification_reads.skipped, Some(1));
+    assert_eq!(notification_reads.new, Some(2));
     let problem = preview
         .relationship_problems
         .iter()
-        .find(|problem| problem.entity == "public.user_guests")
+        .find(|problem| problem.entity == "public.staff_notification_reads")
         .expect("the required missing-user reference must be reported");
     assert_eq!(problem.rows, 1);
     assert!(
@@ -899,25 +901,31 @@ async fn missing_user_refs_remap_or_skip_and_are_reported() {
 
     // Audit columns survive attribution — remapped to the importing admin.
     let (created_by, updated_by): (Option<i64>, Option<i64>) =
-        sqlx::query_as("SELECT created_by, updated_by FROM teams WHERE id = 920944001")
+        sqlx::query_as("SELECT created_by, updated_by FROM guest_segments WHERE id = 920944001")
             .fetch_one(&pool)
             .await
-            .expect("the remapped team must exist");
+            .expect("the remapped guest segment must exist");
     assert_eq!(created_by, Some(admin_id));
     assert_eq!(updated_by, Some(admin_id));
 
     // The unresolvable row was skipped and counted; the resolvable one landed.
-    let dangling: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_guests WHERE id = 920944011)")
-            .fetch_one(&pool)
-            .await
-            .expect("probe must run");
+    let dangling: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM staff_notification_reads WHERE notification_id = $1 AND user_id = $2)",
+    )
+    .bind(real_notification)
+    .bind(missing_user)
+    .fetch_one(&pool)
+    .await
+    .expect("probe must run");
     assert!(!dangling, "a row needing a missing user must be skipped");
-    let applied: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_guests WHERE id = 920944012)")
-            .fetch_one(&pool)
-            .await
-            .expect("probe must run");
+    let applied: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM staff_notification_reads WHERE notification_id = $1 AND user_id = $2)",
+    )
+    .bind(real_notification)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .expect("probe must run");
     assert!(applied, "the resolvable row must insert");
 
     let result = status.result.expect("succeeded job carries a result");
@@ -925,28 +933,30 @@ async fn missing_user_refs_remap_or_skip_and_are_reported() {
         .report
         .entities
         .iter()
-        .find(|entity| entity.entity == "public.user_guests")
-        .expect("user_guests must be in the report");
+        .find(|entity| entity.entity == "public.staff_notification_reads")
+        .expect("staff_notification_reads must be in the report");
     assert_eq!((outcome.inserted, outcome.skipped), (1, 1));
     assert!(
         result
             .report
             .relationship_problems
             .iter()
-            .any(|problem| problem.entity == "public.user_guests" && problem.rows == 1),
+            .any(
+                |problem| problem.entity == "public.staff_notification_reads" && problem.rows == 1
+            ),
         "the job report must carry the skipped reference: {:?}",
         result.report.relationship_problems
     );
 
-    sqlx::query("DELETE FROM user_guests WHERE id = 920944012")
+    sqlx::query("DELETE FROM staff_notification_reads WHERE notification_id = 920944013")
         .execute(&pool)
         .await
         .expect("fixture cleanup must run");
-    sqlx::query("DELETE FROM teams WHERE id = 920944001")
+    sqlx::query("DELETE FROM staff_notifications WHERE id = 920944013")
         .execute(&pool)
         .await
         .expect("fixture cleanup must run");
-    sqlx::query("DELETE FROM guests WHERE id = 920944013")
+    sqlx::query("DELETE FROM guest_segments WHERE id = 920944001")
         .execute(&pool)
         .await
         .expect("fixture cleanup must run");

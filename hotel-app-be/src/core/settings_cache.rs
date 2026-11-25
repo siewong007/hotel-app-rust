@@ -64,17 +64,23 @@ pub async fn get_optional_string(pool: &DbPool, key: &str) -> Option<String> {
         return cached;
     }
 
-    let value =
-        sqlx::query_scalar::<_, Option<String>>("SELECT value FROM system_settings WHERE key = $1")
-            .bind(key)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .flatten();
-
-    CACHE.store(key, value.clone());
-    value
+    match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT value FROM system_settings WHERE key = $1",
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(opt) => {
+            let value = opt.flatten();
+            CACHE.store(key, value.clone());
+            value
+        }
+        Err(e) => {
+            log::warn!("Failed to load system_settings key '{key}': {e}");
+            None
+        }
+    }
 }
 
 pub async fn get_string(pool: &DbPool, key: &str, default: &str) -> String {

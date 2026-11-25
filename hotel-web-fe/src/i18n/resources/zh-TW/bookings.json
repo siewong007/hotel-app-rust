@@ -74,6 +74,7 @@
     "takePaymentDetail": "一般未結餘額 {{amount}}"
   },
   "list": {
+    "count_zero": "沒有預訂",
     "count_other": "{{count}} 筆預訂",
     "sortButton": "排序：{{field}}",
     "sortGuest": "賓客",

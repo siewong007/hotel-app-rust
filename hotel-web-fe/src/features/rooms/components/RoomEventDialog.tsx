@@ -38,7 +38,7 @@ import { Room, RoomDetailedStatus, RoomStatusUpdateInput } from '../../../types'
 import RoomHistoryTimeline from './RoomHistoryTimeline';
 import { errorMessage } from '../../../utils/errorMessage';
 import { useTranslation } from '../../../i18n/useTranslation';
-import { formatHotelDate } from '../../../utils/date';
+import { formatHotelDate, toHotelDateString } from '../../../utils/date';
 import { getLocalizedStatusLabel } from '../config';
 
 interface RoomEventDialogProps {
@@ -257,11 +257,9 @@ const RoomEventDialog: React.FC<RoomEventDialogProps> = ({
     detailedStatus?.current_booking &&
     (detailedStatus.current_booking.status === 'confirmed' || detailedStatus.current_booking.status === 'pending') &&
     (() => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const checkInDate = new Date(detailedStatus.current_booking.check_in_date);
-      checkInDate.setHours(0, 0, 0, 0);
-      return checkInDate <= today;
+      const todayKey = toHotelDateString(new Date());
+      const checkInKey = detailedStatus.current_booking.check_in_date.split('T')[0];
+      return Boolean(checkInKey && todayKey && checkInKey <= todayKey);
     })();
 
   const handleEndMaintenance = async () => {

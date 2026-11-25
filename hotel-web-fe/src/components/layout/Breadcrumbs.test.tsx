@@ -78,4 +78,13 @@ describe('Breadcrumbs', () => {
 
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Create a booking');
   });
+
+  it('places the follow-up queue under the Guests nav group instead of Overview', () => {
+    mocks.pathname = '/guest-relations/follow-ups';
+    render(<Breadcrumbs />);
+
+    expect(screen.getByText('Guests')).toBeTruthy();
+    const current = screen.getByText('Follow-up Queue');
+    expect(current.getAttribute('aria-current')).toBe('page');
+  });
 });

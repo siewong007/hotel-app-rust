@@ -61,7 +61,7 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { getHotelSettings } from '../../../utils/hotelSettings';
 import { useCheckInFormData } from '../hooks/useCheckInFormData';
 import { emitApiNotification } from '../../../utils/apiNotifications';
-import { addMoney, divideMoney, isPositiveMoney, multiplyMoney, toMoneyNumber } from '../../../utils/money';
+import { addMoney, divideMoney, isPositiveMoney, multiplyMoney, subtractMoney, toMoneyNumber } from '../../../utils/money';
 import { getBookingChannelInfo } from '../utils/bookingChannel';
 import { useTranslation } from '../../../i18n';
 import type { ValidationErrors, CompanyOption } from './checkIn/checkInTypes';
@@ -306,17 +306,18 @@ export default function EnhancedCheckInModal({
 
     // For non-online bookings (walk-in, phone, direct), the full billable balance includes room, tourism tax, and extra bed:
     const billableTotal = isOnline ? totalAmt : addMoney(totalAmt, initialDeskCharges);
+    const remainingDue =
+      booking.balance_due !== undefined && booking.balance_due !== null
+        ? Math.max(0, toMoneyNumber(booking.balance_due))
+        : Math.max(0, subtractMoney(billableTotal, toMoneyNumber(booking.total_paid)));
+    const alreadyPaid = booking.payment_status === 'paid' || !isPositiveMoney(remainingDue);
     const settingsDeposit = getHotelSettings().deposit_amount;
-    setAmountPaid(billableTotal);
+    setAmountPaid(alreadyPaid ? 0 : remainingDue);
 
     setDeskChargesAmount(initialDeskCharges);
     setCollectDeskCharges(isPositiveMoney(initialDeskCharges));
     setDeskChargesMethod('Cash');
-    if (booking.payment_status === 'paid') {
-      setPaymentChoice('pay_now');
-    } else {
-      setPaymentChoice('pay_later');
-    }
+    setPaymentChoice('pay_later');
     if (booking.deposit_paid) {
       setDepositChoice('receive');
       const existingDeposit = toMoneyNumber(booking.deposit_amount);
@@ -614,11 +615,21 @@ export default function EnhancedCheckInModal({
     setError(null);
 
     try {
+      const totalAmt = toMoneyNumber(booking.total_amount);
+      const fallbackDue = isOnlineReservation
+        ? totalAmt
+        : addMoney(totalAmt, addMoney(toMoneyNumber(booking.tourism_tax_amount), toMoneyNumber(booking.extra_bed_charge)));
+      const remainingDue =
+        booking.balance_due !== undefined && booking.balance_due !== null
+          ? Math.max(0, toMoneyNumber(booking.balance_due))
+          : Math.max(0, subtractMoney(fallbackDue, toMoneyNumber(booking.total_paid)));
+      const isAlreadyPaid = booking.payment_status === 'paid' || !isPositiveMoney(remainingDue);
+
       // Build payment/deposit fields. Don't send payment_status — the backend
       // derives it from the payments table on every read and recomputes after
       // each payment row mutation, so any value sent here would be overridden.
       const paymentFields: Record<string, any> = {};
-      if (paymentChoice === 'pay_now') {
+      if (!isAlreadyPaid && paymentChoice === 'pay_now') {
         paymentFields.amount_paid = toMoneyNumber(amountPaid);
         paymentFields.payment_method = paymentType;
       }
@@ -657,7 +668,7 @@ export default function EnhancedCheckInModal({
       // backend records exactly that and skips its auto-settlement — preventing a
       // double charge from the separate recordPayment call below.
       const collectingOnlineAtDesk =
-        isOnlineReservation && paymentChoice === 'pay_now' && isPositiveMoney(amountPaid);
+        !isAlreadyPaid && isOnlineReservation && paymentChoice === 'pay_now' && isPositiveMoney(amountPaid);
       if (collectingOnlineAtDesk) {
         checkinRequest.payment_record = {
           amount: toMoneyNumber(amountPaid),
@@ -671,7 +682,7 @@ export default function EnhancedCheckInModal({
 
       // Record payment if paying now (online desk-collection is already handled
       // above via payment_record, so skip the duplicate posting here).
-      if (paymentChoice === 'pay_now' && isPositiveMoney(amountPaid) && !collectingOnlineAtDesk) {
+      if (!isAlreadyPaid && paymentChoice === 'pay_now' && isPositiveMoney(amountPaid) && !collectingOnlineAtDesk) {
         try {
           await recordCheckInPayment();
         } catch (payErr) {

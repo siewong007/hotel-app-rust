@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ConfirmProvider } from '../../../components/common/ConfirmProvider';
 import type { NightAuditPreview, NightAuditRun } from '../../../api';
 import { formatLocalDate } from '../../../utils/date';
+import { csvCell } from './NightAuditPage';
 
 const preview: NightAuditPreview = {
   audit_date: '2026-09-14',
@@ -176,5 +177,15 @@ describe('NightAuditPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Expand audit details' }));
     expect(await screen.findByRole('button', { name: 'Export PDF' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Rerun Audit' })).toBeNull();
+  });
+
+  it('neutralizes CSV formula prefixes and escapes quotes', () => {
+    expect(csvCell('=SUM(A1:A2)')).toBe(`"'=SUM(A1:A2)"`);
+    expect(csvCell('+cmd')).toBe(`"'+cmd"`);
+    expect(csvCell('-10')).toBe(`"'-10"`);
+    expect(csvCell('@IMPORT')).toBe(`"'@IMPORT"`);
+    expect(csvCell('\tTAB')).toBe(`"'\tTAB"`);
+    expect(csvCell('Doe, "Jane"')).toBe(`"Doe, ""Jane"""`);
+    expect(csvCell(null)).toBe('""');
   });
 });

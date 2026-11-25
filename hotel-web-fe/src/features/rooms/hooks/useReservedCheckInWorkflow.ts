@@ -3,7 +3,7 @@ import { BookingsService, GuestsService } from '../../../api';
 import type { BookingUpdateRequest, BookingWithDetails, CheckInRequest } from '../../../types';
 import { getHotelSettings } from '../../../utils/hotelSettings';
 import type { ApiNotificationSeverity } from '../../../utils/apiNotifications';
-import { isPositiveMoney, toMoneyNumber } from '../../../utils/money';
+import { isPositiveMoney, subtractMoney, toMoneyNumber } from '../../../utils/money';
 import { errorMessage } from '../../../utils/errorMessage';
 import { useTranslation } from '../../../i18n/useTranslation';
 
@@ -42,11 +42,16 @@ export function useReservedCheckInWorkflow({
   ) => {
     const settingsDeposit = getHotelSettings().deposit_amount;
     const totalAmount = toMoneyNumber(nextBooking.total_amount);
+    const remainingDue =
+      nextBooking.balance_due !== undefined && nextBooking.balance_due !== null
+        ? Math.max(0, toMoneyNumber(nextBooking.balance_due))
+        : Math.max(0, subtractMoney(totalAmount, toMoneyNumber(nextBooking.total_paid)));
+    const alreadyPaid = nextBooking.payment_status === 'paid' || !isPositiveMoney(remainingDue);
 
     setBooking(nextBooking);
-    setPaymentChoice(nextBooking.payment_status === 'paid' ? 'pay_now' : 'pay_later');
+    setPaymentChoice('pay_later');
     setPaymentMethod(nextBooking.payment_method || fallbackPaymentMethod);
-    setAmountPaid(totalAmount);
+    setAmountPaid(alreadyPaid ? 0 : remainingDue);
     setDepositChoice('receive');
     setDepositAmount(settingsDeposit);
     setDepositMethod('Cash');
@@ -132,7 +137,10 @@ export function useReservedCheckInWorkflow({
           ...(phone.trim() ? { phone: phone.trim() } : {}),
         },
       };
-      if (paymentChoice === 'pay_now' && isPositiveMoney(amountPaid)) {
+      const isAlreadyPaid =
+        booking.payment_status === 'paid' ||
+        (booking.balance_due !== undefined && booking.balance_due !== null && !isPositiveMoney(booking.balance_due));
+      if (!isAlreadyPaid && paymentChoice === 'pay_now' && isPositiveMoney(amountPaid)) {
         checkinPayload.payment_record = {
           amount: toMoneyNumber(amountPaid),
           payment_method: paymentMethod,

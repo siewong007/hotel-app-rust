@@ -45,3 +45,26 @@ df6f815e5b3bf9d41072dc71b7ed9d3172726ac0:infra/terraform/oci/environments/dev/te
 # postgres://drift:nopass@127.0.0.1:1/drift DSN. Not a credential; it exists
 # only in that doc. The commit is pushed and cannot be rewritten, so pin it.
 d5e707cc5d4b03bdbef5735cac01e393095faeb1:docs/superpowers/plans/2026-08-25-quality-enhancement-phase2.md:generic-api-key:72
+
+# Current master history SHAs (refreshed after history rewrite) for the same 8
+# verified false positives documented above.
+07d4ed32b405ffcdb90e89fac46666e140319416:hotel-app-be/tests/postgres_patch_lifecycle.rs:generic-api-key:423
+ec59c5de3b60574cab27a9d94b317bc557579f2c:.gitleaksignore:generic-api-key:13
+d45493fdcda462dae41b95aab585b8a35d1a51f9:hotel-app-be/tests/communications_scheduler.rs:generic-api-key:24
+d7cad3376192379b6988b7db7aaac0be7c5cdf7f:infra/terraform/oci/environments/dev/terraform.tfvars.example:generic-api-key:11
+d7cad3376192379b6988b7db7aaac0be7c5cdf7f:infra/terraform/oci/environments/dev/terraform.tfvars.example:generic-api-key:12
+46aa66d02740b19a74b576f197d8e307a881676a:.github/workflows/ci.yml:generic-api-key:123
+4d1566939eb090f5d92b1cf560635ff1407bae08:hotel-app-be/tests/pre_arrival_reminder.rs:generic-api-key:33
+ff7381ad4c2e9a4051716e04f0ac50e2738c13c7:docs/superpowers/plans/2026-08-25-quality-enhancement-phase2.md:generic-api-key:72
+
+# Remote tag lineage (v0.2.0 / v0.3.0) SHAs for the same 8 verified false
+# positives; actions/checkout fetch-depth: 0 includes tags on scheduled scans.
+658b6bc9023775c3bd853abb5dcf0c411263d017:hotel-app-be/tests/postgres_patch_lifecycle.rs:generic-api-key:423
+edb28f9c0a7d0cfebf63c7c78253b1fb72c6074a:.gitleaksignore:generic-api-key:13
+2fe9910b1c241431e6c5a716fe0f122ab9cdaf15:hotel-app-be/tests/communications_scheduler.rs:generic-api-key:24
+6eb2b55c6b587f28af0c6b1dbf3331cfc6f7597f:infra/terraform/oci/environments/dev/terraform.tfvars.example:generic-api-key:11
+6eb2b55c6b587f28af0c6b1dbf3331cfc6f7597f:infra/terraform/oci/environments/dev/terraform.tfvars.example:generic-api-key:12
+b116f6231e7a1aaa61930bee9bfae3aa6b210234:.github/workflows/ci.yml:generic-api-key:123
+23da0e24ba71c24d28a8593f063af39ad4d98787:hotel-app-be/tests/pre_arrival_reminder.rs:generic-api-key:33
+3cae9e83a4c39bfd45c3491a7b71de98357cce9e:docs/superpowers/plans/2026-08-25-quality-enhancement-phase2.md:generic-api-key:72
+

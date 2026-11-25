@@ -78,8 +78,12 @@ export const NotificationCenter: React.FC = () => {
 
   // Persisted staff alerts are addressed to permission holders. Job failures
   // use settings:manage; a guest bank-transfer claim uses payments:read,
-  // which reception already holds (and payments:manage implies).
-  const canSeeStaffAlerts = hasPermission('settings:manage') || hasPermission('payments:read');
+  // which reception already holds (and payments:manage implies); guest
+  // support alerts use support:read (and support:manage implies).
+  const canSeeStaffAlerts =
+    hasPermission('settings:manage') ||
+    hasPermission('payments:read') ||
+    hasPermission('support:read');
   const staffAlerts = useStaffNotifications(canSeeStaffAlerts, open);
   const markAllStaffRead = useMarkAllStaffNotificationsRead();
   const staffUnread = canSeeStaffAlerts ? staffAlerts.data?.unread ?? 0 : 0;
@@ -162,7 +166,7 @@ export const NotificationCenter: React.FC = () => {
               if (next === 'system') markAllStaffRead.mutate();
             }}
             variant="fullWidth"
-            sx={{ minHeight: 36, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTab-root': { minHeight: 36, fontSize: '0.75rem' } }}
+            sx={{ minHeight: 36, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTab-root': { minHeight: 36, minWidth: 0, px: 1, fontSize: '0.75rem' } }}
           >
             <Tab value="alerts" label={t('center.alerts')} />
             {canSeeStaffAlerts && <Tab value="system" label={t('center.system')} />}

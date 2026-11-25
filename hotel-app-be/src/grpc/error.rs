@@ -114,7 +114,8 @@ pub fn to_status(err: ApiError) -> Status {
         }
         // Internal failures keep REST's rule verbatim: a generic client-facing
         // message, never the underlying detail (which is logged server-side).
-        ApiError::Database(_) | ApiError::Internal(_) => {
+        ApiError::Database(msg) | ApiError::Internal(msg) => {
+            log::error!("gRPC internal error: {msg}");
             Status::internal("An internal error occurred")
         }
     }

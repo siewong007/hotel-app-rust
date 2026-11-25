@@ -387,6 +387,7 @@ pub struct BookingWithDetails {
     pub children: Option<i32>,
     #[serde(rename = "price_per_night")]
     pub room_rate: Decimal,
+    pub discount_amount: Option<Decimal>,
     pub total_amount: Decimal,
     pub status: String,
     pub payment_status: Option<String>,
@@ -596,6 +597,7 @@ impl<'r> sqlx::FromRow<'r, crate::core::db::DbRow> for BookingWithDetails {
             adults: row.try_get("adults").ok().flatten(),
             children: row.try_get("children").ok().flatten(),
             room_rate: { row.try_get("room_rate")? },
+            discount_amount: row.try_get("discount_amount").ok().flatten(),
             total_amount: { row.try_get("total_amount")? },
             status: row.try_get("status")?,
             payment_status: row.try_get("payment_status")?,

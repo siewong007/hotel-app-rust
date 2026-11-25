@@ -2,6 +2,8 @@
  * Retry utility for API calls with exponential backoff
  */
 
+import { isHTTPError } from 'ky';
+import { APIError } from '../api/client';
 import { t } from '../i18n';
 
 export interface RetryOptions {
@@ -13,24 +15,39 @@ export interface RetryOptions {
   onRetry?: (error: Error, attempt: number, delay: number) => void;
 }
 
+function extractStatusCode(error: Error): number | undefined {
+  if (isHTTPError(error)) {
+    return error.response.status;
+  }
+  if (error instanceof APIError && typeof error.statusCode === 'number') {
+    return error.statusCode;
+  }
+  const match = error.message.match(/(?:\bstatus(?:\s+code)?\s+|^)(\d{3})\b/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 const DEFAULT_OPTIONS: Required<RetryOptions> = {
   maxAttempts: 3,
   initialDelay: 1000,
   maxDelay: 10000,
   backoffFactor: 2,
-  shouldRetry: (error: Error, attempt: number) => {
-    // Retry on network errors or 5xx server errors
-    if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+  shouldRetry: (error: Error) => {
+    const status = extractStatusCode(error);
+    if (status !== undefined) {
+      return isRetryableStatus(status);
+    }
+    if (
+      error instanceof TypeError ||
+      error.message.includes('NetworkError') ||
+      error.message.includes('Failed to fetch')
+    ) {
       return true;
     }
-    // Don't retry on 4xx client errors (except 429 Too Many Requests)
-    if (error.message.includes('429')) {
-      return true;
-    }
-    if (error.message.match(/4\d{2}/)) {
-      return false;
-    }
-    return true;
+    return false;
   },
   onRetry: (error: Error, attempt: number, delay: number) => {
     console.warn(`Retry attempt ${attempt} after ${delay}ms due to:`, error.message);

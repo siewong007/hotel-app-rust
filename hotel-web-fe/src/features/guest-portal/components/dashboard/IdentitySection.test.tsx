@@ -155,4 +155,63 @@ describe('IdentitySection', () => {
     expect(await screen.findByText('Unable to load your verification status right now.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
+
+  it('requires PDPA identity verification consent before submitting and includes consents on submit', async () => {
+    mocks.getEkycStatus.mockResolvedValue(null);
+    mocks.uploadEkycDocument
+      .mockResolvedValueOnce({
+        success: true,
+        file_path: 'private_uploads/ekyc/42_id_front_x.jpg',
+        filename: '42_id_front_x.jpg',
+        document_type: 'id_front',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        file_path: 'private_uploads/ekyc/42_selfie_x.jpg',
+        filename: '42_selfie_x.jpg',
+        document_type: 'selfie',
+      });
+    mocks.submitEkycVerification.mockResolvedValue({ id: 99, status: 'pending_manual_review' });
+
+    render(<IdentitySection token="guest-token" />);
+    const submit = await screen.findByRole('button', { name: /Submit for verification/ });
+
+    fireEvent.change(screen.getByLabelText(/Full name \(as on your ID\)/), { target: { value: 'Lin Wei' } });
+    fireEvent.change(screen.getByLabelText(/Date of birth/), { target: { value: '1992-05-14' } });
+    fireEvent.change(screen.getByLabelText(/Nationality/), { target: { value: 'Malaysian' } });
+    fireEvent.change(screen.getByLabelText(/ID number/), { target: { value: 'A12345678' } });
+    fireEvent.change(screen.getByLabelText(/ID expiry date/), { target: { value: '2032-12-31' } });
+    fireEvent.change(screen.getByLabelText(/Issuing country/), { target: { value: 'Malaysia' } });
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '+60123456789' } });
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'lin@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Current address/), { target: { value: '12 Jalan Test, Sibu' } });
+
+    const inputs = document.querySelectorAll('input[type="file"]');
+    fireEvent.change(inputs[0] as HTMLInputElement, {
+      target: { files: [new File(['front'], 'front.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(mocks.uploadEkycDocument).toHaveBeenCalledTimes(1));
+    fireEvent.change(inputs[2] as HTMLInputElement, {
+      target: { files: [new File(['selfie'], 'selfie.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(mocks.uploadEkycDocument).toHaveBeenCalledTimes(2));
+
+    // Attempt without ticking consent checkbox
+    fireEvent.click(submit);
+    expect(await screen.findByText('You need to agree to this before you can continue.')).toBeTruthy();
+    expect(mocks.submitEkycVerification).not.toHaveBeenCalled();
+
+    // Tick every consent checkbox and resubmit
+    for (const box of screen.getAllByRole('checkbox')) {
+      fireEvent.click(box);
+    }
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(mocks.submitEkycVerification).toHaveBeenCalledTimes(1));
+    const [payload, tok] = mocks.submitEkycVerification.mock.calls[0];
+    expect(tok).toBe('guest-token');
+    expect(Array.isArray(payload.consents)).toBe(true);
+    expect(payload.consents.length).toBeGreaterThan(0);
+    expect(payload.consents.every((c: { granted: boolean }) => c.granted)).toBe(true);
+  });
 });

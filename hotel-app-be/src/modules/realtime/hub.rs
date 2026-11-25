@@ -90,10 +90,30 @@ impl DataChangeHub {
     }
 }
 
-pub async fn serve_socket(mut socket: WebSocket, hub: DataChangeHub) {
+pub async fn serve_socket(
+    mut socket: WebSocket,
+    hub: DataChangeHub,
+    pool: DbPool,
+    user_id: i64,
+    session_id: String,
+) {
     let mut events = hub.subscribe();
+    let mut session_check = tokio::time::interval(std::time::Duration::from_secs(30));
+    session_check.tick().await;
     loop {
         tokio::select! {
+            _ = session_check.tick() => {
+                match crate::core::auth::AuthService::is_session_active(&pool, user_id, &session_id).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = socket.send(Message::Close(None)).await;
+                        break;
+                    }
+                    Err(error) => {
+                        log::warn!("updates websocket session check failed: {error}");
+                    }
+                }
+            }
             event = events.recv() => match event {
                 Ok(event) => {
                     let Ok(payload) = serde_json::to_string(&event) else { continue; };

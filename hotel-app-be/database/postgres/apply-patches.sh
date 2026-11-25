@@ -117,7 +117,13 @@ while IFS= read -r line || [[ -n $line ]]; do
     actual_checksum="sha256:$(sha256_file "$patch_snapshot")"
     [[ $actual_checksum == "$checksum" ]] || fail "checksum mismatch for $file"
     input_snapshot="$snapshot_dir/input-$snapshot_index.sql"
-    if ! cat -- "$catalog_dir/_begin.sql" "$patch_snapshot" "$catalog_dir/_end.sql" > "$input_snapshot"; then
+    if ! {
+        cat -- "$catalog_dir/_begin.sql"
+        printf '\n'
+        cat -- "$patch_snapshot"
+        printf '\n'
+        cat -- "$catalog_dir/_end.sql"
+    } > "$input_snapshot"; then
         fail "patch input snapshot cannot be constructed: $file"
     fi
     [[ -f $input_snapshot && ! -L $input_snapshot ]] || fail "patch input snapshot is unavailable: $file"

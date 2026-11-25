@@ -130,6 +130,11 @@ pub async fn update_campaign(
     user_agent: Option<String>,
 ) -> Result<EmailCampaign, ApiError> {
     let draft = validation::validate_campaign_input(input)?;
+    if let Some(promotion_id) = draft.promotion_id
+        && Repo::promotion_status(pool, promotion_id).await?.is_none()
+    {
+        return Err(ApiError::BadRequest("Unknown promotion".to_string()));
+    }
     if let Some(segment_id) = draft.segment_id {
         segments_service::require_active_segment(pool, segment_id).await?;
     }

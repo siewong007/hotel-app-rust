@@ -30,7 +30,7 @@ fn row_i32(row: &DbRow, col: &str) -> i32 {
 }
 
 pub async fn occupancy_report(pool: &DbPool) -> Result<serde_json::Value, ApiError> {
-    let total_rooms: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rooms")
+    let total_rooms: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rooms WHERE is_active = true")
         .fetch_one(pool)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
@@ -38,7 +38,7 @@ pub async fn occupancy_report(pool: &DbPool) -> Result<serde_json::Value, ApiErr
     let occupied_rooms: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(DISTINCT room_id) FROM bookings
-        WHERE status NOT IN ('voided')
+        WHERE status NOT IN ('voided', 'comp_void', 'no_show')
         AND check_in_date <= CURRENT_DATE
         AND check_out_date > CURRENT_DATE
         "#,
@@ -65,7 +65,7 @@ pub async fn occupancy_report(pool: &DbPool) -> Result<serde_json::Value, ApiErr
     let revenue: Decimal = sqlx::query_scalar(
         r#"
         SELECT COALESCE(SUM(total_amount), 0) FROM bookings
-        WHERE status NOT IN ('voided')
+        WHERE status NOT IN ('voided', 'comp_void', 'no_show')
         AND check_in_date <= CURRENT_DATE
         AND check_out_date > CURRENT_DATE
         "#,
@@ -85,17 +85,19 @@ pub async fn occupancy_report(pool: &DbPool) -> Result<serde_json::Value, ApiErr
 }
 
 pub async fn booking_analytics(pool: &DbPool) -> Result<serde_json::Value, ApiError> {
-    let total_bookings: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE status NOT IN ('voided')")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
+    let total_bookings: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bookings WHERE status NOT IN ('voided', 'comp_void', 'no_show')",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    let revenue_result: Option<Decimal> =
-        sqlx::query_scalar("SELECT SUM(total_amount) FROM bookings WHERE status NOT IN ('voided')")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
+    let revenue_result: Option<Decimal> = sqlx::query_scalar(
+        "SELECT SUM(total_amount) FROM bookings WHERE status NOT IN ('voided', 'comp_void', 'no_show')",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let total_revenue = revenue_result.unwrap_or_default();
 
@@ -112,7 +114,7 @@ pub async fn booking_analytics(pool: &DbPool) -> Result<serde_json::Value, ApiEr
         FROM bookings b
         INNER JOIN rooms r ON b.room_id = r.id
         INNER JOIN room_types rt ON r.room_type_id = rt.id
-        WHERE b.status NOT IN ('voided')
+        WHERE b.status NOT IN ('voided', 'comp_void', 'no_show')
         GROUP BY rt.name
         "#,
     )
@@ -141,7 +143,7 @@ pub async fn booking_analytics(pool: &DbPool) -> Result<serde_json::Value, ApiEr
                 COUNT(*)::BIGINT as bookings,
                 COALESCE(SUM(total_amount), 0) as revenue
             FROM bookings
-            WHERE status NOT IN ('voided')
+            WHERE status NOT IN ('voided', 'comp_void', 'no_show')
               AND check_in_date >= (date_trunc('month', CURRENT_DATE) - INTERVAL '5 months')
             GROUP BY month_start
         ) trend
@@ -170,7 +172,7 @@ pub async fn booking_analytics(pool: &DbPool) -> Result<serde_json::Value, ApiEr
         r#"
         SELECT EXTRACT(HOUR FROM created_at)::INTEGER as hour, COUNT(*)::BIGINT as bookings
         FROM bookings
-        WHERE status NOT IN ('voided')
+        WHERE status NOT IN ('voided', 'comp_void', 'no_show')
           AND created_at IS NOT NULL
         GROUP BY hour
         ORDER BY bookings DESC, hour
@@ -551,6 +553,11 @@ pub async fn generate_report(
         .map_err(|e| ApiError::BadRequest(format!("Invalid start_date: {}", e)))?;
     let end_date = parse_date_flexible(&params.end_date)
         .map_err(|e| ApiError::BadRequest(format!("Invalid end_date: {}", e)))?;
+    if end_date < start_date {
+        return Err(ApiError::BadRequest(
+            "end_date cannot be before start_date".to_string(),
+        ));
+    }
 
     let report_data = match params.report_type.as_str() {
         // Legacy accounting reports
@@ -614,7 +621,7 @@ async fn generate_balance_sheet(
     // Get total room revenue
     let room_revenue_row = sqlx::query(
         "SELECT COALESCE(SUM(total_amount), 0) AS room_revenue FROM bookings
-         WHERE check_in_date >= $1 AND check_in_date <= $2 AND status IN ('confirmed', 'checked_in', 'checked_out')"
+         WHERE check_in_date >= $1 AND check_in_date <= $2 AND status IN ('confirmed', 'partial_complimentary', 'fully_complimentary', 'checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')"
     )
     .bind(start_date)
     .bind(end_date)
@@ -702,6 +709,7 @@ async fn generate_journal_by_type(
          JOIN rooms r ON b.room_id = r.id
          LEFT JOIN guests g ON b.guest_id = g.id
          WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
+           AND COALESCE(b.status, 'pending') NOT IN ('voided', 'comp_void', 'no_show')
          ORDER BY b.check_in_date, b.id",
     )
     .bind(start_date)
@@ -783,7 +791,7 @@ async fn generate_shift_report(
         JOIN rooms r ON b.room_id = r.id
         LEFT JOIN room_types rt ON r.room_type_id = rt.id
         WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-        AND b.status IN ('confirmed', 'checked_in', 'checked_out')
+        AND b.status IN ('confirmed', 'partial_complimentary', 'fully_complimentary', 'checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
         ORDER BY b.check_in_date ASC, b.created_at ASC"#,
     )
     .bind(start_date)
@@ -878,11 +886,11 @@ async fn generate_rooms_sold_report(
             b.id,
             b.check_in_date,
             b.check_out_date,
-            b.adults,
-            b.children,
-            b.infants,
+            COALESCE(b.adults, 1) as adults,
+            COALESCE(b.children, 0) as children,
+            COALESCE(b.infants, 0) as infants,
             b.booking_number,
-            NULL::VARCHAR as post_type,
+            b.post_type,
             NULL::VARCHAR as rate_code,
             r.room_number,
             rt.name as room_type,
@@ -892,6 +900,7 @@ async fn generate_rooms_sold_report(
          JOIN room_types rt ON r.room_type_id = rt.id
          LEFT JOIN guests g ON b.guest_id = g.id
          WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
+           AND COALESCE(b.status, 'pending') NOT IN ('voided', 'comp_void', 'no_show')
          ORDER BY b.check_in_date",
     )
     .bind(start_date)
@@ -912,13 +921,13 @@ async fn generate_rooms_sold_report(
             "check_out_date": check_out.to_string(),
             "room_number": row.get::<String, _>("room_number"),
             "room_type": row.get::<String, _>("room_type"),
-            "folio": row.get::<Option<String>, _>("booking_number").unwrap_or_else(|| "".to_string()),
-            "guest_name": row.get::<Option<String>, _>("guest_name").unwrap_or_else(|| "Guest".to_string()),
+            "folio": row.try_get::<Option<String>, _>("booking_number").ok().flatten().unwrap_or_default(),
+            "guest_name": row.try_get::<Option<String>, _>("guest_name").ok().flatten().unwrap_or_else(|| "Guest".to_string()),
             "post_type": if is_same_day { "Same Day" } else { "Normal Stay" },
-            "adult_count": row.get::<i32, _>("adults"),
-            "child_count": row.get::<i32, _>("children"),
-            "infant_count": row.get::<i32, _>("infants"),
-            "rate_plan": row.get::<Option<String>, _>("rate_code").unwrap_or_else(|| "RACK".to_string()),
+            "adult_count": row.try_get::<i32, _>("adults").unwrap_or(1),
+            "child_count": row.try_get::<i32, _>("children").unwrap_or(0),
+            "infant_count": row.try_get::<i32, _>("infants").unwrap_or(0),
+            "rate_plan": row.try_get::<Option<String>, _>("rate_code").ok().flatten().unwrap_or_else(|| "RACK".to_string()),
         }));
     }
 
@@ -941,6 +950,7 @@ async fn generate_general_journal(
             b.id,
             b.check_in_date as date,
             b.booking_number as folio,
+            b.subtotal,
             b.total_amount,
             b.room_rate,
             COALESCE(b.tax_amount, 0) as tax_amount,
@@ -959,7 +969,7 @@ async fn generate_general_journal(
         JOIN rooms r ON b.room_id = r.id
         LEFT JOIN guests g ON b.guest_id = g.id
         WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-          AND b.status IN ('confirmed', 'checked_in', 'checked_out')
+          AND b.status IN ('confirmed', 'partial_complimentary', 'fully_complimentary', 'checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
         ORDER BY b.check_in_date, b.id
         "#,
     )
@@ -1004,17 +1014,16 @@ async fn generate_general_journal(
         // Use actual values from booking instead of hardcoded calculations
         let service_tax = tax_amount;
         let tourism_tax = tourism_tax_amount;
-        let room_charge = room_rate;
+        let room_charge = row_mappers::get_opt_decimal(&row, "subtotal").unwrap_or(room_rate);
 
         // Use actual deposit amount from booking
         let deposit_amount = deposit_amount_val;
 
-        let paid_amount =
-            if payment_status.as_deref() == Some("paid") && deposit_amount_val <= Decimal::ZERO {
-                total_amount
-            } else {
-                deposit_amount_val
-            };
+        let paid_amount = if payment_status.as_deref() == Some("paid") {
+            total_amount
+        } else {
+            Decimal::ZERO
+        };
 
         // Guest Ledger entries: payments/platforms debit, charges and taxes credit.
         // Room Charge
@@ -1317,7 +1326,7 @@ async fn generate_daily_operations_report(
         FROM bookings b
         JOIN guests g ON b.guest_id = g.id
         JOIN rooms r ON b.room_id = r.id
-        WHERE b.status IN ('checked_in', 'auto_checked_in')
+        WHERE b.status IN ('checked_in', 'auto_checked_in', 'late_checkout')
         ORDER BY r.room_number
         "#,
     )
@@ -1327,7 +1336,7 @@ async fn generate_daily_operations_report(
 
     // Room status breakdown
     let room_status: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT status, COUNT(*)::bigint FROM rooms WHERE is_active = true GROUP BY status",
+        "SELECT COALESCE(status, 'available'), COUNT(*)::bigint FROM rooms WHERE is_active = true GROUP BY COALESCE(status, 'available')",
     )
     .fetch_all(pool)
     .await
@@ -1441,13 +1450,18 @@ async fn generate_occupancy_report(
             .map_err(|e| ApiError::Database(e.to_string()))?;
     let total_rooms = total_rooms.unwrap_or(0);
 
-    // Rooms sold and revenue
+    // Rooms sold (occupied room-nights overlapping [start_date, end_date]) and prorated revenue
     let stats = sqlx::query(
         r#"
-        SELECT COUNT(*)::bigint AS rooms_sold, SUM(total_amount) AS total_revenue
+        SELECT
+            COALESCE(SUM(GREATEST(0, LEAST(check_out_date, ($2::date + 1)) - GREATEST(check_in_date, $1::date))), 0)::bigint AS rooms_sold,
+            COALESCE(SUM(
+                total_amount * GREATEST(0, LEAST(check_out_date, ($2::date + 1)) - GREATEST(check_in_date, $1::date))::numeric
+                / GREATEST(check_out_date - check_in_date, 1)
+            ), 0) AS total_revenue
         FROM bookings
-        WHERE check_in_date >= $1 AND check_in_date <= $2
-        AND status NOT IN ('voided')
+        WHERE check_in_date <= $2 AND check_out_date > $1
+        AND status NOT IN ('voided', 'comp_void', 'no_show')
         "#,
     )
     .bind(start_date)
@@ -1486,14 +1500,20 @@ async fn generate_occupancy_report(
     // Occupancy by room type
     let by_room_type = sqlx::query(
         r#"
-        SELECT rt.name AS room_type, COUNT(*) AS bookings, SUM(b.total_amount) AS revenue
+        SELECT
+            rt.name AS room_type,
+            COALESCE(SUM(GREATEST(0, LEAST(b.check_out_date, ($2::date + 1)) - GREATEST(b.check_in_date, $1::date))), 0)::bigint AS bookings,
+            COALESCE(SUM(
+                b.total_amount * GREATEST(0, LEAST(b.check_out_date, ($2::date + 1)) - GREATEST(b.check_in_date, $1::date))::numeric
+                / GREATEST(b.check_out_date - b.check_in_date, 1)
+            ), 0) AS revenue
         FROM bookings b
         JOIN rooms r ON b.room_id = r.id
         JOIN room_types rt ON r.room_type_id = rt.id
-        WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-        AND b.status NOT IN ('voided')
+        WHERE b.check_in_date <= $2 AND b.check_out_date > $1
+        AND b.status NOT IN ('voided', 'comp_void', 'no_show')
         GROUP BY rt.name
-        ORDER BY COUNT(*) DESC
+        ORDER BY bookings DESC
         "#,
     )
     .bind(start_date)
@@ -1520,7 +1540,7 @@ async fn generate_occupancy_report(
         SELECT check_in_date, COUNT(*) AS bookings, SUM(total_amount) AS revenue
         FROM bookings
         WHERE check_in_date >= $1 AND check_in_date <= $2
-        AND status NOT IN ('voided')
+        AND status NOT IN ('voided', 'comp_void', 'no_show')
         GROUP BY check_in_date
         ORDER BY check_in_date
         "#,
@@ -1829,16 +1849,18 @@ async fn generate_complimentary_report(
     // All complimentary bookings
     let complimentary = sqlx::query(
         r#"
-        SELECT b.id, b.booking_number, g.nick_name AS guest_name, r.room_number,
+        SELECT b.id, b.booking_number, COALESCE(g.nick_name, '') AS guest_name, COALESCE(r.room_number, '') AS room_number,
                b.check_in_date, b.check_out_date,
                b.is_complimentary, b.complimentary_reason,
                b.complimentary_start_date, b.complimentary_end_date,
-               b.original_total_amount, b.total_amount, b.complimentary_nights, b.status
+               b.original_total_amount, b.total_amount, b.complimentary_nights,
+               COALESCE(b.status, 'confirmed') AS status
         FROM bookings b
         JOIN guests g ON b.guest_id = g.id
         JOIN rooms r ON b.room_id = r.id
         WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
         AND b.is_complimentary = true
+        AND b.status NOT IN ('voided', 'comp_void')
         ORDER BY b.check_in_date DESC
         "#,
     )
@@ -1865,20 +1887,20 @@ async fn generate_complimentary_report(
             let room_number: String = row.get("room_number");
             let check_in: NaiveDate = row.get("check_in_date");
             let check_out: NaiveDate = row.get("check_out_date");
-            let is_complimentary: Option<bool> = row.try_get("is_complimentary").ok();
-            let reason: Option<String> = row.try_get("complimentary_reason").ok();
-            let comp_start: Option<NaiveDate> = row.try_get("complimentary_start_date").ok();
-            let comp_end: Option<NaiveDate> = row.try_get("complimentary_end_date").ok();
+            let is_complimentary: Option<bool> = row.try_get("is_complimentary").ok().flatten();
+            let reason: Option<String> = row.try_get("complimentary_reason").ok().flatten();
+            let comp_start: Option<NaiveDate> = row.try_get("complimentary_start_date").ok().flatten();
+            let comp_end: Option<NaiveDate> = row.try_get("complimentary_end_date").ok().flatten();
             let original = row_mappers::get_opt_decimal(row, "original_total_amount");
             let actual = row_mappers::get_decimal(row, "total_amount");
-            let nights: Option<i32> = row.try_get("complimentary_nights").ok();
-            let status: String = row.get("status");
+            let nights: Option<i32> = row.try_get("complimentary_nights").ok().flatten();
+            let status: String = row.try_get::<Option<String>, _>("status").ok().flatten().unwrap_or_default();
 
             total_complimentary_nights += nights.unwrap_or(0);
             total_original_amount += original.unwrap_or(Decimal::ZERO);
             total_actual_amount += actual;
 
-            if status == "complimentary" {
+            if status == "fully_complimentary" {
                 full_count += 1;
             } else if status == "partial_complimentary" {
                 partial_count += 1;
@@ -1943,7 +1965,7 @@ async fn generate_guest_statistics_report(
         r#"
         SELECT COUNT(DISTINCT guest_id)::bigint FROM bookings
         WHERE check_in_date >= $1 AND check_in_date <= $2
-        AND status NOT IN ('voided')
+        AND status NOT IN ('voided', 'comp_void', 'no_show')
         "#,
     )
     .bind(start_date)
@@ -1959,12 +1981,12 @@ async fn generate_guest_statistics_report(
         SELECT COUNT(DISTINCT b.guest_id)::bigint
         FROM bookings b
         WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-        AND b.status NOT IN ('voided')
+        AND b.status NOT IN ('voided', 'comp_void', 'no_show')
         AND NOT EXISTS (
             SELECT 1 FROM bookings prev
             WHERE prev.guest_id = b.guest_id
             AND prev.check_in_date < $1
-            AND prev.status NOT IN ('voided')
+            AND prev.status NOT IN ('voided', 'comp_void', 'no_show')
         )
         "#,
     )
@@ -1983,7 +2005,7 @@ async fn generate_guest_statistics_report(
         SELECT b.is_tourist, COUNT(DISTINCT b.guest_id)::bigint
         FROM bookings b
         WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-        AND b.status NOT IN ('voided')
+        AND b.status NOT IN ('voided', 'comp_void', 'no_show')
         GROUP BY b.is_tourist
         "#,
     )
@@ -1997,9 +2019,9 @@ async fn generate_guest_statistics_report(
     let mut non_tourists = 0i64;
     for (is_tourist, count) in tourist_stats {
         if is_tourist.unwrap_or(false) {
-            tourists = count;
+            tourists += count;
         } else {
-            non_tourists = count;
+            non_tourists += count;
         }
     }
 

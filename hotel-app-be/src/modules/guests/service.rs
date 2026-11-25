@@ -503,6 +503,14 @@ async fn ensure_loyalty_member_for_guest_type(
 }
 
 pub async fn delete_guest(pool: &DbPool, guest_id: i64) -> Result<(), ApiError> {
+    delete_guest_as(pool, None, guest_id).await
+}
+
+pub async fn delete_guest_as(
+    pool: &DbPool,
+    actor_id: Option<i64>,
+    guest_id: i64,
+) -> Result<(), ApiError> {
     if !GuestRepository::exists_any(pool, guest_id).await? {
         return Err(ApiError::NotFound("Guest not found".to_string()));
     }
@@ -519,7 +527,7 @@ pub async fn delete_guest(pool: &DbPool, guest_id: i64) -> Result<(), ApiError> 
     let _ = AuditLog::log_event(
         pool,
         AuditEvent {
-            user_id: None,
+            user_id: actor_id,
             action: "guest_deleted",
             resource_type: "guest",
             resource_id: Some(guest_id),
@@ -659,7 +667,7 @@ pub async fn guest_credits(
         .await?
         .ok_or_else(|| ApiError::NotFound("Guest not found".to_string()))?;
 
-    let credits_by_room_type = GuestRepository::guest_credits(pool, guest_id).await;
+    let credits_by_room_type = GuestRepository::guest_credits(pool, guest_id).await?;
 
     let total_nights: i32 = credits_by_room_type
         .iter()

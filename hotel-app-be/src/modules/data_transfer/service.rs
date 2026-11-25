@@ -107,11 +107,6 @@ pub const TABLE_INSERT_ORDER: &[&str] = &[
     "services",
     "booking_services",
     "system_settings",
-    // teams reference `users` (excluded) only; members/roles hang off `teams`.
-    "teams",
-    "team_members",
-    "team_roles",
-    "user_guests",
 ];
 
 /// Transferable tables carrying sensitive business data — guest PII,
@@ -133,7 +128,6 @@ pub const SENSITIVE_TABLES: &[&str] = &[
     "guest_preferences",
     "guest_complimentary_credits",
     "guest_reviews",
-    "user_guests",
     "email_suppressions",
     "consent_records",
     // corporate billing accounts and their contacts
@@ -177,8 +171,6 @@ pub const SENSITIVE_TABLES: &[&str] = &[
     "support_conversations",
     "support_messages",
     "support_events",
-    "teams",
-    "team_members",
     // notification and marketing send state tied to people
     "notification_subscriptions",
     "notification_consent_events",
@@ -218,6 +210,10 @@ pub const EXCLUDED_TABLES: &[(&str, &str)] = &[
     ("public.user_roles", "credentials_and_auth_state"),
     ("public.user_permissions", "credentials_and_auth_state"),
     ("public.route_access_policies", "credentials_and_auth_state"),
+    ("public.teams", "credentials_and_auth_state"),
+    ("public.team_members", "credentials_and_auth_state"),
+    ("public.team_roles", "credentials_and_auth_state"),
+    ("public.user_guests", "credentials_and_auth_state"),
     ("public.refresh_tokens", "session_or_token_material"),
     ("public.user_sessions", "session_or_token_material"),
     ("public.passkeys", "session_or_token_material"),
@@ -284,6 +280,10 @@ pub const PROTECTED_TABLE_ORDER: &[&str] = &[
     "role_permissions",
     "user_roles",
     "user_permissions",
+    "teams",
+    "team_members",
+    "team_roles",
+    "user_guests",
     "refresh_tokens",
     "user_sessions",
     "passkeys",
@@ -981,10 +981,9 @@ mod tests {
             TABLE_INSERT_ORDER.len(),
             "TABLE_INSERT_ORDER must not contain duplicates"
         );
-        // The business-data set the API exports/imports — 75 plus the four
-        // channel-pricing tables and `booking_groups`. The protected set is counted separately in
-        // `the_system_tier_carries_every_excluded_table`.
-        assert_eq!(TABLE_INSERT_ORDER.len(), 80);
+        // The business-data set the API exports/imports — 76 tables outside the
+        // RBAC/credential/identity protected set (see `PROTECTED_TABLE_ORDER`).
+        assert_eq!(TABLE_INSERT_ORDER.len(), 76);
         // Introspection list and the canonical order must stay in lock-step.
         assert_eq!(ALL_IMPORT_TABLES, TABLE_INSERT_ORDER);
     }
@@ -1039,8 +1038,8 @@ mod tests {
                 "'{name}' is both transferable and excluded"
             );
         }
-        // The 30 tables outside the business-data set.
-        assert_eq!(EXCLUDED_TABLES.len(), 30);
+        // The 34 tables outside the business-data set.
+        assert_eq!(EXCLUDED_TABLES.len(), 34);
     }
 
     #[test]

@@ -713,9 +713,7 @@ fn assert_expected_objects(objects: &ObjectSnapshot) {
             *kind == "function"
                 && *name == "sync_room_status_with_booking"
                 && definition
-                    .matches(
-                        "IN ('confirmed', 'pending', 'pending_payment', 'pending_confirmation')",
-                    )
+                    .matches("'confirmed', 'pending', 'pending_payment', 'pending_confirmation'")
                     .count()
                     == 1
         }),
@@ -1945,11 +1943,18 @@ async fn postgres_v1_catalog_moves_room_holds_to_the_arrival_day() {
     let mut databases = DisposableDatabases::connect(&database_url).await;
     let database = databases.create("room_hold").await;
     let pool = install_v1(&database).await;
-    let baseline = room_hold_functions(&pool).await;
+    // Patch 0032 supersedes 0018's room-hold function bodies on every database,
+    // so the catalog head, not the baseline, is what a pre-0018 database must
+    // converge onto.
+    let fresh = databases.create("room_hold_fresh").await;
+    let fresh_pool = install_v1(&fresh).await;
+    assert_runner_succeeded(&run_patches(&fresh, None).await);
+    let catalog_head = room_hold_functions(&fresh_pool).await;
+    fresh_pool.close().await;
     assert_eq!(
-        baseline.len(),
+        catalog_head.len(),
         3,
-        "the baseline must define all room-hold functions"
+        "the catalog head must define all room-hold functions"
     );
 
     // Rebuild a database installed before patch 0018.
@@ -1965,8 +1970,8 @@ async fn postgres_v1_catalog_moves_room_holds_to_the_arrival_day() {
     assert_runner_succeeded(&first_run);
     assert_eq!(
         room_hold_functions(&pool).await,
-        baseline,
-        "patch 0018 must converge onto the baseline definitions and comment"
+        catalog_head,
+        "patches 0018 and 0032 must converge onto the fresh-install definitions and comment"
     );
     let revisions = revision_snapshot(&pool).await;
     assert!(
@@ -1978,7 +1983,7 @@ async fn postgres_v1_catalog_moves_room_holds_to_the_arrival_day() {
 
     let second_run = run_patches(&database, None).await;
     assert_runner_succeeded(&second_run);
-    assert_eq!(room_hold_functions(&pool).await, baseline);
+    assert_eq!(room_hold_functions(&pool).await, catalog_head);
     assert_eq!(revision_snapshot(&pool).await, revisions);
 
     pool.close().await;
@@ -2985,5 +2990,59 @@ async fn postgres_v1_patch_runners_serialize() {
 
     pool.close().await;
     drop(temporary_catalog);
+    databases.cleanup().await;
+}
+
+#[tokio::test]
+async fn postgres_v1_patch_0032_applies_and_skips_idempotently() {
+    let Some(database_url) = database_url_or_skip() else {
+        return;
+    };
+    let mut databases = DisposableDatabases::connect(&database_url).await;
+    let database = databases.create("patch_0032").await;
+    let pool = install_v1(&database).await;
+
+    let first_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&first_run);
+    let revisions = revision_snapshot(&pool).await;
+    assert!(
+        revisions
+            .iter()
+            .any(|(version, name, _, _)| *version == 32 && name == "full-audit-schema-fixes"),
+        "patch 0032 must record its revision: {revisions:?}"
+    );
+
+    let second_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&second_run);
+    assert_eq!(revision_snapshot(&pool).await, revisions);
+
+    let has_loyalty_check: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'loyalty_rewards_inventory_non_negative'
+        )",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("check constraint from patch 0032");
+    assert!(
+        has_loyalty_check,
+        "patch 0032 must enforce non-negative loyalty reward inventory"
+    );
+
+    let trigger_def: String = sqlx::query_scalar(
+        "SELECT pg_get_functiondef(to_regprocedure('public.sync_room_status_with_booking()'))",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read sync_room_status_with_booking definition");
+    assert!(
+        trigger_def.contains(
+            "IN ('confirmed', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')",
+        ),
+        "patch 0032 must upgrade sync_room_status_with_booking to cover complimentary holds"
+    );
+
+    pool.close().await;
     databases.cleanup().await;
 }

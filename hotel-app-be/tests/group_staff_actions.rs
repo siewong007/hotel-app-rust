@@ -4,6 +4,9 @@
 //! Opt-in through `DATABASE_URL`; rows are hard-deleted after each test.
 use hotel_app_be::modules::bookings::group_actions::{GroupAction, run_group_action};
 use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TAG: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct Fixture {
@@ -14,10 +17,9 @@ struct Fixture {
 }
 
 async fn fixture(pool: &PgPool, totals: [&str; 2]) -> Fixture {
-    let tag = format!(
-        "{:x}",
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    );
+    let seq = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
+    let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default() as u64;
+    let tag = format!("{:08x}{:04x}", (nanos ^ (nanos >> 32)) as u32, seq & 0xffff);
     let guest_id: i64 = sqlx::query_scalar(
         "INSERT INTO guests (nick_name, email, ic_number) VALUES ($1, $2, 'A1234567') RETURNING id",
     )

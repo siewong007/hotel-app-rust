@@ -2076,4 +2076,87 @@ mod postgres_tests {
         cleanup_room_type(&pool, room_type_id).await;
         cleanup_actor(&pool, actor_id).await;
     }
+
+    #[tokio::test]
+    async fn postgres_fetch_room_reviews_joins_via_bookings_and_filters_published() {
+        let Some((pool, _guard)) = setup_pg_pool().await else {
+            return;
+        };
+        let actor_id = 980_010;
+        let room_type_id = 980_420;
+        let room_id = 980_320;
+        let guest_id = 980_520;
+        let booking_id = 980_620;
+
+        sqlx::query("DELETE FROM guest_reviews WHERE guest_id = $1 OR booking_id = $2")
+            .bind(guest_id)
+            .bind(booking_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        cleanup_booking(&pool, booking_id).await;
+        cleanup_room(&pool, room_id).await;
+        cleanup_guest(&pool, guest_id).await;
+        cleanup_room_type(&pool, room_type_id).await;
+        cleanup_actor(&pool, actor_id).await;
+
+        seed_actor(&pool, actor_id).await;
+        seed_room_type(&pool, room_type_id).await;
+        seed_room(&pool, room_id, room_type_id, "available").await;
+        seed_guest(&pool, guest_id).await;
+        let today = hotel_app_be::core::db::hotel_today(&pool).await.unwrap();
+        seed_booking(
+            &pool,
+            BookingFixture {
+                actor_id,
+                booking_id,
+                guest_id,
+                room_id,
+                status: "checked_out",
+                check_in: today - Duration::days(2),
+                check_out: today,
+            },
+        )
+        .await;
+
+        let rt_name: String = sqlx::query_scalar("SELECT name FROM room_types WHERE id = $1")
+            .bind(room_type_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO guest_reviews (guest_id, booking_id, overall_rating, title, content, is_published) \
+             VALUES ($1, $2, 4.5, 'Published Review', 'Very clean room', true), \
+                    ($1, $2, 2.0, 'Unpublished Draft', 'Hidden', false)",
+        )
+        .bind(guest_id)
+        .bind(booking_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let reviews = hotel_app_be::modules::rooms::queries::fetch_room_reviews(&pool, &rt_name)
+            .await
+            .expect("fetch_room_reviews must succeed without unknown room_type_id column error");
+        assert_eq!(
+            reviews.len(),
+            1,
+            "only published reviews should be returned"
+        );
+        assert_eq!(reviews[0].title.as_deref(), Some("Published Review"));
+        assert_eq!(reviews[0].room_type_id, Some(room_type_id));
+
+        sqlx::query("DELETE FROM guest_reviews WHERE guest_id = $1 OR booking_id = $2")
+            .bind(guest_id)
+            .bind(booking_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        cleanup_booking(&pool, booking_id).await;
+        cleanup_room(&pool, room_id).await;
+        cleanup_guest(&pool, guest_id).await;
+        cleanup_room_type(&pool, room_type_id).await;
+        cleanup_actor(&pool, actor_id).await;
+    }
 }

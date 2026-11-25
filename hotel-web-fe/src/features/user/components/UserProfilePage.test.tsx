@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UserProfile } from '../../../types';
@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   },
   passkeys: { data: [] as unknown[] },
   sessions: { data: [] as unknown[] },
+  twoFactorStatus: { data: { enabled: false, backup_codes_remaining: 0 } },
+  addPasskeyMutateAsync: vi.fn(),
 }));
 
 const emptyMutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null };
@@ -42,8 +44,15 @@ vi.mock('../hooks/useProfileQueries', () => ({
   useUpdatePasswordMutation: () => emptyMutation,
   useDeletePasskeyMutation: () => emptyMutation,
   useRenamePasskeyMutation: () => emptyMutation,
-  useRegisterPasskeyMutation: () => emptyMutation,
+  useRegisterPasskeyMutation: () => ({
+    ...emptyMutation,
+    mutateAsync: mocks.addPasskeyMutateAsync,
+  }),
   useRevokeSessionMutation: () => emptyMutation,
+}));
+
+vi.mock('../../auth/hooks/useTwoFactorQueries', () => ({
+  useTwoFactorStatus: () => mocks.twoFactorStatus,
 }));
 
 vi.mock('../../auth/components/TwoFactorSetup', () => ({
@@ -77,6 +86,8 @@ describe('UserProfilePage', () => {
     mocks.profile = { data: profile, isPending: false, isError: false };
     mocks.passkeys = { data: [] };
     mocks.sessions = { data: [] };
+    mocks.twoFactorStatus = { data: { enabled: false, backup_codes_remaining: 0 } };
+    mocks.addPasskeyMutateAsync.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(cleanup);
@@ -119,5 +130,40 @@ describe('UserProfilePage', () => {
   it('reports no critical axe violations', async () => {
     const { container } = renderPage();
     await expectNoCriticalAxeViolations(container);
+  });
+
+  it('opens a step-up confirmation dialog before registering a passkey with password', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Register Your First Passkey' }));
+
+    expect(await screen.findByText('Confirm it is you')).toBeTruthy();
+    expect(screen.queryByLabelText('6-digit code')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Your password'), { target: { value: 'Secret123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mocks.addPasskeyMutateAsync).toHaveBeenCalledWith({
+        username: 'reception',
+        stepUp: { password: 'Secret123!', totpCode: undefined },
+      }),
+    );
+  });
+
+  it('allows TOTP step-up verification when 2FA is enabled', async () => {
+    mocks.twoFactorStatus = { data: { enabled: true, backup_codes_remaining: 5 } };
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Register Your First Passkey' }));
+
+    const codeInput = await screen.findByLabelText('6-digit code');
+    fireEvent.change(codeInput, { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mocks.addPasskeyMutateAsync).toHaveBeenCalledWith({
+        username: 'reception',
+        stepUp: { password: undefined, totpCode: '654321' },
+      }),
+    );
   });
 });

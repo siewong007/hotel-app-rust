@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schemas.tauri.app/2/capabilities",
+  "identifier": "dev",
+  "description": "Development-only remote URL capabilities for the Vite/Tauri dev server",
+  "windows": ["main"],
+  "remote": {
+    "urls": [
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3000/*",
+      "http://localhost:5173/*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "updater:default",
+    "process:default"
+  ]
+}

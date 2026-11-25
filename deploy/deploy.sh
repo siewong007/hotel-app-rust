@@ -92,6 +92,7 @@ required_payload=(
   database/patches/0029_voucher_allocation_per_room_night.sql
   database/patches/0030_hotel_currency_defaults.sql
   database/patches/0031_manager_owns_user_management.sql
+  database/patches/0032_full_audit_schema_fixes.sql
   database/db-least-privilege.sql
 )
 for payload in "${required_payload[@]}"; do
@@ -400,6 +401,7 @@ install_release_files() {
   install -m 0644 "$RELEASE_DIR/database/patches/0029_voucher_allocation_per_room_night.sql" "$APP_DIR/database/patches/0029_voucher_allocation_per_room_night.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0030_hotel_currency_defaults.sql" "$APP_DIR/database/patches/0030_hotel_currency_defaults.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0031_manager_owns_user_management.sql" "$APP_DIR/database/patches/0031_manager_owns_user_management.sql"
+  install -m 0644 "$RELEASE_DIR/database/patches/0032_full_audit_schema_fixes.sql" "$APP_DIR/database/patches/0032_full_audit_schema_fixes.sql"
   install -m 0644 "$RELEASE_DIR/database/db-least-privilege.sql" "$APP_DIR/database/db-least-privilege.sql"
   # The backend image runs as uid/gid 1000. Bind-mounted application state must
   # stay writable by that non-root user across container replacements.
@@ -709,6 +711,14 @@ saliminn.my {
     # Force HTTPS on repeat visits (prevents SSL-strip downgrade). Set-if-missing
     # so an upstream that also emits HSTS is not duplicated.
     header ?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    header {
+        -Server
+        ?Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+        ?Referrer-Policy "strict-origin-when-cross-origin"
+        ?Cross-Origin-Opener-Policy "same-origin"
+        ?X-Content-Type-Options "nosniff"
+        ?X-Frame-Options "DENY"
+    }
 
     # Access log. The application cannot produce one: its TraceLayer spans are
     # emitted at DEBUG while the backend container runs RUST_LOG=warn, and

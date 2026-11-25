@@ -206,6 +206,15 @@ pub async fn capture_order(order_id: &str) -> Result<PaypalCaptureOutcome, ApiEr
     let client = http_client()?;
     let token = get_access_token(cfg, &client).await?;
 
+    if order_id.is_empty()
+        || order_id.len() > 64
+        || !order_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return Err(ApiError::BadRequest("Invalid PayPal order id.".to_string()));
+    }
+
     let response = client
         .post(format!(
             "{}/v2/checkout/orders/{}/capture",
@@ -233,14 +242,8 @@ pub async fn capture_order(order_id: &str) -> Result<PaypalCaptureOutcome, ApiEr
         .await
         .map_err(|e| ApiError::ServiceUnavailable(format!("PayPal capture decode failed: {e}")))?;
 
-    let status = json
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("UNKNOWN")
-        .to_string();
-
     // The capture object under purchase_units[0].payments.captures[0] carries
-    // the authoritative custom_id and the amount that actually moved.
+    // the authoritative capture status, custom_id, and amount that actually moved.
     let capture = json
         .get("purchase_units")
         .and_then(Value::as_array)
@@ -249,6 +252,21 @@ pub async fn capture_order(order_id: &str) -> Result<PaypalCaptureOutcome, ApiEr
         .and_then(|p| p.get("captures"))
         .and_then(Value::as_array)
         .and_then(|c| c.first());
+
+    let capture_status = capture
+        .and_then(|cap| cap.get("status"))
+        .and_then(Value::as_str);
+    let order_status = json
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("UNKNOWN");
+    // In PayPal Orders v2, an order can report COMPLETED while the nested
+    // capture is PENDING (eCheck/hold/review) or DECLINED. Never treat a capture
+    // as completed unless the capture itself settled when present.
+    let status = match (order_status, capture_status) {
+        ("COMPLETED", Some(cap_status)) if cap_status != "COMPLETED" => cap_status.to_string(),
+        _ => order_status.to_string(),
+    };
 
     let custom_id = capture
         .and_then(|cap| cap.get("custom_id"))

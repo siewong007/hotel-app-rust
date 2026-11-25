@@ -17,7 +17,7 @@ fn domain_for_path(path: &str) -> Option<&'static str> {
     match first {
         "bookings" | "payments" | "invoices" | "services" | "complimentary" => Some("bookings"),
         "guests" => Some("guests"),
-        "rooms" | "room-types" | "rates" => Some("rooms"),
+        "rooms" | "room-types" | "room-type-prices" | "rates" => Some("rooms"),
         "ledgers" | "companies" => Some("ledgers"),
         "housekeeping" => Some("housekeeping"),
         "night-audit" => Some("night-audit"),
@@ -68,6 +68,7 @@ mod tests {
         assert_eq!(domain_for_path("/guests/12"), Some("guests"));
         assert_eq!(domain_for_path("/rooms/4/status"), Some("rooms"));
         assert_eq!(domain_for_path("/room-types/2"), Some("rooms"));
+        assert_eq!(domain_for_path("/room-type-prices/2"), Some("rooms"));
         assert_eq!(domain_for_path("/rates/1"), Some("rooms"));
         assert_eq!(domain_for_path("/ledgers/7/payments"), Some("ledgers"));
         assert_eq!(domain_for_path("/companies/3"), Some("ledgers"));

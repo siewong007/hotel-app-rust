@@ -74,7 +74,8 @@ services:
       # TLS-terminating proxy such as the caddy service (see SECURITY.md).
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       RUST_LOG: ${RUST_LOG:-info}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      TOTP_ENCRYPTION_KEY: "${TOTP_ENCRYPTION_KEY:-}"
       PAYPAL_ENABLED: ${PAYPAL_ENABLED:-false}
       PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
       PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}

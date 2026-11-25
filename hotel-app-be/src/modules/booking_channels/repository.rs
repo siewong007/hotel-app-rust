@@ -346,9 +346,14 @@ pub async fn update(
     let (commission_type, commission_value, commission_scope) =
         validate_commission(commission_type, commission_value, commission_scope)?;
     let is_active = input.is_active.unwrap_or(current.is_active);
-    let abbreviation =
-        normalize_optional_text(input.abbreviation, 8, "abbreviation")?.or(current.abbreviation);
-    let code = normalize_optional_text(input.code, 40, "code")?.or(current.code);
+    let abbreviation = match input.abbreviation {
+        Some(raw) => normalize_optional_text(Some(raw), 8, "abbreviation")?,
+        None => current.abbreviation,
+    };
+    let code = match input.code {
+        Some(raw) => normalize_optional_text(Some(raw), 40, "code")?,
+        None => current.code,
+    };
     let integration_mode = validate_integration_mode(normalize_token(
         input.integration_mode,
         &current.integration_mode,

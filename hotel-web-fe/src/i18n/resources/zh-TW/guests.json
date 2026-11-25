@@ -597,6 +597,7 @@
     "rating": "評分 {{rating}}/5",
     "unrated": "未評分",
     "due": "到期 {{date}}",
+    "waitingForStaff": "{{count}} 個等待員工處理",
     "waitingForStaff_other": "{{count}} 個等待員工處理",
     "stats": {
       "arrivals": "抵達",

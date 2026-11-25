@@ -654,6 +654,7 @@
     "fullAccess": "Akses penuh",
     "noDescription": "Tiada perihalan disediakan untuk peranan ini.",
     "ofPermissions": "/ {{total}} kebenaran",
+    "usersAssigned_zero": "0 pengguna diberikan",
     "usersAssigned_other": "{{count}} pengguna diberikan",
     "coverage": "liputan",
     "rename": "Namakan semula",

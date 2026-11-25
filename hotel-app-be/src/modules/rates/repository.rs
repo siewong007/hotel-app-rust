@@ -513,6 +513,7 @@ impl RateRepository {
               AND (rr.effective_to IS NULL OR rr.effective_to >= $2)
               AND (rp.valid_from IS NULL OR rp.valid_from <= $2)
               AND (rp.valid_to IS NULL OR rp.valid_to >= $2)
+              AND NOT (COALESCE(rp.blackout_dates, '[]'::jsonb) ? $2::text)
               AND (
                   ($3 = 0 AND rp.applies_monday = true) OR
                   ($3 = 1 AND rp.applies_tuesday = true) OR

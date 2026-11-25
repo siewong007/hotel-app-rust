@@ -23,6 +23,7 @@ vi.mock('../../../../hooks/useCurrency', () => ({
 vi.mock('../../../../hooks/useIsPhone', () => ({ useIsPhone: () => false }));
 
 vi.mock('../../../../utils/hotelSettings', () => ({
+  getHotelSetting: () => undefined,
   getHotelSettings: () => ({ check_in_time: '15:00', payment_methods: [], booking_channels: [] }),
 }));
 

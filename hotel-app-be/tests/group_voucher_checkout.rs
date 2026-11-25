@@ -54,9 +54,16 @@ struct Fx {
 }
 
 fn tag() -> String {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static BASE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
+        chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_default()
+            .unsigned_abs()
+    });
     format!(
         "{:x}",
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        *BASE + SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     )
 }
 

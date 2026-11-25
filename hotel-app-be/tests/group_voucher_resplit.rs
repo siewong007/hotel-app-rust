@@ -41,9 +41,16 @@ struct Fx {
 /// A group of `shares.len()` unpaid rooms (2 nights × 100) whose fixed
 /// voucher was split as `shares`.
 async fn fixture(pool: &PgPool, shares: &[&str]) -> Fx {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static BASE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
+        chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_default()
+            .unsigned_abs()
+    });
     let tag = format!(
         "{:x}",
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        *BASE + SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
     let guest_id: i64 = sqlx::query_scalar(
         "INSERT INTO guests (first_name, last_name, nick_name, email, phone, ic_number) \

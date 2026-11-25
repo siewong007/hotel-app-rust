@@ -17,6 +17,7 @@ const GUEST_EXACT_PATHS = new Set([
 
 const GUEST_PATH_PREFIXES = [
   '/guest-checkin',
+  '/booking/recover-payment',
   '/guest-portal',
   '/portal',
   '/offers',
@@ -56,6 +57,7 @@ export function isPublicGuestPath(pathname: string, search: string): boolean {
   return (
     path === '/guest-checkin' ||
     path.startsWith('/guest-checkin/') ||
+    path.startsWith('/booking/recover-payment/') ||
     path === '/offers' ||
     path.startsWith('/offers/') ||
     path.startsWith('/legal/') ||

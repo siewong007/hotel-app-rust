@@ -80,18 +80,40 @@ pub async fn is_super_admin(pool: &DbPool, user_id: i64) -> Result<bool, ApiErro
     .map_err(|e| ApiError::Database(e.to_string()))
 }
 
+/// True when the user account carries `users.is_super_admin` regardless of
+/// whether the account is currently suspended (`is_active = false`). Used to
+/// protect suspended super-admin accounts from mutation by non-super-admins.
+pub async fn is_super_admin_account(pool: &DbPool, user_id: i64) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT is_super_admin FROM users \
+         WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map(|flag| flag.unwrap_or(false))
+    .map_err(|e| ApiError::Database(e.to_string()))
+}
+
 pub async fn check_any_permission(
     pool: &DbPool,
     user_id: i64,
     permissions: &[&str],
 ) -> Result<(), ApiError> {
     for permission in permissions {
-        match check_permission(pool, user_id, permission).await {
-            Ok(()) => return Ok(()),
-            Err(ApiError::Forbidden(_)) => {}
-            Err(err) => return Err(err),
+        let has_permission = AuthService::check_permission(pool, user_id, permission)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+        if has_permission {
+            return Ok(());
         }
     }
+
+    crate::core::metrics::incr(&crate::core::metrics::PERMISSION_DENIED);
+    log::warn!(
+        "Permission denied: user {user_id} lacks any of [{}]",
+        permissions.join(", ")
+    );
 
     Err(ApiError::Forbidden(format!(
         "Missing one of required permissions: {}",

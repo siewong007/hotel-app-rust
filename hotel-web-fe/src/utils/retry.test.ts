@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { APIError } from '../api/client';
 import { batchWithRetry, createRetryConfig, retryable, withRetry } from './retry';
 
 describe('withRetry', () => {
@@ -184,5 +185,24 @@ describe('createRetryConfig', () => {
   it('caps retryDelay at maxDelay', () => {
     const config = createRetryConfig({ initialDelay: 1000, backoffFactor: 10, maxDelay: 5000 });
     expect(config.retryDelay(3)).toBe(5000);
+  });
+
+  it('does not retry 400 APIError and retries 503 APIError', async () => {
+    vi.useFakeTimers();
+    try {
+      const badReq = vi.fn().mockRejectedValue(new APIError('Bad Request', 400));
+      await expect(withRetry(badReq)).rejects.toThrow('Bad Request');
+      expect(badReq).toHaveBeenCalledTimes(1);
+
+      const unavailable = vi.fn()
+        .mockRejectedValueOnce(new APIError('Service Unavailable', 503))
+        .mockResolvedValueOnce('recovered');
+      const promise = withRetry(unavailable, { initialDelay: 25 });
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(promise).resolves.toBe('recovered');
+      expect(unavailable).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

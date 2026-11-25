@@ -48,6 +48,8 @@ entry point names it `README.md`; otherwise this index is the way in.
 | Data transfer (hotel-backup v1) | [`guides/data-transfer.md`](guides/data-transfer.md) |
 | i18n engine, legal/help/landing copy, adding languages | [`guides/internationalization.md`](guides/internationalization.md) |
 | i18n terminology | [`guides/i18n-glossary.md`](guides/i18n-glossary.md) |
+| Admin & staff user guide (Simplified Chinese) | [`guides/admin-user-guide-zh.md`](guides/admin-user-guide-zh.md) · [`PDF`](guides/admin-user-guide-zh.pdf) |
+| Normal user / guest guide (Simplified Chinese) | [`guides/guest-user-guide-zh.md`](guides/guest-user-guide-zh.md) · [`PDF`](guides/guest-user-guide-zh.pdf) |
 | i18n coverage audit | [`reference/i18n-coverage-inventory.md`](reference/i18n-coverage-inventory.md) |
 | Production security operations | [`security/production-operations.md`](security/production-operations.md) |
 | Production readiness assessment | [`security/production-readiness-assessment.md`](security/production-readiness-assessment.md) |

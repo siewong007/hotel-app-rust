@@ -158,10 +158,20 @@ pub async fn create_ticket(
     }
     let description = sanitize_optional_notes(input.description);
 
-    let ticket_number = repository::next_ticket_number(pool).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    let ticket = repository::insert_ticket(
-        pool,
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('maintenance_ticket_number'))")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    let ticket_number = repository::next_ticket_number(&mut *tx).await?;
+
+    let ticket = repository::insert_ticket_tx(
+        &mut tx,
         NewMaintenanceTicket {
             room_id: input.room_id,
             ticket_number: &ticket_number,
@@ -178,6 +188,10 @@ pub async fn create_ticket(
         },
     )
     .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let _ = AuditLog::log_event(
         pool,

@@ -340,7 +340,10 @@ pub async fn claim_booking_account(
 
     let existing = AuthRepository::find_guest_account(&mut tx, booking.guest_id).await?;
     let existing_user_id = match existing {
-        Some(account) if account.is_deleted || (account.has_password && !account.is_active) => {
+        Some(account)
+            if account.is_deleted
+                || ((account.has_password || account.has_google_account) && !account.is_active) =>
+        {
             return Err(ApiError::Conflict(
                 "This guest profile has a disabled account. Please contact the front desk."
                     .to_string(),
@@ -349,7 +352,7 @@ pub async fn claim_booking_account(
         // Deliberately does NOT echo the existing username: the caller proved
         // they hold the booking link and know the booking details, which is not
         // the same as being the account owner.
-        Some(account) if account.has_password => {
+        Some(account) if account.has_password || account.has_google_account => {
             return Err(ApiError::Conflict(
                 "An account already exists for this booking. Please sign in, or use \
                  'forgot password' if you cannot get in."

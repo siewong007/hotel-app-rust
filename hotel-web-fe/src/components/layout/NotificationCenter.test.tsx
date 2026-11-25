@@ -203,4 +203,29 @@ describe('NotificationCenter', () => {
     const review = screen.getByRole('link', { name: 'Review payment' });
     expect(review.getAttribute('href')).toBe('/payment-approvals');
   });
+
+  it('shows a guest support alert to support viewers without settings or payments access', () => {
+    mocks.hasPermission = (permission: string) => permission === 'support:read';
+    mocks.serverUnread = 0;
+    mocks.staffUnread = 1;
+    mocks.staffItems = [
+      {
+        id: 14,
+        kind: 'guest_support_conversation',
+        subject: 'SUP-2026-0001',
+        title: 'Guest support request',
+        body: 'A guest opened support conversation SUP-2026-0001.',
+        created_at: new Date().toISOString(),
+        read_at: null,
+      },
+    ];
+
+    render(<NotificationCenter />);
+
+    expect(screen.getByLabelText('Notifications (1 unread)')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'System' }));
+    expect(screen.getByText('Guest support request')).toBeTruthy();
+    expect(screen.getByText('A guest opened support conversation SUP-2026-0001.')).toBeTruthy();
+  });
 });

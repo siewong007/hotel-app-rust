@@ -27,7 +27,7 @@ import {
   CardGiftcard as GiftIcon,
 } from '@mui/icons-material';
 import { BookingWithDetails } from '../../../../../types';
-import { toMoneyNumber } from '../../../../../utils/money';
+import { isPositiveMoney, toMoneyNumber } from '../../../../../utils/money';
 import { getBookingChannelInfo } from '../../../../bookings/utils/bookingChannel';
 import RoomPaymentMethodSelect from '../../../../bookings/components/payment/RoomPaymentMethodSelect';
 import { useTranslation } from '../../../../../i18n/useTranslation';
@@ -111,6 +111,11 @@ const ReservedCheckInDialog: React.FC<ReservedCheckInDialogProps> = ({
   // generic "unpaid" messaging. Gate on the exact source the backend keys off
   // so the prompt never promises an auto-settlement that won't happen.
   const isOnlineReservation = (booking?.source || '').trim().toLowerCase() === 'online';
+  const isAlreadyPaid =
+    booking?.payment_status === 'paid' ||
+    (booking?.balance_due !== undefined &&
+      booking?.balance_due !== null &&
+      !isPositiveMoney(booking.balance_due));
   const onlinePlatformName =
     (booking ? getBookingChannelInfo(booking)?.name : null) || t('bookings:checkIn.onlinePlatformFallback');
 
@@ -230,67 +235,75 @@ const ReservedCheckInDialog: React.FC<ReservedCheckInDialogProps> = ({
 
             {/* Payment Section */}
             <Typography variant="subtitle2" color="primary" sx={{ mb: 1 }}>{t('bookings:checkIn.paymentSection')}</Typography>
-            {isOnlineReservation && (
+            {isAlreadyPaid ? (
               <Alert severity="success" sx={{ mb: 1.5, py: 0 }}>
-                {t('bookings:checkIn.settledOnlineNotice', {
-                  platform: onlinePlatformName,
-                  amount: formatCurrency(toMoneyNumber(booking.total_amount)),
-                })}
+                {t('bookings:payment.paid')} ({formatCurrency(toMoneyNumber(booking?.total_paid ?? booking?.total_amount))})
               </Alert>
-            )}
-            <ToggleButtonGroup
-              value={paymentChoice}
-              exclusive
-              onChange={(_, val) => { if (val) onPaymentChoiceChange(val); }}
-              fullWidth
-              size="small"
-              sx={{ mb: 1.5 }}
-            >
-              <ToggleButton value="pay_now" color="success" sx={{ py: 1, fontWeight: 600 }}>
-                <PaymentIcon sx={{ mr: 0.5, fontSize: 18 }} />
-                {t('bookings:checkIn.makePaymentNow')}
-              </ToggleButton>
-              <ToggleButton value="pay_later" color="warning" sx={{ py: 1, fontWeight: 600 }}>
-                <MoneyOffIcon sx={{ mr: 0.5, fontSize: 18 }} />
-                {isOnlineReservation ? t('bookings:checkIn.settledOnline') : t('bookings:checkIn.payLater')}
-              </ToggleButton>
-            </ToggleButtonGroup>
+            ) : (
+              <>
+                {isOnlineReservation && (
+                  <Alert severity="success" sx={{ mb: 1.5, py: 0 }}>
+                    {t('bookings:checkIn.settledOnlineNotice', {
+                      platform: onlinePlatformName,
+                      amount: formatCurrency(toMoneyNumber(booking.total_amount)),
+                    })}
+                  </Alert>
+                )}
+                <ToggleButtonGroup
+                  value={paymentChoice}
+                  exclusive
+                  onChange={(_, val) => { if (val) onPaymentChoiceChange(val); }}
+                  fullWidth
+                  size="small"
+                  sx={{ mb: 1.5 }}
+                >
+                  <ToggleButton value="pay_now" color="success" sx={{ py: 1, fontWeight: 600 }}>
+                    <PaymentIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                    {t('bookings:checkIn.makePaymentNow')}
+                  </ToggleButton>
+                  <ToggleButton value="pay_later" color="warning" sx={{ py: 1, fontWeight: 600 }}>
+                    <MoneyOffIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                    {isOnlineReservation ? t('bookings:checkIn.settledOnline') : t('bookings:checkIn.payLater')}
+                  </ToggleButton>
+                </ToggleButtonGroup>
 
-            {paymentChoice === 'pay_now' && (
-              <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
-                <Grid size={6}>
-                  <RoomPaymentMethodSelect
-                    booking={booking}
-                    paymentMethods={paymentMethods}
-                    value={paymentMethod}
-                    onChange={onPaymentMethodChange}
-                    label={t('bookings:checkIn.paymentMethod')}
-                    size="small"
-                  />
-                </Grid>
-                <Grid size={6}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label={t('bookings:checkIn.amountPaid')}
-                    type="number"
-                    value={amountPaid}
-                    onChange={(e) => onAmountPaidChange(toMoneyNumber(e.target.value))}
-                    slotProps={{
-                      input: {
-                        startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>,
-                        inputProps: { min: 0, step: 0.01 },
-                      }
-                    }}
-                  />
-                </Grid>
-              </Grid>
-            )}
+                {paymentChoice === 'pay_now' && (
+                  <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+                    <Grid size={6}>
+                      <RoomPaymentMethodSelect
+                        booking={booking}
+                        paymentMethods={paymentMethods}
+                        value={paymentMethod}
+                        onChange={onPaymentMethodChange}
+                        label={t('bookings:checkIn.paymentMethod')}
+                        size="small"
+                      />
+                    </Grid>
+                    <Grid size={6}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label={t('bookings:checkIn.amountPaid')}
+                        type="number"
+                        value={amountPaid}
+                        onChange={(e) => onAmountPaidChange(toMoneyNumber(e.target.value))}
+                        slotProps={{
+                          input: {
+                            startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>,
+                            inputProps: { min: 0, step: 0.01 },
+                          }
+                        }}
+                      />
+                    </Grid>
+                  </Grid>
+                )}
 
-            {paymentChoice === 'pay_later' && !isOnlineReservation && (
-              <Alert severity="info" sx={{ mb: 1.5, py: 0 }}>
-                {t('bookings:checkIn.payLaterUnpaid')}
-              </Alert>
+                {paymentChoice === 'pay_later' && !isOnlineReservation && (
+                  <Alert severity="info" sx={{ mb: 1.5, py: 0 }}>
+                    {t('bookings:checkIn.payLaterUnpaid')}
+                  </Alert>
+                )}
+              </>
             )}
 
             {/* Deposit Section */}

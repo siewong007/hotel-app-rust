@@ -284,9 +284,11 @@ pub async fn regenerate_backup_codes(
         ));
     }
 
-    let totp_secret = user
+    let stored_secret = user
         .two_factor_secret
         .ok_or_else(|| ApiError::Internal("2FA secret missing".to_string()))?;
+    let totp_secret =
+        AuthService::decrypt_stored_totp_secret(&stored_secret).map_err(ApiError::Internal)?;
     let valid = AuthService::verify_totp_code(&totp_secret, &req.code)
         .map_err(|error| ApiError::BadRequest(format!("Invalid TOTP code: {}", error)))?;
 

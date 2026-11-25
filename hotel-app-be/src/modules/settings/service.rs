@@ -120,6 +120,22 @@ pub async fn update_system_setting(
     if key == NEW_RESERVATION_VISIBLE_TIME_KEY {
         input.value = normalize_clock_time(&input.value)?;
     }
+    if key == "timezone" {
+        let tz = input.value.trim();
+        let valid_tz: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name = $1)")
+                .bind(tz)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| ApiError::Database(e.to_string()))?;
+        if tz.is_empty() || !valid_tz {
+            return Err(ApiError::BadRequest(format!(
+                "Invalid timezone '{}'. Use a valid PostgreSQL timezone name (e.g. 'Asia/Kuala_Lumpur' or 'UTC')",
+                input.value
+            )));
+        }
+        input.value = tz.to_string();
+    }
     // Read before the write: `system_settings` keeps only `updated_by`/`updated_at`,
     // so the row itself cannot say what a value was replaced with. Two admins
     // racing the same key could make the recorded `old_value` one revision stale,

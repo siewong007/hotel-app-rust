@@ -20,7 +20,7 @@ pub async fn create_rate_plan(
     user_id: i64,
     input: RatePlanInput,
 ) -> Result<RatePlan, ApiError> {
-    let values = rate_plan_create_values(input);
+    let values = rate_plan_create_values(input)?;
     let rate_plan = RateRepository::create_rate_plan(pool, user_id, &values).await?;
     log_rate_plan_event(pool, user_id, "rate_plan_created", &rate_plan).await;
     Ok(rate_plan)
@@ -49,12 +49,17 @@ pub async fn update_rate_plan(
     rate_plan_id: i64,
     input: RatePlanUpdateInput,
 ) -> Result<RatePlan, ApiError> {
-    let values = rate_plan_update_values(input);
+    let values = rate_plan_update_values(input)?;
     if !has_rate_plan_updates(&values) {
         return Err(ApiError::BadRequest(
             "No valid fields to update".to_string(),
         ));
     }
+
+    let existing = RateRepository::find_rate_plan(pool, rate_plan_id).await?;
+    let merged_from = values.valid_from.or(existing.valid_from);
+    let merged_to = values.valid_to.or(existing.valid_to);
+    validate_optional_date_window(merged_from, merged_to, "valid_from", "valid_to")?;
 
     let rate_plan = RateRepository::update_rate_plan(pool, rate_plan_id, &values).await?;
     log_rate_plan_event(pool, user_id, "rate_plan_updated", &rate_plan).await;
@@ -103,12 +108,22 @@ pub async fn update_room_rate(
     rate_id: i64,
     input: RoomRateUpdateInput,
 ) -> Result<RoomRate, ApiError> {
-    let values = room_rate_update_values(input);
+    let values = room_rate_update_values(input)?;
     if !has_room_rate_updates(&values) {
         return Err(ApiError::BadRequest(
             "No valid fields to update".to_string(),
         ));
     }
+
+    let existing = RateRepository::find_room_rate(pool, rate_id).await?;
+    let merged_from = values.effective_from.unwrap_or(existing.effective_from);
+    let merged_to = values.effective_to.or(existing.effective_to);
+    validate_optional_date_window(
+        Some(merged_from),
+        merged_to,
+        "effective_from",
+        "effective_to",
+    )?;
 
     let room_rate = RateRepository::update_room_rate(pool, rate_id, &values).await?;
     log_room_rate_event(pool, user_id, "room_rate_updated", &room_rate).await;
@@ -228,22 +243,54 @@ pub async fn applicable_rate(
     }))
 }
 
-fn rate_plan_create_values(input: RatePlanInput) -> RatePlanCreateValues {
-    RatePlanCreateValues {
+fn parse_opt_rate_date(value: Option<&String>, field: &str) -> Result<Option<NaiveDate>, ApiError> {
+    match value.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(raw) => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| {
+                ApiError::BadRequest(format!("Invalid {field} date format. Use YYYY-MM-DD"))
+            }),
+        None => Ok(None),
+    }
+}
+
+fn validate_optional_date_window(
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    from_label: &str,
+    to_label: &str,
+) -> Result<(), ApiError> {
+    if let (Some(start), Some(end)) = (from, to)
+        && start > end
+    {
+        return Err(ApiError::BadRequest(format!(
+            "{from_label} must not be after {to_label}"
+        )));
+    }
+    Ok(())
+}
+
+fn rate_plan_create_values(input: RatePlanInput) -> Result<RatePlanCreateValues, ApiError> {
+    let valid_from = parse_opt_rate_date(input.valid_from.as_ref(), "valid_from")?;
+    let valid_to = parse_opt_rate_date(input.valid_to.as_ref(), "valid_to")?;
+    validate_optional_date_window(valid_from, valid_to, "valid_from", "valid_to")?;
+    let adjustment_value = input
+        .adjustment_value
+        .map(|v| {
+            Decimal::from_f64_retain(v)
+                .ok_or_else(|| ApiError::BadRequest("Invalid adjustment_value".to_string()))
+        })
+        .transpose()?;
+
+    Ok(RatePlanCreateValues {
         name: input.name,
         code: input.code,
         description: input.description,
         plan_type: input.plan_type,
         adjustment_type: input.adjustment_type,
-        adjustment_value: input.adjustment_value.and_then(Decimal::from_f64_retain),
-        valid_from: input
-            .valid_from
-            .as_ref()
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
-        valid_to: input
-            .valid_to
-            .as_ref()
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
+        adjustment_value,
+        valid_from,
+        valid_to,
         applies_monday: input.applies_monday.unwrap_or(true),
         applies_tuesday: input.applies_tuesday.unwrap_or(true),
         applies_wednesday: input.applies_wednesday.unwrap_or(true),
@@ -258,25 +305,30 @@ fn rate_plan_create_values(input: RatePlanInput) -> RatePlanCreateValues {
         blackout_dates: input.blackout_dates,
         is_active: input.is_active.unwrap_or(true),
         priority: input.priority.unwrap_or(0),
-    }
+    })
 }
 
-fn rate_plan_update_values(input: RatePlanUpdateInput) -> RatePlanUpdateValues {
-    RatePlanUpdateValues {
+fn rate_plan_update_values(input: RatePlanUpdateInput) -> Result<RatePlanUpdateValues, ApiError> {
+    let valid_from = parse_opt_rate_date(input.valid_from.as_ref(), "valid_from")?;
+    let valid_to = parse_opt_rate_date(input.valid_to.as_ref(), "valid_to")?;
+    validate_optional_date_window(valid_from, valid_to, "valid_from", "valid_to")?;
+    let adjustment_value = input
+        .adjustment_value
+        .map(|v| {
+            Decimal::from_f64_retain(v)
+                .ok_or_else(|| ApiError::BadRequest("Invalid adjustment_value".to_string()))
+        })
+        .transpose()?;
+
+    Ok(RatePlanUpdateValues {
         name: input.name,
         code: input.code,
         description: input.description,
         plan_type: input.plan_type,
         adjustment_type: input.adjustment_type,
-        adjustment_value: input.adjustment_value.and_then(Decimal::from_f64_retain),
-        valid_from: input
-            .valid_from
-            .as_ref()
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
-        valid_to: input
-            .valid_to
-            .as_ref()
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
+        adjustment_value,
+        valid_from,
+        valid_to,
         applies_monday: input.applies_monday,
         applies_tuesday: input.applies_tuesday,
         applies_wednesday: input.applies_wednesday,
@@ -290,7 +342,7 @@ fn rate_plan_update_values(input: RatePlanUpdateInput) -> RatePlanUpdateValues {
         max_advance_booking: input.max_advance_booking,
         is_active: input.is_active,
         priority: input.priority,
-    }
+    })
 }
 
 fn has_rate_plan_updates(values: &RatePlanUpdateValues) -> bool {
@@ -323,13 +375,17 @@ fn room_rate_create_values(input: RoomRateInput) -> Result<RoomRateCreateValues,
             ApiError::BadRequest("Invalid effective_from date format. Use YYYY-MM-DD".to_string())
         })?;
 
-    let effective_to = input
-        .effective_to
-        .as_ref()
-        .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok());
+    let effective_to = parse_opt_rate_date(input.effective_to.as_ref(), "effective_to")?;
+    validate_optional_date_window(
+        Some(effective_from),
+        effective_to,
+        "effective_from",
+        "effective_to",
+    )?;
 
     let price = Decimal::from_f64_retain(input.price)
-        .ok_or_else(|| ApiError::BadRequest("Invalid price value".to_string()))?;
+        .filter(|p| p.is_sign_positive() && !p.is_zero())
+        .ok_or_else(|| ApiError::BadRequest("price must be a positive number".to_string()))?;
 
     Ok(RoomRateCreateValues {
         rate_plan_id: input.rate_plan_id,
@@ -371,18 +427,29 @@ fn room_rate_bulk_values(input: BulkRoomRateInput) -> Result<RoomRateBulkValues,
     })
 }
 
-fn room_rate_update_values(input: RoomRateUpdateInput) -> RoomRateUpdateValues {
-    RoomRateUpdateValues {
-        price: input.price.and_then(Decimal::from_f64_retain),
-        effective_from: input
-            .effective_from
-            .as_ref()
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
-        effective_to: input
-            .effective_to
-            .as_ref()
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
-    }
+fn room_rate_update_values(input: RoomRateUpdateInput) -> Result<RoomRateUpdateValues, ApiError> {
+    let price = input
+        .price
+        .map(|p| {
+            Decimal::from_f64_retain(p)
+                .filter(|d| d.is_sign_positive() && !d.is_zero())
+                .ok_or_else(|| ApiError::BadRequest("price must be a positive number".to_string()))
+        })
+        .transpose()?;
+    let effective_from = parse_opt_rate_date(input.effective_from.as_ref(), "effective_from")?;
+    let effective_to = parse_opt_rate_date(input.effective_to.as_ref(), "effective_to")?;
+    validate_optional_date_window(
+        effective_from,
+        effective_to,
+        "effective_from",
+        "effective_to",
+    )?;
+
+    Ok(RoomRateUpdateValues {
+        price,
+        effective_from,
+        effective_to,
+    })
 }
 
 fn has_room_rate_updates(values: &RoomRateUpdateValues) -> bool {
@@ -441,4 +508,68 @@ async fn log_room_rate_event(pool: &DbPool, user_id: i64, action: &str, room_rat
         },
     )
     .await;
+}
+
+#[cfg(test)]
+mod rate_validation_tests {
+    use super::*;
+
+    #[test]
+    fn room_rate_create_rejects_bad_price_dates_and_window() {
+        let bad_price = RoomRateInput {
+            rate_plan_id: 1,
+            room_type_id: 1,
+            price: 0.0,
+            effective_from: "2026-11-01".to_string(),
+            effective_to: Some("2026-11-05".to_string()),
+        };
+        assert!(room_rate_create_values(bad_price).is_err());
+
+        let bad_date = RoomRateInput {
+            rate_plan_id: 1,
+            room_type_id: 1,
+            price: 150.0,
+            effective_from: "2026-11-01".to_string(),
+            effective_to: Some("not-a-date".to_string()),
+        };
+        assert!(room_rate_create_values(bad_date).is_err());
+
+        let inverted = RoomRateInput {
+            rate_plan_id: 1,
+            room_type_id: 1,
+            price: 150.0,
+            effective_from: "2026-11-10".to_string(),
+            effective_to: Some("2026-11-05".to_string()),
+        };
+        assert!(room_rate_create_values(inverted).is_err());
+    }
+
+    #[test]
+    fn rate_plan_create_rejects_inverted_window_and_bad_dates() {
+        let base = RatePlanInput {
+            name: "Promo".to_string(),
+            code: "PROMO".to_string(),
+            description: None,
+            plan_type: Some("seasonal".to_string()),
+            adjustment_type: None,
+            adjustment_value: None,
+            valid_from: Some("2026-12-20".to_string()),
+            valid_to: Some("2026-12-01".to_string()),
+            applies_monday: None,
+            applies_tuesday: None,
+            applies_wednesday: None,
+            applies_thursday: None,
+            applies_friday: None,
+            applies_saturday: None,
+            applies_sunday: None,
+            min_nights: None,
+            max_nights: None,
+            min_advance_booking: None,
+            max_advance_booking: None,
+            blackout_dates: None,
+            is_active: None,
+            priority: None,
+        };
+        assert!(rate_plan_create_values(base).is_err());
+    }
 }

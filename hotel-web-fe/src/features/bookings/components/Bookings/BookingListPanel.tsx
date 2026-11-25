@@ -24,6 +24,7 @@ import { useIsPhone } from '../../../../hooks/useIsPhone';
 import { statusLabel, useTranslation } from '../../../../i18n';
 import { getHotelSettings } from '../../../../utils/hotelSettings';
 import { isPositiveMoney } from '../../../../utils/money';
+import { isInHouseBookingStatus } from '../../../../constants/booking.constants';
 import { getBookingChannelInfo } from '../../utils/bookingChannel';
 import {
   canCheckIn,
@@ -256,7 +257,8 @@ const BookingListPanel: React.FC<BookingListPanelProps> = ({
               !booking.group_number &&
               !booking.is_complimentary &&
               isPositiveMoney(balance) &&
-              !['checked_in', 'checked_out', 'completed'].includes(booking.status)
+              !isInHouseBookingStatus(booking.status) &&
+              !['checked_out', 'completed'].includes(booking.status)
             );
             const showInvoice = !showCheckIn && !showCheckOut && !showPayment && Boolean(
               onInvoice && ['checked_out', 'completed'].includes(booking.status)

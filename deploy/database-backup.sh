@@ -41,7 +41,7 @@
 # Every run writes BACKUP_DIR/backup-status.json (success or failure) so
 # saliminn-backup-health.timer has something machine-readable to alert on; a
 # nightly backup nobody checks is indistinguishable from no backup at all.
-set -euo pipefail
+set -Eeuo pipefail
 
 # SALIMINN_BACKUP_DIR / SALIMINN_SKIP_DUMP exist so the retention logic can be
 # exercised against a scratch directory without touching production, matching the
@@ -60,22 +60,36 @@ backup_path="$BACKUP_DIR/nightly-$timestamp.dump"
 
 install -d -m 0700 "$BACKUP_DIR"
 
+json_escape() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    printf '%s' "$s"
+}
+
 # $1 = status (ok|error), $2 = error_category (empty when ok), $3 = message,
 # $4 = filename (empty on failure), $5 = size bytes (0 on failure),
 # $6 = offsite flag (default false).
 write_status() {
-    local tmp
+    local tmp prev_success
     tmp=$(mktemp "$BACKUP_DIR/.status.XXXXXX")
+    if [ "$1" = ok ]; then
+        prev_success="\"$(date -u +%FT%TZ)\""
+    else
+        prev_success=$(sed -n 's/.*"last_success": \("[^"]*"\|null\).*/\1/p' "$STATUS_FILE" 2>/dev/null | head -1 || true)
+        prev_success=${prev_success:-null}
+    fi
     cat > "$tmp" <<STATUS
 {
-  "status": "$1",
-  "error_category": $( [ -n "$2" ] && printf '"%s"' "$2" || printf 'null' ),
-  "message": "$3",
+  "status": "$(json_escape "$1")",
+  "error_category": $( [ -n "$2" ] && printf '"%s"' "$(json_escape "$2")" || printf 'null' ),
+  "message": "$(json_escape "$3")",
   "last_attempt": "$(date -u +%FT%TZ)",
-  "last_success": $( [ "$1" = ok ] && printf '"%s"' "$(date -u +%FT%TZ)" || {
-        sed -n 's/.*"last_success": \("[^"]*"\|null\).*/\1/p' "$STATUS_FILE" 2>/dev/null | head -1 || true
-    } ),
-  "filename": $( [ -n "$4" ] && printf '"%s"' "$4" || printf 'null' ),
+  "last_success": $prev_success,
+  "filename": $( [ -n "$4" ] && printf '"%s"' "$(json_escape "$4")" || printf 'null' ),
   "size_bytes": $5,
   "offsite": ${6:-false}
 }

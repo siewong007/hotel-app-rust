@@ -209,10 +209,9 @@ const CheckoutInvoicePrintView: React.FC<CheckoutInvoicePrintViewProps> = ({
             );
           }
           const perNight = divideMoney(charges.tourismTax, tourismTaxNights);
-          const checkIn = new Date(booking.check_in_date);
+          const checkIn = parseLocalDate(booking.check_in_date);
           return Array.from({ length: tourismTaxNights }, (_, i) => {
-            const date = new Date(checkIn);
-            date.setDate(date.getDate() + i);
+            const date = addLocalDays(checkIn, i);
             return (
               <tr key={`tt-print-${i}`}>
                 <td>{t('checkout.tourismTaxDay', { date: formatHotelDate(date) })}</td>
@@ -235,6 +234,20 @@ const CheckoutInvoicePrintView: React.FC<CheckoutInvoicePrintViewProps> = ({
               </tr>
             )}
           </>
+        )}
+
+        {isPositiveMoney(charges.complimentaryDeduction) && (
+          <tr>
+            <td>{t('checkout.complimentaryDeduction', { defaultValue: 'Complimentary Deduction' })}</td>
+            <td className="amount">- {formatCurrency(charges.complimentaryDeduction)}</td>
+          </tr>
+        )}
+
+        {isPositiveMoney(charges.discountAmount) && (
+          <tr>
+            <td>{t('checkout.discountDeduction', { defaultValue: 'Discount' })}</td>
+            <td className="amount">- {formatCurrency(charges.discountAmount)}</td>
+          </tr>
         )}
 
         {isPositiveMoney(charges.depositRefund) ? (

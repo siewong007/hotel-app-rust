@@ -113,7 +113,7 @@ fn find_available_port(preferred: u16) -> u16 {
     }
 
     // Try ports in range
-    for port in (preferred + 1)..=(preferred + 100) {
+    for port in preferred.saturating_add(1)..=preferred.saturating_add(100) {
         if StdTcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
             return port;
         }
@@ -154,6 +154,7 @@ async fn main() {
     // from swallowed Result paths (e.g. ensure_invoice_for_booking) survive
     // a process exit.
     init_logging(config);
+    hotel_app_be::modules::system::service::mark_process_started();
 
     log::info!("Starting Hotel Management API server...");
     if desktop_mode {

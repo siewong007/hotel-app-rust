@@ -132,10 +132,17 @@ pub async fn stage_backup_upload_handler(body: Body) -> Result<Response, ApiErro
 /// Pre-flight diff of a staged backup against this database.
 pub async fn preview_import_handler(
     State(pool): State<DbPool>,
+    user_id: i64,
     Json(request): Json<ImportPreviewRequest>,
 ) -> Result<Json<ImportPreview>, ApiError> {
     Ok(Json(
-        data_transfer_jobs::preview_import(&pool, request.upload_id, request.passphrase).await?,
+        data_transfer_jobs::preview_import_for_user(
+            &pool,
+            user_id,
+            request.upload_id,
+            request.passphrase,
+        )
+        .await?,
     ))
 }
 
@@ -148,10 +155,16 @@ pub async fn execute_import_handler(
 ) -> Result<Response, ApiError> {
     let connection =
         super::repository::DataTransferRepository::try_import_connection(&pool).await?;
-    data_transfer_jobs::enforce_import_permissions(&pool, user_id, &headers, &request).await?;
-    let response =
-        data_transfer_jobs::start_import_job_with_connection(&pool, user_id, request, connection)
-            .await?;
+    let tier =
+        data_transfer_jobs::enforce_import_permissions(&pool, user_id, &headers, &request).await?;
+    let response = data_transfer_jobs::start_import_job_with_connection(
+        &pool,
+        user_id,
+        request,
+        connection,
+        Some(tier),
+    )
+    .await?;
     Ok((StatusCode::ACCEPTED, Json(response)).into_response())
 }
 

@@ -195,7 +195,7 @@ pub async fn cancel_pending_group_by_guest(
     use crate::modules::booking_groups::repository::BookingGroupRepository;
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let group = BookingGroupRepository::lock_tx(&mut tx, group_id).await?;
-    if !booking_repo::user_owns_booking(pool, user_id, group.guest_id).await? {
+    if !booking_repo::user_owns_booking(&mut *tx, user_id, group.guest_id).await? {
         return Err(ApiError::Forbidden(
             "You don't have permission to cancel this booking".to_string(),
         ));
@@ -220,7 +220,7 @@ pub async fn cancel_pending_group_by_guest(
     .await?;
     let mut bookings = Vec::with_capacity(ids.len());
     for id in &ids {
-        let booking = booking_service::fetch_booking_by_id(pool, *id).await?;
+        let booking = booking_service::fetch_booking_by_id_with(&mut *tx, *id).await?;
         if !is_guest_cancellable_booking(&booking.status) {
             return Err(ApiError::BadRequest(
                 "Only upcoming bookings can be cancelled online.".to_string(),
@@ -231,7 +231,7 @@ pub async fn cancel_pending_group_by_guest(
     let mut affected_night_audit_dates = Vec::new();
     for booking in &bookings {
         affected_night_audit_dates
-            .extend(booking_repo::booking_night_audit_dates(pool, booking.id).await?);
+            .extend(booking_repo::booking_night_audit_dates(&mut *tx, booking.id).await?);
         void_booking_by_guest_tx(&mut tx, booking, user_id, reason.as_deref()).await?;
     }
     BookingGroupRepository::refresh_totals_tx(&mut tx, group_id).await?;
@@ -344,11 +344,59 @@ async fn perform_release(
         booking_repo::booking_night_audit_dates(pool, booking_id).await?;
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
-    // Group lock first (same order as payment and cancel), then hand any
-    // unpaid voucher share on to the rooms that stay.
-    if let Some(group_id) = booking_repo::booking_group_id(pool, booking_id).await? {
+    // Group lock first (same order as payment and cancel), then lock the
+    // booking row and re-verify it is still an unpaid `pending_payment` hold.
+    let group_id = booking_repo::booking_group_id(&mut *tx, booking_id).await?;
+    if let Some(group_id) = group_id {
         crate::modules::booking_groups::repository::BookingGroupRepository::lock_tx(
             &mut tx, group_id,
+        )
+        .await?;
+    }
+    let locked_status: Option<String> =
+        sqlx::query_scalar("SELECT COALESCE(status, '') FROM bookings WHERE id = $1 FOR UPDATE")
+            .bind(booking_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ApiError::from)?;
+    if locked_status.as_deref() != Some("pending_payment") {
+        return Err(ApiError::Conflict(
+            "Booking is no longer an unpaid pending hold.".to_string(),
+        ));
+    }
+    let has_completed_payment: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM payments WHERE booking_id = $1 AND status = 'completed' \
+         AND COALESCE(payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage'))",
+    )
+    .bind(booking_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ApiError::from)?;
+    if has_completed_payment {
+        return Err(ApiError::Conflict(
+            "Cannot release hold: a completed room payment exists.".to_string(),
+        ));
+    }
+    if let Some(gid) = group_id {
+        let group_engaged: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM bookings m WHERE m.booking_group_id = $1 \
+             AND (m.status = 'pending_confirmation' OR EXISTS ( \
+                 SELECT 1 FROM payments mp WHERE mp.booking_id = m.id \
+                 AND mp.status IN ('completed', 'pending', 'processing') \
+                 AND COALESCE(mp.payment_type, 'booking') != 'refund')))",
+        )
+        .bind(gid)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+        if group_engaged {
+            return Err(ApiError::Conflict(
+                "Cannot release hold while a group payment claim is active or paid.".to_string(),
+            ));
+        }
+    } else {
+        crate::modules::booking_groups::voucher_resplit::return_unpaid_single_room_voucher_tx(
+            &mut tx, booking_id, reason,
         )
         .await?;
     }
@@ -366,6 +414,12 @@ async fn perform_release(
     booking_repo::void_booking_ledgers_tx(&mut tx, booking_id, actor, reason).await?;
     let nights_credited = booking_repo::restore_complimentary_credits_tx(&mut tx, booking).await?;
     payments::recompute_payment_status_tx(&mut tx, booking_id).await?;
+    if let Some(group_id) = group_id {
+        crate::modules::booking_groups::repository::BookingGroupRepository::refresh_totals_tx(
+            &mut tx, group_id,
+        )
+        .await?;
+    }
 
     booking_repo::record_booking_history_tx(
         &mut tx,
@@ -624,7 +678,8 @@ pub async fn void_booking(
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     // A group member: lock the group before any booking row, as the payment
     // and cancel paths do, so the voucher re-split and totals are serialised.
-    if let Some(group_id) = booking_repo::booking_group_id(pool, booking_id).await? {
+    let group_id = booking_repo::booking_group_id(&mut *tx, booking_id).await?;
+    if let Some(group_id) = group_id {
         crate::modules::booking_groups::repository::BookingGroupRepository::lock_tx(
             &mut tx, group_id,
         )
@@ -639,6 +694,12 @@ pub async fn void_booking(
             CompletedPaymentDisposition::Void,
         )
         .await?;
+    if let Some(group_id) = group_id {
+        crate::modules::booking_groups::repository::BookingGroupRepository::refresh_totals_tx(
+            &mut tx, group_id,
+        )
+        .await?;
+    }
     tx.commit().await.map_err(ApiError::from)?;
 
     if let Err(err) = crate::modules::loyalty::service::reverse_booking_points(
@@ -689,6 +750,12 @@ pub(crate) async fn void_booking_in_tx(
     payments: CompletedPaymentDisposition,
 ) -> Result<(i32, u64, u64), ApiError> {
     let booking_id = booking.id;
+    crate::modules::booking_groups::voucher_resplit::return_unpaid_single_room_voucher_tx(
+        tx,
+        booking_id,
+        reason.unwrap_or("Booking voided"),
+    )
+    .await?;
     crate::modules::booking_groups::voucher_resplit::return_voucher_if_final_room_tx(
         tx, booking_id,
     )
@@ -826,7 +893,10 @@ pub(crate) async fn checkin_booking_in_tx(
             "Payment required before check-in.".to_string(),
         ));
     }
-    if booking.status != "confirmed" {
+    if !matches!(
+        booking.status.as_str(),
+        "confirmed" | "partial_complimentary" | "fully_complimentary"
+    ) {
         return Err(ApiError::BadRequest(format!(
             "Cannot check in booking with status: {}",
             booking.status
@@ -1126,7 +1196,7 @@ pub async fn reactivate_booking(
         pool,
         booking_id,
         Some("voided"),
-        "confirmed",
+        &booking.status,
         Some(user_id),
         Some("Booking reactivated"),
         serde_json::json!({

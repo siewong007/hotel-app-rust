@@ -132,10 +132,6 @@ const GET_LEDGER_PAYMENTS_QUERY: &str = r#"
 const CHECK_LEDGER_EXISTS_QUERY: &str =
     "SELECT EXISTS(SELECT 1 FROM customer_ledgers WHERE id = $1)";
 
-// PostgreSQL query for getting ledger status and paid_amount
-const GET_LEDGER_STATUS_QUERY: &str =
-    "SELECT status, paid_amount FROM customer_ledgers WHERE id = $1";
-
 // PostgreSQL query for deleting ledger payments
 const DELETE_LEDGER_PAYMENTS_QUERY: &str =
     "DELETE FROM customer_ledger_payments WHERE ledger_id = $1";
@@ -315,33 +311,33 @@ pub async fn get_customer_ledger_with_payments(
     Ok(CustomerLedgerWithPayments { ledger, payments })
 }
 
+fn parse_optional_ledger_date(
+    value: Option<&String>,
+    field: &str,
+) -> Result<Option<NaiveDate>, ApiError> {
+    match value.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(raw) => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| ApiError::BadRequest(format!("Invalid {field}. Use YYYY-MM-DD"))),
+        None => Ok(None),
+    }
+}
+
 /// Create a new customer ledger entry.
 pub async fn create_customer_ledger(
     pool: &DbPool,
     user_id: i64,
     request: CustomerLedgerCreateRequest,
 ) -> Result<CustomerLedger, ApiError> {
-    let invoice_date = request
-        .invoice_date
-        .as_ref()
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-    let posting_date = request
-        .posting_date
-        .as_ref()
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-    let transaction_date = request
-        .transaction_date
-        .as_ref()
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+    let invoice_date = parse_optional_ledger_date(request.invoice_date.as_ref(), "invoice_date")?;
+    let posting_date = parse_optional_ledger_date(request.posting_date.as_ref(), "posting_date")?;
+    let transaction_date =
+        parse_optional_ledger_date(request.transaction_date.as_ref(), "transaction_date")?;
     // due_date: prefer the caller's value; otherwise look up the company's
     // payment_terms_days; otherwise fall back to default_payment_terms_days.
     // Without this, auto-created ledgers (company check-in / checkout) leave
     // due_date NULL and the UI shows "-".
-    let due_date = match request
-        .due_date
-        .as_ref()
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-    {
+    let due_date = match parse_optional_ledger_date(request.due_date.as_ref(), "due_date")? {
         Some(d) => Some(d),
         None => {
             let default_terms_days = default_payment_terms_days(pool).await;
@@ -365,9 +361,24 @@ pub async fn create_customer_ledger(
     };
 
     let amount = Decimal::from_f64_retain(request.amount)
-        .ok_or_else(|| ApiError::BadRequest("Invalid amount".to_string()))?;
-    let tax_amount = request.tax_amount.and_then(Decimal::from_f64_retain);
-    let service_charge = request.service_charge.and_then(Decimal::from_f64_retain);
+        .filter(|v| *v > Decimal::ZERO)
+        .ok_or_else(|| ApiError::BadRequest("Amount must be a positive number".to_string()))?;
+    let tax_amount = request
+        .tax_amount
+        .map(|v| {
+            Decimal::from_f64_retain(v)
+                .filter(|d| *d >= Decimal::ZERO)
+                .ok_or_else(|| ApiError::BadRequest("Invalid tax amount".to_string()))
+        })
+        .transpose()?;
+    let service_charge = request
+        .service_charge
+        .map(|v| {
+            Decimal::from_f64_retain(v)
+                .filter(|d| *d >= Decimal::ZERO)
+                .ok_or_else(|| ApiError::BadRequest("Invalid service charge".to_string()))
+        })
+        .transpose()?;
 
     if let Some(booking_id) = request.booking_id {
         let existing_query = format!(
@@ -785,7 +796,13 @@ pub async fn update_customer_ledger(
     }
     if let Some(amount) = request.amount {
         let decimal_amount = Decimal::from_f64_retain(amount)
-            .ok_or_else(|| ApiError::BadRequest("Invalid amount".to_string()))?;
+            .filter(|v| *v > Decimal::ZERO)
+            .ok_or_else(|| ApiError::BadRequest("Amount must be a positive number".to_string()))?;
+        if decimal_amount < current_paid {
+            return Err(ApiError::BadRequest(format!(
+                "Cannot reduce ledger amount below already paid amount ({current_paid})"
+            )));
+        }
         query_builder = query_builder.bind(decimal_amount);
     }
     if let Some(ref v) = request.currency {
@@ -828,11 +845,13 @@ pub async fn update_customer_ledger(
     }
     if let Some(tax_amount) = request.tax_amount {
         let decimal_tax = Decimal::from_f64_retain(tax_amount)
+            .filter(|v| *v >= Decimal::ZERO)
             .ok_or_else(|| ApiError::BadRequest("Invalid tax amount".to_string()))?;
         query_builder = query_builder.bind(decimal_tax);
     }
     if let Some(service_charge) = request.service_charge {
         let decimal_service_charge = Decimal::from_f64_retain(service_charge)
+            .filter(|v| *v >= Decimal::ZERO)
             .ok_or_else(|| ApiError::BadRequest("Invalid service charge".to_string()))?;
         query_builder = query_builder.bind(decimal_service_charge);
     }
@@ -855,12 +874,17 @@ pub async fn delete_customer_ledger(
     pool: &DbPool,
     ledger_id: i64,
 ) -> Result<serde_json::Value, ApiError> {
-    // Fetch ledger status and paid_amount
-    let ledger_row = sqlx::query(GET_LEDGER_STATUS_QUERY)
-        .bind(ledger_id)
-        .fetch_optional(pool)
+    let mut tx = pool
+        .begin()
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    let ledger_row =
+        sqlx::query("SELECT status, paid_amount FROM customer_ledgers WHERE id = $1 FOR UPDATE")
+            .bind(ledger_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
 
     match ledger_row {
         None => return Err(ApiError::NotFound("Customer ledger not found".to_string())),
@@ -883,19 +907,23 @@ pub async fn delete_customer_ledger(
 
     sqlx::query(DELETE_LEDGER_PAYMENTS_QUERY)
         .bind(ledger_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let result = sqlx::query(DELETE_LEDGER_QUERY)
         .bind(ledger_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
     if result.rows_affected() == 0 {
         return Err(ApiError::NotFound("Customer ledger not found".to_string()));
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(serde_json::json!({
         "message": "Customer ledger deleted successfully",
@@ -1777,10 +1805,19 @@ pub async fn create_ledger_reversal(
     user_id: i64,
     request: LedgerReversalRequest,
 ) -> Result<CustomerLedger, ApiError> {
-    // Get the original ledger
-    let original_row = sqlx::query(GET_LEDGER_BY_ID_QUERY)
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    // Lock the original ledger so concurrent reversals cannot race.
+    let lock_query = format!(
+        "SELECT {} FROM customer_ledgers WHERE id = $1 FOR UPDATE",
+        LEDGER_SELECT_FIELDS
+    );
+    let original_row = sqlx::query(sqlx::AssertSqlSafe(&*lock_query))
         .bind(ledger_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?
         .ok_or_else(|| ApiError::NotFound("Customer ledger not found".to_string()))?;
@@ -1792,6 +1829,23 @@ pub async fn create_ledger_reversal(
             "Cannot reverse a reversal entry".to_string(),
         ));
     }
+    if original.void_at.is_some() || original.status == "void" {
+        return Err(ApiError::BadRequest(
+            "Cannot reverse a voided ledger entry".to_string(),
+        ));
+    }
+    let already_reversed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM customer_ledgers WHERE original_transaction_id = $1 AND COALESCE(is_reversal, FALSE) = TRUE AND void_at IS NULL)",
+    )
+    .bind(ledger_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    if already_reversed {
+        return Err(ApiError::Conflict(
+            "This ledger entry has already been reversed".to_string(),
+        ));
+    }
 
     // Create the reversal entry with opposite transaction type
     let reversal_type = if original.transaction_type.as_deref() == Some("debit") {
@@ -1800,7 +1854,8 @@ pub async fn create_ledger_reversal(
         "debit"
     };
 
-    let invoice_number = crate::services::invoice_numbers::next_invoice_number(pool).await?;
+    let invoice_number = crate::services::invoice_numbers::next_invoice_number_tx(&mut tx).await?;
+    let hotel_date = hotel_today(&mut *tx).await?;
 
     let reversal_query = format!(
         r#"
@@ -1818,7 +1873,7 @@ pub async fn create_ledger_reversal(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'paid', $13,
                 $15, $16, $31, $17, $18, $19, $19, $19,
-                $20, $21, $22, $23, $24, $25, CURRENT_DATE, CURRENT_DATE,
+                $20, $21, $22, $23, $24, $25, $32, $32,
                 $26, $27, $28, TRUE, $29, $30)
         RETURNING {}
         "#,
@@ -1857,11 +1912,15 @@ pub async fn create_ledger_reversal(
         .bind(ledger_id)
         .bind(&request.reason)
         .bind(&invoice_number)
-        .fetch_one(pool)
+        .bind(hotel_date)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let reversal = row_to_customer_ledger(&row);
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(reversal)
 }

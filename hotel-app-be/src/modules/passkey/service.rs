@@ -221,11 +221,21 @@ pub async fn login_start(
     pool: &DbPool,
     req: PasskeyLoginStart,
 ) -> Result<serde_json::Value, ApiError> {
-    let user = PasskeyRepository::find_active_user_by_username(pool, &req.username)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+    let Some(user) = PasskeyRepository::find_active_user_by_username(pool, &req.username).await?
+    else {
+        return Err(ApiError::Unauthorized(
+            "Invalid credentials or no passkeys configured".to_string(),
+        ));
+    };
 
-    issue_assertion_challenge(pool, user.id).await
+    issue_assertion_challenge(pool, user.id)
+        .await
+        .map_err(|err| match err {
+            ApiError::NotFound(_) => {
+                ApiError::Unauthorized("Invalid credentials or no passkeys configured".to_string())
+            }
+            other => other,
+        })
 }
 
 /// Mint a single-use authentication challenge for `user_id` and the
@@ -577,21 +587,70 @@ fn rp_id() -> String {
     config::get().passkey_rp_id.clone()
 }
 
-fn origin_host(origin: &str) -> Option<&str> {
-    let (_, rest) = origin.split_once("://")?;
-    let authority = rest.split('/').next().unwrap_or(rest);
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    host_port.split(':').next().filter(|host| !host.is_empty())
+fn parse_strict_origin(origin: &str) -> Option<(String, String)> {
+    if origin.contains('@') || origin.contains('?') || origin.contains('#') {
+        return None;
+    }
+    let uri: axum::http::Uri = origin.parse().ok()?;
+    let scheme = uri.scheme_str()?.to_ascii_lowercase();
+    let authority = uri.authority()?;
+    if authority.as_str().contains('@') {
+        return None;
+    }
+    if !matches!(uri.path(), "" | "/") {
+        return None;
+    }
+    let host = authority
+        .host()
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if host.is_empty() {
+        return None;
+    }
+    Some((scheme, host.to_ascii_lowercase()))
 }
 
 fn origin_allowed(origin: &str, rp_id: &str) -> bool {
-    let Some(host) = origin_host(origin) else {
+    let Some((scheme, host)) = parse_strict_origin(origin) else {
         return false;
     };
-
-    host == rp_id
+    let rp_id = rp_id.to_ascii_lowercase();
+    let host_matches_rp = host == rp_id
         || host.ends_with(&format!(".{rp_id}"))
-        || (rp_id == "localhost" && matches!(host, "127.0.0.1" | "::1"))
+        || (rp_id == "localhost" && matches!(host.as_str(), "127.0.0.1" | "::1"));
+    if !host_matches_rp {
+        return false;
+    }
+
+    let cfg = config::get();
+    if matches!(cfg.environment, config::Environment::Production) {
+        if scheme != "https" {
+            return false;
+        }
+        if let config::AllowedOrigins::List(allowed) = &cfg.allowed_origins {
+            let normalized = origin.trim_end_matches('/');
+            return allowed.iter().any(|entry| {
+                entry
+                    .to_str()
+                    .map(|val| val.trim_end_matches('/').eq_ignore_ascii_case(normalized))
+                    .unwrap_or(false)
+            }) || normalized.eq_ignore_ascii_case(&format!("https://{rp_id}"));
+        }
+        return true;
+    }
+
+    scheme == "https"
+        || (scheme == "http"
+            && matches!(
+                host.as_str(),
+                "localhost" | "127.0.0.1" | "::1" | "tauri.localhost"
+            ))
+        || (cfg.desktop_mode
+            && matches!(scheme.as_str(), "tauri" | "app")
+            && matches!(
+                host.as_str(),
+                "localhost" | "127.0.0.1" | "::1" | "tauri.localhost"
+            ))
 }
 
 fn verify_client_data(
@@ -758,6 +817,16 @@ impl<'a> CborReader<'a> {
     }
 
     fn skip(&mut self) -> Result<(), ApiError> {
+        self.skip_with_depth(0)
+    }
+
+    fn skip_with_depth(&mut self, depth: usize) -> Result<(), ApiError> {
+        const MAX_CBOR_DEPTH: usize = 32;
+        if depth >= MAX_CBOR_DEPTH {
+            return Err(ApiError::BadRequest(
+                "CBOR structure exceeds maximum nesting depth".to_string(),
+            ));
+        }
         let (major, len) = self.read_type_len()?;
         match major {
             0 | 1 => Ok(()),
@@ -770,18 +839,18 @@ impl<'a> CborReader<'a> {
             }
             4 => {
                 for _ in 0..len {
-                    self.skip()?;
+                    self.skip_with_depth(depth + 1)?;
                 }
                 Ok(())
             }
             5 => {
                 for _ in 0..len {
-                    self.skip()?;
-                    self.skip()?;
+                    self.skip_with_depth(depth + 1)?;
+                    self.skip_with_depth(depth + 1)?;
                 }
                 Ok(())
             }
-            6 => self.skip(),
+            6 => self.skip_with_depth(depth + 1),
             7 => Ok(()),
             _ => Err(ApiError::BadRequest("Unsupported CBOR value".to_string())),
         }
@@ -913,4 +982,26 @@ fn parse_attested_credential(
     let credential_id = auth_data[pos..credential_end].to_vec();
     let public_key = parse_cose_es256_public_key(&auth_data[credential_end..])?;
     Ok((credential_id, public_key, counter))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CborReader, origin_allowed};
+
+    #[test]
+    fn cbor_skip_rejects_excessive_nesting_depth() {
+        let mut deeply_nested = vec![0x81u8; 64];
+        deeply_nested.push(0x00);
+        let mut reader = CborReader::new(&deeply_nested);
+        let err = reader.skip().unwrap_err();
+        assert!(err.to_string().contains("maximum nesting depth"), "{err}");
+    }
+
+    #[test]
+    fn origin_allowed_rejects_userinfo_paths_and_queries() {
+        assert!(!origin_allowed("https://user@localhost", "localhost"));
+        assert!(!origin_allowed("https://localhost/extra", "localhost"));
+        assert!(!origin_allowed("https://localhost?q=1", "localhost"));
+        assert!(!origin_allowed("https://localhost#frag", "localhost"));
+    }
 }

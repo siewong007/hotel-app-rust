@@ -58,6 +58,10 @@
       "label": "宾客关系",
       "breadcrumb": "宾客关系"
     },
+    "guest-relations-follow-ups": {
+      "label": "跟进队列",
+      "breadcrumb": "跟进队列"
+    },
     "help": {
       "label": "帮助",
       "breadcrumb": "帮助与支持"

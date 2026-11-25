@@ -133,7 +133,7 @@ export function GuestPaymentPanel({
   const [bankError, setBankError] = useState<string | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [paypalError, setPaypalError] = useState<string | null>(null);
-  const [pendingPaypalPaymentId, setPendingPaypalPaymentId] = useState<number | null>(null);
+  const pendingPaypalPaymentIdRef = useRef<number | null>(null);
   const [result, setResult] = useState<PaymentActionResponse | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'bank_transfer' | 'paypal' | null>(null);
   const bankErrorRef = useAutoFocusError(bankError);
@@ -183,15 +183,19 @@ export function GuestPaymentPanel({
         : mode === 'session'
           ? await GuestPortalDashboardService.submitBankTransfer(bookingId!, consents, token)
           : await GuestPortalService.submitBankTransfer(token!, consents);
-      if (receiptFile) {
-        if (mode === 'session') {
-          await GuestPortalDashboardService.uploadPaymentReceipt(response.payment_id, receiptFile, token);
-        } else {
-          await GuestPortalService.uploadPaymentReceipt(token!, response.payment_id, receiptFile);
-        }
-      }
       setResult(response);
       onPaid?.(response);
+      if (receiptFile) {
+        try {
+          if (mode === 'session') {
+            await GuestPortalDashboardService.uploadPaymentReceipt(response.payment_id, receiptFile, token);
+          } else {
+            await GuestPortalService.uploadPaymentReceipt(token!, response.payment_id, receiptFile);
+          }
+        } catch (receiptError) {
+          setBankError(guestErrorMessage(receiptError, t('payment.bankSubmitFailed')));
+        }
+      }
     } catch (error) {
       setBankError(guestErrorMessage(error, t('payment.bankSubmitFailed')));
     } finally {
@@ -215,7 +219,7 @@ export function GuestPaymentPanel({
         : mode === 'session'
           ? await GuestPortalDashboardService.createPaypalOrder(bookingId!, consents, token)
           : await GuestPortalService.createPaypalOrder(token!, consents);
-      setPendingPaypalPaymentId(response.payment_id);
+      pendingPaypalPaymentIdRef.current = response.payment_id;
       return response.order_id;
     } catch (error) {
       setPaypalError(guestErrorMessage(error, t('payment.paypalStartFailed')));
@@ -226,7 +230,9 @@ export function GuestPaymentPanel({
 
   const onApprove = useCallback(
     async (data: { orderID: string }): Promise<void> => {
-      if (pendingPaypalPaymentId == null) {
+      const pendingPaymentId = pendingPaypalPaymentIdRef.current;
+      if (pendingPaymentId == null) {
+        paymentAttemptInFlight.current = false;
         setPaypalError(t('payment.paypalOrderMissing'));
         return;
       }
@@ -236,25 +242,25 @@ export function GuestPaymentPanel({
             ? await GuestPortalDashboardService.captureGroupPaypalOrder(
                 groupId,
                 data.orderID,
-                pendingPaypalPaymentId,
+                pendingPaymentId,
                 token,
               )
             : await GuestPortalService.captureGroupPaypalOrder(
                 token!,
                 data.orderID,
-                pendingPaypalPaymentId,
+                pendingPaymentId,
               )
           : mode === 'session'
             ? await GuestPortalDashboardService.capturePaypalOrder(
                 bookingId!,
                 data.orderID,
-                pendingPaypalPaymentId,
+                pendingPaymentId,
                 token,
               )
             : await GuestPortalService.capturePaypalOrder(
                 token!,
                 data.orderID,
-                pendingPaypalPaymentId,
+                pendingPaymentId,
               );
         setResult(response);
         onPaid?.(response);
@@ -264,7 +270,7 @@ export function GuestPaymentPanel({
         paymentAttemptInFlight.current = false;
       }
     },
-    [mode, bookingId, isGroup, groupId, token, pendingPaypalPaymentId, onPaid, t],
+    [mode, bookingId, isGroup, groupId, token, onPaid, t],
   );
 
   const onPaypalError = useCallback(() => {

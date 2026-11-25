@@ -24,8 +24,7 @@ use crate::models::Booking;
 /// `confirmed`/`pending`, so an awaiting-payment hold holds the room without
 /// being check-in-ready. Mirrors `ROOM_HOLDING_RESERVATION_STATUSES` in
 /// `hotel-web-fe/src/constants/booking.constants.ts`.
-pub const ROOM_HOLDING_RESERVATION_STATUSES_SQL: &str =
-    "'pending', 'pending_payment', 'pending_confirmation', 'confirmed'";
+pub const ROOM_HOLDING_RESERVATION_STATUSES_SQL: &str = "'pending', 'pending_payment', 'pending_confirmation', 'confirmed', 'partial_complimentary', 'fully_complimentary'";
 
 /// Generate a unique booking number using the provided hotel-local date.
 pub fn generate_booking_number_for_date(date: NaiveDate) -> String {
@@ -44,7 +43,19 @@ pub fn generate_booking_number() -> String {
 
 /// Fetch a single booking row by ID, returning a fully-mapped `Booking`.
 pub async fn fetch_booking_by_id(pool: &DbPool, booking_id: i64) -> Result<Booking, ApiError> {
-    BookingRepository::find_mapped_by_id(pool, booking_id)
+    fetch_booking_by_id_with(pool, booking_id).await
+}
+
+/// Executor-generic variant so open transactions can read uncommitted writes
+/// without acquiring a second pool connection.
+pub async fn fetch_booking_by_id_with<'e, E>(
+    executor: E,
+    booking_id: i64,
+) -> Result<Booking, ApiError>
+where
+    E: sqlx::Executor<'e, Database = crate::core::db::DbDatabase>,
+{
+    BookingRepository::find_mapped_by_id(executor, booking_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))
 }

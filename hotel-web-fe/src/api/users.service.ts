@@ -64,10 +64,7 @@ export class UsersService {
   }
 
   static async createUser(userData: CreateRbacUserInput): Promise<User> {
-    return await withRetry(
-      () => api.post('users', { json: userData }).json<User>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.post('users', { json: userData }).json<User>();
   }
 
   static async getUserRolesAndPermissions(userId: string): Promise<UserWithRolesAndPermissions> {
@@ -78,10 +75,7 @@ export class UsersService {
   }
 
   static async updateUser(userId: string, userData: UpdateRbacUserInput): Promise<User> {
-    return await withRetry(
-      () => api.patch(`users/${userId}`, { json: userData }).json<User>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.patch(`users/${userId}`, { json: userData }).json<User>();
   }
 
   static async deleteUser(userId: string): Promise<void> {

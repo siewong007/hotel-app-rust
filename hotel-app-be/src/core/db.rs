@@ -34,16 +34,27 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, sqlx::Error>
                     sqlx::query_scalar("SELECT value FROM system_settings WHERE key = 'timezone'")
                         .fetch_optional(&mut *conn)
                         .await?;
-                let tz = tz.unwrap_or_else(|| "UTC".to_string());
+                let tz = tz
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("UTC");
                 if !tz
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '/' || c == '_' || c == '+' || c == '-')
                 {
                     log::warn!("Invalid timezone value in system_settings: {}", tz);
                     conn.execute("SET timezone = 'UTC'").await?;
-                } else {
-                    conn.execute(sqlx::AssertSqlSafe(format!("SET timezone = '{}'", tz)))
-                        .await?;
+                } else if let Err(err) = conn
+                    .execute(sqlx::AssertSqlSafe(format!("SET timezone = '{}'", tz)))
+                    .await
+                {
+                    log::error!(
+                        "Failed to apply PostgreSQL timezone '{}': {}; falling back to UTC",
+                        tz,
+                        err
+                    );
+                    conn.execute("SET timezone = 'UTC'").await?;
                 }
                 // Bound every statement on this connection. Without it one
                 // slow query holds a pooled connection indefinitely (the pool

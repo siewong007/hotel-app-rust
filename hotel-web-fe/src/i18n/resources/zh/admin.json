@@ -654,6 +654,7 @@
     "fullAccess": "完全访问",
     "noDescription": "此角色暂无描述。",
     "ofPermissions": "/ 共 {{total}} 项权限",
+    "usersAssigned_zero": "已分配 0 个用户",
     "usersAssigned_other": "已分配 {{count}} 个用户",
     "coverage": "覆盖率",
     "rename": "重命名",

@@ -17,6 +17,8 @@ use crate::models::{
     BookingWithDetails, RoomCreateInput, RoomEventInput, RoomStatusUpdateInput,
     RoomTypeCreateInput, RoomTypeUpdateInput, RoomUpdateInput, SearchQuery,
 };
+use crate::modules::guest_booking::availability::{AvailabilityEvent, AvailabilityHub};
+use crate::modules::realtime::hub::DataChangeHub;
 use crate::modules::rooms::{models as rm, queries as rq, service as room_service};
 
 use super::auth::authenticate;
@@ -226,6 +228,8 @@ fn occupancy_pb(o: &rm::RoomCurrentOccupancy) -> pb::RoomOccupancy {
 pub struct RoomGrpc {
     pool: DbPool,
     idem: std::sync::Arc<IdempotencyCache>,
+    data_change_hub: Option<DataChangeHub>,
+    availability_hub: Option<AvailabilityHub>,
 }
 
 impl RoomGrpc {
@@ -233,6 +237,30 @@ impl RoomGrpc {
         Self {
             pool,
             idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: None,
+            availability_hub: None,
+        }
+    }
+
+    pub fn with_hubs(
+        pool: DbPool,
+        data_change_hub: DataChangeHub,
+        availability_hub: AvailabilityHub,
+    ) -> Self {
+        Self {
+            pool,
+            idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: Some(data_change_hub),
+            availability_hub: Some(availability_hub),
+        }
+    }
+
+    fn publish_change(&self) {
+        if let Some(ref hub) = self.data_change_hub {
+            hub.publish_data_changed("rooms");
+        }
+        if let Some(ref hub) = self.availability_hub {
+            hub.publish(AvailabilityEvent::room_inventory_changed());
         }
     }
 
@@ -332,41 +360,49 @@ impl RoomService for RoomGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("CreateRoom", &req.request_id, || async {
-                let r = req.room.clone().unwrap_or_default();
-                let price = c::money_to_f64(r.price_per_night.as_ref())
-                    .ok_or_else(|| Status::invalid_argument("room.price_per_night is required"))?;
-                // Compute before the struct literal — r.status() borrows all
-                // of r and can't run after fields move.
-                let status = (r.status() != pb::RoomStatus::Unspecified)
-                    .then(|| status_str(r.status()).to_string());
-                let input = RoomCreateInput {
-                    room_number: r.room_number,
-                    room_type: r.room_type,
-                    room_type_id: c::parse_name(&r.room_type_link, "roomTypes")?,
-                    price_per_night: price,
-                    custom_price: c::money_to_f64(r.custom_price.as_ref()),
-                    description: (!r.description.is_empty()).then_some(r.description),
-                    max_occupancy: r.max_occupancy,
-                    floor: r.floor,
-                    building: (!r.building.is_empty()).then_some(r.building),
-                    is_accessible: r.is_accessible,
-                    is_smoking: r.is_smoking,
-                    status,
-                };
-                let room = room_service::create_room_handler(
-                    State(self.pool.clone()),
-                    auth.user_id,
-                    Json(input),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::CreateRoomResponse {
-                    room: Some(room_pb(&room, &currency)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "CreateRoom",
+                &req.request_id,
+                &req,
+                || async {
+                    let r = req.room.clone().unwrap_or_default();
+                    let price = c::money_to_f64(r.price_per_night.as_ref()).ok_or_else(|| {
+                        Status::invalid_argument("room.price_per_night is required")
+                    })?;
+                    // Compute before the struct literal — r.status() borrows all
+                    // of r and can't run after fields move.
+                    let status = (r.status() != pb::RoomStatus::Unspecified)
+                        .then(|| status_str(r.status()).to_string());
+                    let input = RoomCreateInput {
+                        room_number: r.room_number,
+                        room_type: r.room_type,
+                        room_type_id: c::parse_name(&r.room_type_link, "roomTypes")?,
+                        price_per_night: price,
+                        custom_price: c::money_to_f64(r.custom_price.as_ref()),
+                        description: (!r.description.is_empty()).then_some(r.description),
+                        max_occupancy: r.max_occupancy,
+                        floor: r.floor,
+                        building: (!r.building.is_empty()).then_some(r.building),
+                        is_accessible: r.is_accessible,
+                        is_smoking: r.is_smoking,
+                        status,
+                    };
+                    let room = room_service::create_room_handler(
+                        State(self.pool.clone()),
+                        auth.user_id,
+                        Json(input),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::CreateRoomResponse {
+                        room: Some(room_pb(&room, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -380,57 +416,64 @@ impl RoomService for RoomGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("UpdateRoom", &req.request_id, || async {
-                let r = req.room.clone().unwrap_or_default();
-                let room_id = c::require_name(&r.name, "rooms")?;
-                let mut input = RoomUpdateInput {
-                    room_number: None,
-                    room_type: None,
-                    price_per_night: None,
-                    available: None,
-                    description: None,
-                    max_occupancy: None,
-                    notes: None,
-                    is_smoking: None,
-                };
-                for path in &req
-                    .update_mask
-                    .as_ref()
-                    .map(|m| m.paths.clone())
-                    .unwrap_or_default()
-                {
-                    match path.as_str() {
-                        "room_number" => input.room_number = Some(r.room_number.clone()),
-                        "room_type" => input.room_type = Some(r.room_type.clone()),
-                        "price_per_night" => {
-                            input.price_per_night = c::money_to_f64(r.price_per_night.as_ref())
-                        }
-                        "available" => input.available = Some(r.available),
-                        "description" => input.description = Some(r.description.clone()),
-                        "max_occupancy" => input.max_occupancy = Some(r.max_occupancy),
-                        "notes" => input.notes = Some(r.notes.clone()),
-                        "is_smoking" => input.is_smoking = r.is_smoking,
-                        other => {
-                            return Err(Status::invalid_argument(format!(
-                                "update_mask contains unsupported field '{other}'"
-                            )));
+            .run(
+                auth.user_id,
+                "UpdateRoom",
+                &req.request_id,
+                &req,
+                || async {
+                    let r = req.room.clone().unwrap_or_default();
+                    let room_id = c::require_name(&r.name, "rooms")?;
+                    let mut input = RoomUpdateInput {
+                        room_number: None,
+                        room_type: None,
+                        price_per_night: None,
+                        available: None,
+                        description: None,
+                        max_occupancy: None,
+                        notes: None,
+                        is_smoking: None,
+                    };
+                    for path in &req
+                        .update_mask
+                        .as_ref()
+                        .map(|m| m.paths.clone())
+                        .unwrap_or_default()
+                    {
+                        match path.as_str() {
+                            "room_number" => input.room_number = Some(r.room_number.clone()),
+                            "room_type" => input.room_type = Some(r.room_type.clone()),
+                            "price_per_night" => {
+                                input.price_per_night = c::money_to_f64(r.price_per_night.as_ref())
+                            }
+                            "available" => input.available = Some(r.available),
+                            "description" => input.description = Some(r.description.clone()),
+                            "max_occupancy" => input.max_occupancy = Some(r.max_occupancy),
+                            "notes" => input.notes = Some(r.notes.clone()),
+                            "is_smoking" => input.is_smoking = r.is_smoking,
+                            other => {
+                                return Err(Status::invalid_argument(format!(
+                                    "update_mask contains unsupported field '{other}'"
+                                )));
+                            }
                         }
                     }
-                }
-                let room = room_service::update_room_handler(
-                    State(self.pool.clone()),
-                    auth.user_id,
-                    Path(room_id),
-                    Json(input),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::UpdateRoomResponse {
-                    room: Some(room_pb(&room, &currency)),
-                }))
-            })
+                    let room = room_service::update_room_handler(
+                        State(self.pool.clone()),
+                        auth.user_id,
+                        Path(room_id),
+                        Json(input),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::UpdateRoomResponse {
+                        room: Some(room_pb(&room, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -444,17 +487,24 @@ impl RoomService for RoomGrpc {
             .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("DeleteRoom", &req.request_id, || async {
-                let room_id = c::require_name(&req.name, "rooms")?;
-                let _ = room_service::delete_room_handler(
-                    State(self.pool.clone()),
-                    auth.user_id,
-                    Path(room_id),
-                )
-                .await
-                .map_err(to_status)?;
-                Ok(Response::new(pb::DeleteRoomResponse {}))
-            })
+            .run(
+                auth.user_id,
+                "DeleteRoom",
+                &req.request_id,
+                &req,
+                || async {
+                    let room_id = c::require_name(&req.name, "rooms")?;
+                    let _ = room_service::delete_room_handler(
+                        State(self.pool.clone()),
+                        auth.user_id,
+                        Path(room_id),
+                    )
+                    .await
+                    .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::DeleteRoomResponse {}))
+                },
+            )
             .await
     }
 
@@ -463,42 +513,54 @@ impl RoomService for RoomGrpc {
         request: Request<pb::UpdateRoomStatusRequest>,
     ) -> Result<Response<pb::UpdateRoomStatusResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("UpdateRoomStatus", &req.request_id, || async {
-                let status = status_str(req.status());
-                if status.is_empty() {
-                    return Err(Status::invalid_argument("status is required"));
-                }
-                let input = RoomStatusUpdateInput {
-                    status: status.to_string(),
-                    reason: (!req.reason.is_empty()).then(|| req.reason.clone()),
-                    notes: (!req.notes.is_empty()).then(|| req.notes.clone()),
-                    reserved_start_date: c::date_to_ymd(req.reserved_start_date.as_ref())?,
-                    reserved_end_date: c::date_to_ymd(req.reserved_end_date.as_ref())?,
-                    maintenance_start_date: c::date_to_ymd(req.maintenance_start_date.as_ref())?,
-                    maintenance_end_date: c::date_to_ymd(req.maintenance_end_date.as_ref())?,
-                    cleaning_start_date: c::date_to_ymd(req.cleaning_start_date.as_ref())?,
-                    cleaning_end_date: c::date_to_ymd(req.cleaning_end_date.as_ref())?,
-                    target_room_id: c::parse_name(&req.target_room, "rooms")?,
-                    booking_id: c::parse_name(&req.booking, "bookings")?,
-                    guest_id: c::parse_name(&req.guest, "guests")?,
-                    reward_id: c::parse_name(&req.reward, "rewards")?,
-                };
-                let room = room_service::update_room_status_handler(
-                    State(self.pool.clone()),
-                    Path(c::require_name(&req.name, "rooms")?),
-                    auth.headers.clone(),
-                    Json(input),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::UpdateRoomStatusResponse {
-                    room: Some(room_pb(&room, &currency)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "UpdateRoomStatus",
+                &req.request_id,
+                &req,
+                || async {
+                    let status = status_str(req.status());
+                    if status.is_empty() {
+                        return Err(Status::invalid_argument("status is required"));
+                    }
+                    let input = RoomStatusUpdateInput {
+                        status: status.to_string(),
+                        reason: (!req.reason.is_empty()).then(|| req.reason.clone()),
+                        notes: (!req.notes.is_empty()).then(|| req.notes.clone()),
+                        reserved_start_date: c::date_to_ymd(req.reserved_start_date.as_ref())?,
+                        reserved_end_date: c::date_to_ymd(req.reserved_end_date.as_ref())?,
+                        maintenance_start_date: c::date_to_ymd(
+                            req.maintenance_start_date.as_ref(),
+                        )?,
+                        maintenance_end_date: c::date_to_ymd(req.maintenance_end_date.as_ref())?,
+                        cleaning_start_date: c::date_to_ymd(req.cleaning_start_date.as_ref())?,
+                        cleaning_end_date: c::date_to_ymd(req.cleaning_end_date.as_ref())?,
+                        target_room_id: c::parse_name(&req.target_room, "rooms")?,
+                        booking_id: c::parse_name(&req.booking, "bookings")?,
+                        guest_id: c::parse_name(&req.guest, "guests")?,
+                        reward_id: c::parse_name(&req.reward, "rewards")?,
+                    };
+                    let room = room_service::update_room_status_handler(
+                        State(self.pool.clone()),
+                        Path(c::require_name(&req.name, "rooms")?),
+                        auth.headers.clone(),
+                        Json(input),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::UpdateRoomStatusResponse {
+                        room: Some(room_pb(&room, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -507,22 +569,32 @@ impl RoomService for RoomGrpc {
         request: Request<pb::EndRoomMaintenanceRequest>,
     ) -> Result<Response<pb::EndRoomMaintenanceResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("EndRoomMaintenance", &req.request_id, || async {
-                let room = room_service::end_maintenance_handler(
-                    State(self.pool.clone()),
-                    Path(c::require_name(&req.name, "rooms")?),
-                    auth.headers.clone(),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::EndRoomMaintenanceResponse {
-                    room: Some(room_pb(&room, &currency)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "EndRoomMaintenance",
+                &req.request_id,
+                &req,
+                || async {
+                    let room = room_service::end_maintenance_handler(
+                        State(self.pool.clone()),
+                        Path(c::require_name(&req.name, "rooms")?),
+                        auth.headers.clone(),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::EndRoomMaintenanceResponse {
+                        room: Some(room_pb(&room, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -531,43 +603,53 @@ impl RoomService for RoomGrpc {
         request: Request<pb::EndRoomCleaningRequest>,
     ) -> Result<Response<pb::EndRoomCleaningResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("EndRoomCleaning", &req.request_id, || async {
-                let room_id = c::require_name(&req.name, "rooms")?;
-                // Service returns a JSON envelope — audit + transition side
-                // effects are inside, so unwrap the envelope here.
-                let v = room_service::end_cleaning_handler(
-                    State(self.pool.clone()),
-                    Path(room_id),
-                    auth.headers.clone(),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                let room = rq::fetch_room_by_id(&self.pool, room_id)
+            .run(
+                auth.user_id,
+                "EndRoomCleaning",
+                &req.request_id,
+                &req,
+                || async {
+                    let room_id = c::require_name(&req.name, "rooms")?;
+                    // Service returns a JSON envelope — audit + transition side
+                    // effects are inside, so unwrap the envelope here.
+                    let v = room_service::end_cleaning_handler(
+                        State(self.pool.clone()),
+                        Path(room_id),
+                        auth.headers.clone(),
+                    )
                     .await
-                    .map_err(to_status)?;
-                Ok(Response::new(pb::EndRoomCleaningResponse {
-                    room: Some(room_pb(&room, &currency)),
-                    previous_status: status_enum(
-                        v.get("previous_status")
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    let room = rq::fetch_room_by_id(&self.pool, room_id)
+                        .await
+                        .map_err(to_status)?;
+                    Ok(Response::new(pb::EndRoomCleaningResponse {
+                        room: Some(room_pb(&room, &currency)),
+                        previous_status: status_enum(
+                            v.get("previous_status")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or(""),
+                        )
+                        .into(),
+                        new_status: status_enum(
+                            v.get("new_status").and_then(|s| s.as_str()).unwrap_or(""),
+                        )
+                        .into(),
+                        message: v
+                            .get("message")
                             .and_then(|s| s.as_str())
-                            .unwrap_or(""),
-                    )
-                    .into(),
-                    new_status: status_enum(
-                        v.get("new_status").and_then(|s| s.as_str()).unwrap_or(""),
-                    )
-                    .into(),
-                    message: v
-                        .get("message")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                }))
-            })
+                            .unwrap_or_default()
+                            .to_string(),
+                    }))
+                },
+            )
             .await
     }
 
@@ -576,56 +658,66 @@ impl RoomService for RoomGrpc {
         request: Request<pb::SyncRoomStatusesRequest>,
     ) -> Result<Response<pb::SyncRoomStatusesResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("SyncRoomStatuses", &req.request_id, || async {
-                let v = room_service::sync_room_statuses_handler(
-                    State(self.pool.clone()),
-                    auth.headers.clone(),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let changes = v
-                    .get("changes")
-                    .and_then(|c| c.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|c| pb::RoomStatusSyncChange {
-                        room: c::room_name(
-                            c.get("room_id")
-                                .and_then(|i| i.as_i64())
-                                .unwrap_or_default(),
-                        ),
-                        room_number: c
-                            .get("room_number")
+            .run(
+                auth.user_id,
+                "SyncRoomStatuses",
+                &req.request_id,
+                &req,
+                || async {
+                    let v = room_service::sync_room_statuses_handler(
+                        State(self.pool.clone()),
+                        auth.headers.clone(),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let changes = v
+                        .get("changes")
+                        .and_then(|c| c.as_array())
+                        .cloned()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|c| pb::RoomStatusSyncChange {
+                            room: c::room_name(
+                                c.get("room_id")
+                                    .and_then(|i| i.as_i64())
+                                    .unwrap_or_default(),
+                            ),
+                            room_number: c
+                                .get("room_number")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            old_status: status_enum(
+                                c.get("old_status").and_then(|s| s.as_str()).unwrap_or(""),
+                            )
+                            .into(),
+                            new_status: status_enum(
+                                c.get("new_status").and_then(|s| s.as_str()).unwrap_or(""),
+                            )
+                            .into(),
+                        })
+                        .collect();
+                    Ok(Response::new(pb::SyncRoomStatusesResponse {
+                        synced_count: v
+                            .get("synced_count")
+                            .and_then(|n| n.as_i64())
+                            .unwrap_or_default(),
+                        changes,
+                        message: v
+                            .get("message")
                             .and_then(|s| s.as_str())
                             .unwrap_or_default()
                             .to_string(),
-                        old_status: status_enum(
-                            c.get("old_status").and_then(|s| s.as_str()).unwrap_or(""),
-                        )
-                        .into(),
-                        new_status: status_enum(
-                            c.get("new_status").and_then(|s| s.as_str()).unwrap_or(""),
-                        )
-                        .into(),
-                    })
-                    .collect();
-                Ok(Response::new(pb::SyncRoomStatusesResponse {
-                    synced_count: v
-                        .get("synced_count")
-                        .and_then(|n| n.as_i64())
-                        .unwrap_or_default(),
-                    changes,
-                    message: v
-                        .get("message")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                }))
-            })
+                    }))
+                },
+            )
             .await
     }
 
@@ -740,33 +832,43 @@ impl RoomService for RoomGrpc {
         request: Request<pb::CreateRoomEventRequest>,
     ) -> Result<Response<pb::CreateRoomEventResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("CreateRoomEvent", &req.request_id, || async {
-                let e = req.event.clone().unwrap_or_default();
-                if e.event_type.is_empty() {
-                    return Err(Status::invalid_argument("event.event_type is required"));
-                }
-                let input = RoomEventInput {
-                    event_type: e.event_type,
-                    notes: (!e.notes.is_empty()).then(|| e.notes.clone()),
-                    status: e.status,
-                    scheduled_date: c::ts_to_rfc3339(e.scheduled_date.as_ref())?,
-                    priority: (!e.priority.is_empty()).then(|| e.priority.clone()),
-                };
-                let event = room_service::create_room_event_handler(
-                    State(self.pool.clone()),
-                    Path(c::require_name(&req.parent, "rooms")?),
-                    auth.headers.clone(),
-                    Json(input),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                Ok(Response::new(pb::CreateRoomEventResponse {
-                    event: Some(event_pb(&event)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "CreateRoomEvent",
+                &req.request_id,
+                &req,
+                || async {
+                    let e = req.event.clone().unwrap_or_default();
+                    if e.event_type.is_empty() {
+                        return Err(Status::invalid_argument("event.event_type is required"));
+                    }
+                    let input = RoomEventInput {
+                        event_type: e.event_type,
+                        notes: (!e.notes.is_empty()).then(|| e.notes.clone()),
+                        status: e.status,
+                        scheduled_date: c::ts_to_ymd(e.scheduled_date.as_ref())?,
+                        priority: (!e.priority.is_empty()).then(|| e.priority.clone()),
+                    };
+                    let event = room_service::create_room_event_handler(
+                        State(self.pool.clone()),
+                        Path(c::require_name(&req.parent, "rooms")?),
+                        auth.headers.clone(),
+                        Json(input),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    Ok(Response::new(pb::CreateRoomEventResponse {
+                        event: Some(event_pb(&event)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -823,64 +925,75 @@ impl RoomService for RoomGrpc {
         request: Request<pb::ExecuteRoomChangeRequest>,
     ) -> Result<Response<pb::ExecuteRoomChangeResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "bookings:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("ExecuteRoomChange", &req.request_id, || async {
-                let target = c::require_name(&req.target_room, "rooms")?;
-                let mut body = serde_json::json!({ "target_room_id": target });
-                if !req.reason.is_empty() {
-                    body["reason"] = serde_json::Value::String(req.reason.clone());
-                }
-                if let Some(m) = &req.room_rate_override {
-                    body["room_rate_override"] = serde_json::json!(m.amount_minor as f64 / 100.0);
-                }
-                let v = room_service::execute_room_change_handler(
-                    State(self.pool.clone()),
-                    Path(c::require_name(&req.name, "rooms")?),
-                    auth.headers.clone(),
-                    Json(body),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                Ok(Response::new(pb::ExecuteRoomChangeResponse {
-                    from_room: c::room_name(
-                        v.get("from_room_id")
-                            .and_then(|i| i.as_i64())
-                            .unwrap_or_default(),
-                    ),
-                    from_room_number: v
-                        .get("from_room_number")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    to_room: c::room_name(
-                        v.get("to_room_id")
-                            .and_then(|i| i.as_i64())
-                            .unwrap_or_default(),
-                    ),
-                    to_room_number: v
-                        .get("to_room_number")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    booking: c::booking_name(
-                        v.get("booking_id")
-                            .and_then(|i| i.as_i64())
-                            .unwrap_or_default(),
-                    ),
-                    reason: v
-                        .get("reason")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    message: v
-                        .get("message")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "ExecuteRoomChange",
+                &req.request_id,
+                &req,
+                || async {
+                    let target = c::require_name(&req.target_room, "rooms")?;
+                    let mut body = serde_json::json!({ "target_room_id": target });
+                    if !req.reason.is_empty() {
+                        body["reason"] = serde_json::Value::String(req.reason.clone());
+                    }
+                    if let Some(m) = &req.room_rate_override {
+                        body["room_rate_override"] =
+                            serde_json::json!(m.amount_minor as f64 / 100.0);
+                    }
+                    let v = room_service::execute_room_change_handler(
+                        State(self.pool.clone()),
+                        Path(c::require_name(&req.name, "rooms")?),
+                        auth.headers.clone(),
+                        Json(body),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    Ok(Response::new(pb::ExecuteRoomChangeResponse {
+                        from_room: c::room_name(
+                            v.get("from_room_id")
+                                .and_then(|i| i.as_i64())
+                                .unwrap_or_default(),
+                        ),
+                        from_room_number: v
+                            .get("from_room_number")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        to_room: c::room_name(
+                            v.get("to_room_id")
+                                .and_then(|i| i.as_i64())
+                                .unwrap_or_default(),
+                        ),
+                        to_room_number: v
+                            .get("to_room_number")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        booking: c::booking_name(
+                            v.get("booking_id")
+                                .and_then(|i| i.as_i64())
+                                .unwrap_or_default(),
+                        ),
+                        reason: v
+                            .get("reason")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        message: v
+                            .get("message")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                    }))
+                },
+            )
             .await
     }
 
@@ -895,7 +1008,7 @@ impl RoomService for RoomGrpc {
         let req = request.into_inner();
         // REST `limit` defaults to 50; page_size<=0 keeps that default.
         let limit = if req.page_size > 0 {
-            req.page_size as i64
+            i64::from(req.page_size).clamp(1, 500)
         } else {
             50
         };
@@ -1087,6 +1200,8 @@ impl RoomService for RoomGrpc {
 pub struct RoomTypeGrpc {
     pool: DbPool,
     idem: std::sync::Arc<IdempotencyCache>,
+    data_change_hub: Option<DataChangeHub>,
+    availability_hub: Option<AvailabilityHub>,
 }
 
 impl RoomTypeGrpc {
@@ -1094,6 +1209,30 @@ impl RoomTypeGrpc {
         Self {
             pool,
             idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: None,
+            availability_hub: None,
+        }
+    }
+
+    pub fn with_hubs(
+        pool: DbPool,
+        data_change_hub: DataChangeHub,
+        availability_hub: AvailabilityHub,
+    ) -> Self {
+        Self {
+            pool,
+            idem: std::sync::Arc::new(IdempotencyCache::default()),
+            data_change_hub: Some(data_change_hub),
+            availability_hub: Some(availability_hub),
+        }
+    }
+
+    fn publish_change(&self) {
+        if let Some(ref hub) = self.data_change_hub {
+            hub.publish_data_changed("rooms");
+        }
+        if let Some(ref hub) = self.availability_hub {
+            hub.publish(AvailabilityEvent::room_inventory_changed());
         }
     }
 
@@ -1161,38 +1300,48 @@ impl RoomTypeService for RoomTypeGrpc {
         request: Request<pb::CreateRoomTypeRequest>,
     ) -> Result<Response<pb::CreateRoomTypeResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:write")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("CreateRoomType", &req.request_id, || async {
-                let t = req.room_type.clone().unwrap_or_default();
-                let input = RoomTypeCreateInput {
-                    name: t.display_name,
-                    code: t.code,
-                    description: (!t.description.is_empty()).then_some(t.description),
-                    base_price: c::money_to_f64(t.base_price.as_ref()).unwrap_or_default(),
-                    weekday_rate: c::money_to_f64(t.weekday_rate.as_ref()),
-                    weekend_rate: c::money_to_f64(t.weekend_rate.as_ref()),
-                    max_occupancy: (t.max_occupancy != 0).then_some(t.max_occupancy),
-                    bed_type: (!t.bed_type.is_empty()).then_some(t.bed_type),
-                    bed_count: t.bed_count,
-                    allows_extra_bed: (t.allows_extra_bed).then_some(t.allows_extra_bed),
-                    max_extra_beds: (t.max_extra_beds != 0).then_some(t.max_extra_beds),
-                    extra_bed_charge: c::money_to_f64(t.extra_bed_charge.as_ref()),
-                    sort_order: (t.sort_order != 0).then_some(t.sort_order),
-                };
-                let rt = room_service::create_room_type_handler(
-                    State(self.pool.clone()),
-                    auth.headers.clone(),
-                    Json(input),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::CreateRoomTypeResponse {
-                    room_type: Some(room_type_pb(&rt, &currency)),
-                }))
-            })
+            .run(
+                auth.user_id,
+                "CreateRoomType",
+                &req.request_id,
+                &req,
+                || async {
+                    let t = req.room_type.clone().unwrap_or_default();
+                    let input = RoomTypeCreateInput {
+                        name: t.display_name,
+                        code: t.code,
+                        description: (!t.description.is_empty()).then_some(t.description),
+                        base_price: c::money_to_f64(t.base_price.as_ref()).unwrap_or_default(),
+                        weekday_rate: c::money_to_f64(t.weekday_rate.as_ref()),
+                        weekend_rate: c::money_to_f64(t.weekend_rate.as_ref()),
+                        max_occupancy: (t.max_occupancy != 0).then_some(t.max_occupancy),
+                        bed_type: (!t.bed_type.is_empty()).then_some(t.bed_type),
+                        bed_count: t.bed_count,
+                        allows_extra_bed: (t.allows_extra_bed).then_some(t.allows_extra_bed),
+                        max_extra_beds: (t.max_extra_beds != 0).then_some(t.max_extra_beds),
+                        extra_bed_charge: c::money_to_f64(t.extra_bed_charge.as_ref()),
+                        sort_order: (t.sort_order != 0).then_some(t.sort_order),
+                    };
+                    let rt = room_service::create_room_type_handler(
+                        State(self.pool.clone()),
+                        auth.headers.clone(),
+                        Json(input),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::CreateRoomTypeResponse {
+                        room_type: Some(room_type_pb(&rt, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -1201,77 +1350,90 @@ impl RoomTypeService for RoomTypeGrpc {
         request: Request<pb::UpdateRoomTypeRequest>,
     ) -> Result<Response<pb::UpdateRoomTypeResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:update")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("UpdateRoomType", &req.request_id, || async {
-                let t = req.room_type.clone().unwrap_or_default();
-                let id = c::require_name(&t.name, "roomTypes")?;
-                let mut input = RoomTypeUpdateInput {
-                    name: None,
-                    code: None,
-                    description: None,
-                    base_price: None,
-                    weekday_rate: None,
-                    weekend_rate: None,
-                    max_occupancy: None,
-                    bed_type: None,
-                    bed_count: None,
-                    allows_extra_bed: None,
-                    max_extra_beds: None,
-                    extra_bed_charge: None,
-                    is_active: None,
-                    sort_order: None,
-                    images: None,
-                };
-                for path in &req
-                    .update_mask
-                    .as_ref()
-                    .map(|m| m.paths.clone())
-                    .unwrap_or_default()
-                {
-                    match path.as_str() {
-                        "display_name" | "name" => input.name = Some(t.display_name.clone()),
-                        "code" => input.code = Some(t.code.clone()),
-                        "description" => input.description = Some(t.description.clone()),
-                        "base_price" => input.base_price = c::money_to_f64(t.base_price.as_ref()),
-                        "weekday_rate" => {
-                            input.weekday_rate = c::money_to_f64(t.weekday_rate.as_ref())
-                        }
-                        "weekend_rate" => {
-                            input.weekend_rate = c::money_to_f64(t.weekend_rate.as_ref())
-                        }
-                        "max_occupancy" => input.max_occupancy = Some(t.max_occupancy),
-                        "bed_type" => input.bed_type = Some(t.bed_type.clone()),
-                        "bed_count" => input.bed_count = t.bed_count,
-                        "allows_extra_bed" => input.allows_extra_bed = Some(t.allows_extra_bed),
-                        "max_extra_beds" => input.max_extra_beds = Some(t.max_extra_beds),
-                        "extra_bed_charge" => {
-                            input.extra_bed_charge = c::money_to_f64(t.extra_bed_charge.as_ref())
-                        }
-                        "is_active" => input.is_active = Some(t.is_active),
-                        "sort_order" => input.sort_order = Some(t.sort_order),
-                        "images" => input.images = Some(t.images.clone()),
-                        other => {
-                            return Err(Status::invalid_argument(format!(
-                                "update_mask contains unsupported field '{other}'"
-                            )));
+            .run(
+                auth.user_id,
+                "UpdateRoomType",
+                &req.request_id,
+                &req,
+                || async {
+                    let t = req.room_type.clone().unwrap_or_default();
+                    let id = c::require_name(&t.name, "roomTypes")?;
+                    let mut input = RoomTypeUpdateInput {
+                        name: None,
+                        code: None,
+                        description: None,
+                        base_price: None,
+                        weekday_rate: None,
+                        weekend_rate: None,
+                        max_occupancy: None,
+                        bed_type: None,
+                        bed_count: None,
+                        allows_extra_bed: None,
+                        max_extra_beds: None,
+                        extra_bed_charge: None,
+                        is_active: None,
+                        sort_order: None,
+                        images: None,
+                    };
+                    for path in &req
+                        .update_mask
+                        .as_ref()
+                        .map(|m| m.paths.clone())
+                        .unwrap_or_default()
+                    {
+                        match path.as_str() {
+                            "display_name" | "name" => input.name = Some(t.display_name.clone()),
+                            "code" => input.code = Some(t.code.clone()),
+                            "description" => input.description = Some(t.description.clone()),
+                            "base_price" => {
+                                input.base_price = c::money_to_f64(t.base_price.as_ref())
+                            }
+                            "weekday_rate" => {
+                                input.weekday_rate = c::money_to_f64(t.weekday_rate.as_ref())
+                            }
+                            "weekend_rate" => {
+                                input.weekend_rate = c::money_to_f64(t.weekend_rate.as_ref())
+                            }
+                            "max_occupancy" => input.max_occupancy = Some(t.max_occupancy),
+                            "bed_type" => input.bed_type = Some(t.bed_type.clone()),
+                            "bed_count" => input.bed_count = t.bed_count,
+                            "allows_extra_bed" => input.allows_extra_bed = Some(t.allows_extra_bed),
+                            "max_extra_beds" => input.max_extra_beds = Some(t.max_extra_beds),
+                            "extra_bed_charge" => {
+                                input.extra_bed_charge =
+                                    c::money_to_f64(t.extra_bed_charge.as_ref())
+                            }
+                            "is_active" => input.is_active = Some(t.is_active),
+                            "sort_order" => input.sort_order = Some(t.sort_order),
+                            "images" => input.images = Some(t.images.clone()),
+                            other => {
+                                return Err(Status::invalid_argument(format!(
+                                    "update_mask contains unsupported field '{other}'"
+                                )));
+                            }
                         }
                     }
-                }
-                let rt = room_service::update_room_type_handler(
-                    State(self.pool.clone()),
-                    Path(id),
-                    auth.headers.clone(),
-                    Json(input),
-                )
-                .await
-                .map_err(to_status)?
-                .0;
-                let currency = self.currency().await?;
-                Ok(Response::new(pb::UpdateRoomTypeResponse {
-                    room_type: Some(room_type_pb(&rt, &currency)),
-                }))
-            })
+                    let rt = room_service::update_room_type_handler(
+                        State(self.pool.clone()),
+                        Path(id),
+                        auth.headers.clone(),
+                        Json(input),
+                    )
+                    .await
+                    .map_err(to_status)?
+                    .0;
+                    self.publish_change();
+                    let currency = self.currency().await?;
+                    Ok(Response::new(pb::UpdateRoomTypeResponse {
+                        room_type: Some(room_type_pb(&rt, &currency)),
+                    }))
+                },
+            )
             .await
     }
 
@@ -1280,19 +1442,29 @@ impl RoomTypeService for RoomTypeGrpc {
         request: Request<pb::DeleteRoomTypeRequest>,
     ) -> Result<Response<pb::DeleteRoomTypeResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
+        check_permission(&self.pool, auth.user_id, "rooms:write")
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         self.idem
-            .run("DeleteRoomType", &req.request_id, || async {
-                let id = c::require_name(&req.name, "roomTypes")?;
-                let _ = room_service::delete_room_type_handler(
-                    State(self.pool.clone()),
-                    Path(id),
-                    auth.headers.clone(),
-                )
-                .await
-                .map_err(to_status)?;
-                Ok(Response::new(pb::DeleteRoomTypeResponse {}))
-            })
+            .run(
+                auth.user_id,
+                "DeleteRoomType",
+                &req.request_id,
+                &req,
+                || async {
+                    let id = c::require_name(&req.name, "roomTypes")?;
+                    let _ = room_service::delete_room_type_handler(
+                        State(self.pool.clone()),
+                        Path(id),
+                        auth.headers.clone(),
+                    )
+                    .await
+                    .map_err(to_status)?;
+                    self.publish_change();
+                    Ok(Response::new(pb::DeleteRoomTypeResponse {}))
+                },
+            )
             .await
     }
 }

@@ -48,8 +48,8 @@ services:
       - --set=ON_ERROR_STOP=1
       - --file=/opt/hotel-app/pg19_beta2.sql
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-patches:
+        condition: service_completed_successfully
     networks:
       - hotel-network
 

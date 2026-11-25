@@ -27,10 +27,7 @@ export class PaymentApprovalsService {
    * booking in one action.
    */
   static async approve(paymentId: number): Promise<PaymentActionResponse> {
-    return await withRetry(
-      () => api.put(`admin/payments/${paymentId}/approve`).json<PaymentActionResponse>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.put(`admin/payments/${paymentId}/approve`).json<PaymentActionResponse>();
   }
 
   /**
@@ -62,13 +59,9 @@ export class PaymentApprovalsService {
    * staff already moved the booking on by hand (e.g. confirmed it).
    */
   static async reject(paymentId: number, reason: string): Promise<PaymentActionResponse> {
-    return await withRetry(
-      () =>
-        api
-          .put(`admin/payments/${paymentId}/reject`, { json: { reason } })
-          .json<PaymentActionResponse>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api
+      .put(`admin/payments/${paymentId}/reject`, { json: { reason } })
+      .json<PaymentActionResponse>();
   }
 
   /**

@@ -1,8 +1,7 @@
 // Parity check for the hand-maintained copies of the same logical lists:
 // hotel-web-fe runtimeApi.ts ROOT_API_PREFIXES, vite.config.ts PROXY_PREFIXES,
-// src-tauri commands.rs ALLOWED_ORIGINS env, and capabilities/default.json
-// remote.urls. They drift independently — this test turns the KEEP IN SYNC
-// comments into a check. Run: bun run test:scripts (or `bun test scripts/`).
+// deploy/Caddyfile @backend prefixes, src-tauri commands.rs PROD/DEV_ALLOWED_ORIGINS,
+// and capabilities/dev.json remote.urls. Run: bun run test:scripts (or `bun test scripts/`).
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -25,17 +24,16 @@ const listLiteral = (source, name) => {
   return items;
 };
 
-const allowedOrigins = () => {
+const originsConstant = (name) => {
   const commands = read('hotel-desktop/src-tauri/src/commands.rs');
-  const match = commands.match(/"ALLOWED_ORIGINS",\s*"([^"]+)"/);
-  if (!match) throw new Error('ALLOWED_ORIGINS env literal not found in commands.rs');
+  const match = commands.match(new RegExp(`const ${name}:\\s*&str\\s*=\\s*"([^"]+)"`));
+  if (!match) throw new Error(`${name} constant not found in commands.rs`);
   return match[1].split(',').map((s) => s.trim());
 };
 
-const capabilityRemoteOrigins = () => {
-  const caps = JSON.parse(read('hotel-desktop/src-tauri/capabilities/default.json'));
-  if (!caps.remote?.urls) throw new Error('remote.urls not found in capabilities/default.json');
-  return caps.remote.urls.map((u) => u.replace(/\/\*$/, ''));
+const capabilityRemoteOrigins = (rel) => {
+  const caps = JSON.parse(read(rel));
+  return caps.remote?.urls ? caps.remote.urls.map((u) => u.replace(/\/\*$/, '')) : [];
 };
 
 // The origin `tauri dev` actually loads in the webview — the single most
@@ -60,27 +58,59 @@ describe('origin/proxy parity', () => {
     expect([...root].sort()).toEqual([...proxy].sort());
   });
 
-  test('commands.rs ALLOWED_ORIGINS includes both tauri webview origins', () => {
-    const origins = allowedOrigins();
-    // The bundled app is unreachable without these — the webview origin differs
-    // per platform (tauri://localhost on macOS/Linux, http://tauri.localhost on
-    // Windows), so both must be in the sidecar CORS allow-list.
-    expect(origins).toContain('tauri://localhost');
-    expect(origins).toContain('http://tauri.localhost');
+  test('deploy/Caddyfile @backend matches vite PROXY_PREFIXES', () => {
+    const caddy = read('deploy/Caddyfile');
+    const match = caddy.match(/@backend path\s+([^\n]+)/);
+    if (!match) throw new Error('@backend path directive not found in deploy/Caddyfile');
+    const caddyPrefixes = match[1]
+      .trim()
+      .split(/\s+/)
+      .filter((p) => !/^\/(?:api|uploads|ws)$/.test(p))
+      .map((p) => (p === '/hotel.*' ? '/hotel.' : p.replace(/\/\*$/, '')));
+    const proxy = listLiteral(read('hotel-web-fe/vite.config.ts'), 'PROXY_PREFIXES');
+    expect([...new Set(caddyPrefixes)].sort()).toEqual([...proxy].sort());
   });
 
-  test('http origins in ALLOWED_ORIGINS == capability remote.urls (sans /*)', () => {
-    const origins = allowedOrigins().filter(isRemoteHttpOrigin).sort();
-    const remote = capabilityRemoteOrigins().filter(isRemoteHttpOrigin).sort();
-    // Anchor first: the equality below is symmetric, so a devUrl origin missing
-    // from BOTH lists would pass unnoticed. The origin `tauri dev` loads must
-    // be CORS-allowed *and* capability-granted.
+  test('PROD_ALLOWED_ORIGINS includes only tauri webview origins and no remote http origins', () => {
+    const prodOrigins = originsConstant('PROD_ALLOWED_ORIGINS');
+    expect(prodOrigins).toContain('tauri://localhost');
+    expect(prodOrigins).toContain('http://tauri.localhost');
+    expect(prodOrigins.filter(isRemoteHttpOrigin)).toEqual([]);
+
+    const defaultCaps = JSON.parse(read('hotel-desktop/src-tauri/capabilities/default.json'));
+    expect(defaultCaps.remote).toBeUndefined();
+
+    const prodConf = JSON.parse(read('hotel-desktop/src-tauri/tauri.conf.json'));
+    expect(prodConf.app?.security?.capabilities).toEqual(['default']);
+  });
+
+  test('dev http origins in DEV_ALLOWED_ORIGINS == capabilities/dev.json remote.urls (sans /*)', () => {
+    const devOrigins = originsConstant('DEV_ALLOWED_ORIGINS');
+    expect(devOrigins).toContain('tauri://localhost');
+    expect(devOrigins).toContain('http://tauri.localhost');
+
+    const devConf = JSON.parse(read('hotel-desktop/src-tauri/tauri.dev.conf.json'));
+    expect(devConf.app?.security?.capabilities).toEqual(['default', 'dev']);
+
+    const origins = devOrigins.filter(isRemoteHttpOrigin).sort();
+    const remote = capabilityRemoteOrigins('hotel-desktop/src-tauri/capabilities/dev.json')
+      .filter(isRemoteHttpOrigin)
+      .sort();
     const devOrigin = devUrlOrigin();
     expect(origins).toContain(devOrigin);
     expect(remote).toContain(devOrigin);
-    // Symmetric: an origin allowed by CORS but absent from remote.urls (or vice
-    // versa) means the webview either cannot reach the backend or is granted a
-    // capability for an origin that never occurs.
     expect(origins).toEqual(remote);
+  });
+
+  test('build-backend-sidecar.mjs hashes patch manifest.tsv and proto/', () => {
+    const script = read('hotel-desktop/scripts/build-backend-sidecar.mjs');
+    expect(script).toContain("'manifest.tsv'");
+    expect(script).toContain("'proto'");
+  });
+
+  test('package-portable.mjs stages sidecar under stripped runtime name', () => {
+    const script = read('hotel-desktop/scripts/package-portable.mjs');
+    expect(script).toContain('const runtimeSidecarName = `hotel-app-be${exeSuffix}`');
+    expect(script).toContain('[stagingDir, runtimeSidecarName]');
   });
 });

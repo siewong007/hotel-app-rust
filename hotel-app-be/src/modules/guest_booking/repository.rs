@@ -13,7 +13,7 @@ use crate::core::db::{DbPool, DbRow, DbTransaction, decimal_to_db, opt_decimal_t
 use crate::core::error::ApiError;
 use crate::models::row_mappers::{get_bool, get_decimal, get_opt_decimal};
 
-const ACTIVE_BOOKING_STATUSES: &str = "'reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation'";
+const ACTIVE_BOOKING_STATUSES: &str = "'reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary'";
 
 fn json_string_list(row: &DbRow, column: &str) -> Vec<String> {
     if let Ok(Some(value)) = row.try_get::<Option<serde_json::Value>, _>(column) {
@@ -63,7 +63,9 @@ fn confirmation_from_row(row: &DbRow) -> GuestBookingConfirmation {
         subtotal: get_decimal(row, "subtotal"),
         discount_amount: get_decimal(row, "discount_amount"),
         tax_amount: get_decimal(row, "tourism_tax_amount"),
-        total_amount: get_decimal(row, "total_amount") + get_decimal(row, "tourism_tax_amount"),
+        total_amount: get_decimal(row, "total_amount")
+            + get_decimal(row, "tourism_tax_amount")
+            + get_decimal(row, "extra_bed_charge"),
         created_at: row.try_get("created_at").unwrap_or_else(|_| Utc::now()),
         smoking_preference: row
             .try_get::<Option<String>, _>("smoking_preference")
@@ -180,7 +182,7 @@ impl GuestBookingRepository {
                     WHERE r.room_type_id = rt.id AND r.is_active = true
                       AND COALESCE(r.status, 'available') NOT IN ('maintenance', 'out_of_order')
                       AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id
-                        AND b.status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation')
+                        AND b.status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')
                         AND b.check_in_date < d.stay_date + 1 AND b.check_out_date > d.stay_date)
                 ) avail ON true
                 LEFT JOIN online_inventory_allocations a ON a.room_type_id = rt.id AND a.stay_date = d.stay_date

@@ -142,14 +142,17 @@ fn pricing_rule_values(
     let effective_from = parse_date(&input.effective_from, "effective_from")?;
     let effective_to = parse_opt_date(input.effective_to.as_ref(), "effective_to")?;
     validate_window(effective_from, effective_to)?;
-    let min_price = input
-        .min_price
-        .and_then(Decimal::from_f64_retain)
-        .filter(|v| *v >= Decimal::ZERO);
-    let max_price = input
-        .max_price
-        .and_then(Decimal::from_f64_retain)
-        .filter(|v| *v >= Decimal::ZERO);
+    let parse_non_neg_price =
+        |raw: Option<f64>, field: &str| -> Result<Option<Decimal>, ApiError> {
+            raw.map(|v| {
+                Decimal::from_f64_retain(v)
+                    .filter(|d| *d >= Decimal::ZERO)
+                    .ok_or_else(|| ApiError::BadRequest(format!("{field} must be non-negative")))
+            })
+            .transpose()
+        };
+    let min_price = parse_non_neg_price(input.min_price, "min_price")?;
+    let max_price = parse_non_neg_price(input.max_price, "max_price")?;
     if let (Some(min), Some(max)) = (min_price, max_price)
         && min > max
     {
@@ -191,10 +194,11 @@ fn pricing_rule_update_values(
             "Invalid rule_type '{rule_type}'"
         )));
     }
-    let value = input
-        .value
-        .and_then(Decimal::from_f64_retain)
-        .unwrap_or(current.value);
+    let value = match input.value {
+        Some(raw) => Decimal::from_f64_retain(raw)
+            .ok_or_else(|| ApiError::BadRequest("Invalid value".to_string()))?,
+        None => current.value,
+    };
     if value < Decimal::ZERO {
         return Err(ApiError::BadRequest(
             "value must be non-negative".to_string(),
@@ -204,6 +208,11 @@ fn pricing_rule_update_values(
         return Err(ApiError::BadRequest(
             "discount_percent value must be between 0 and 100".to_string(),
         ));
+    }
+    if matches!(rule_type.as_str(), "fixed_price" | "net_rate") && value <= Decimal::ZERO {
+        return Err(ApiError::BadRequest(format!(
+            "{rule_type} requires a positive nightly price"
+        )));
     }
     let effective_from = input
         .effective_from
@@ -216,12 +225,20 @@ fn pricing_rule_update_values(
         None => current.effective_to,
     };
     validate_window(effective_from, effective_to)?;
+    let parse_opt_non_neg = |raw: Option<f64>, field: &str| -> Result<Option<Decimal>, ApiError> {
+        raw.map(|v| {
+            Decimal::from_f64_retain(v)
+                .filter(|d| *d >= Decimal::ZERO)
+                .ok_or_else(|| ApiError::BadRequest(format!("{field} must be non-negative")))
+        })
+        .transpose()
+    };
     let min_price = match input.min_price {
-        Some(value) => value.and_then(Decimal::from_f64_retain),
+        Some(value) => parse_opt_non_neg(value, "min_price")?,
         None => current.min_price,
     };
     let max_price = match input.max_price {
-        Some(value) => value.and_then(Decimal::from_f64_retain),
+        Some(value) => parse_opt_non_neg(value, "max_price")?,
         None => current.max_price,
     };
     if let (Some(min), Some(max)) = (min_price, max_price)
@@ -646,15 +663,32 @@ pub async fn source_rate_for(
 ) -> Result<Decimal, ApiError> {
     let room_type = RateRepository::find_room_type(pool, room_type_id).await?;
     if let Some(plan_id) = rate_plan_id {
+        let day_of_week = date.weekday().num_days_from_monday() as i32;
         let band = sqlx::query_scalar::<_, Decimal>(
-            "SELECT price FROM room_rates
-             WHERE rate_plan_id = $1 AND room_type_id = $2
-               AND effective_from <= $3 AND (effective_to IS NULL OR effective_to >= $3)
-             ORDER BY id DESC LIMIT 1",
+            "SELECT rr.price
+             FROM room_rates rr
+             JOIN rate_plans rp ON rp.id = rr.rate_plan_id
+             WHERE rr.rate_plan_id = $1 AND rr.room_type_id = $2
+               AND rp.is_active = TRUE
+               AND rr.effective_from <= $3 AND (rr.effective_to IS NULL OR rr.effective_to >= $3)
+               AND (rp.valid_from IS NULL OR rp.valid_from <= $3)
+               AND (rp.valid_to IS NULL OR rp.valid_to >= $3)
+               AND NOT (COALESCE(rp.blackout_dates, '[]'::jsonb) ? $3::text)
+               AND (
+                   ($4 = 0 AND rp.applies_monday = TRUE) OR
+                   ($4 = 1 AND rp.applies_tuesday = TRUE) OR
+                   ($4 = 2 AND rp.applies_wednesday = TRUE) OR
+                   ($4 = 3 AND rp.applies_thursday = TRUE) OR
+                   ($4 = 4 AND rp.applies_friday = TRUE) OR
+                   ($4 = 5 AND rp.applies_saturday = TRUE) OR
+                   ($4 = 6 AND rp.applies_sunday = TRUE)
+               )
+             ORDER BY rr.id DESC LIMIT 1",
         )
         .bind(plan_id)
         .bind(room_type_id)
         .bind(date)
+        .bind(day_of_week)
         .fetch_optional(pool)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
@@ -959,4 +993,35 @@ async fn log_commission_event(
         },
     )
     .await;
+}
+
+#[cfg(test)]
+mod channel_pricing_validation_tests {
+    use super::*;
+
+    #[test]
+    fn pricing_rule_rejects_negative_bounds_and_non_positive_fixed_or_net_rates() {
+        let base = ChannelPricingRuleInput {
+            room_type_id: None,
+            rate_plan_id: None,
+            rule_type: "net_rate".to_string(),
+            value: 0.0,
+            effective_from: "2026-11-01".to_string(),
+            effective_to: None,
+            min_price: None,
+            max_price: None,
+            priority: None,
+            is_active: None,
+            reason: None,
+        };
+        assert!(pricing_rule_values(&base).is_err());
+
+        let neg_min = ChannelPricingRuleInput {
+            rule_type: "markup_fixed".to_string(),
+            value: 10.0,
+            min_price: Some(-5.0),
+            ..base
+        };
+        assert!(pricing_rule_values(&neg_min).is_err());
+    }
 }

@@ -17,6 +17,19 @@ import { paperTokens } from '../../../../theme';
 
 type FormatCurrency = (value: number) => string;
 
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeStatusClass(status: string): string {
+  return status.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+}
+
 // Write an HTML string into a throwaway iframe and trigger the print dialog,
 // then tear the iframe down once printing has had a chance to start.
 function printHtmlViaIframe(htmlContent: string): void {
@@ -68,7 +81,7 @@ export function printCompanyInvoice(invoiceNumber: string): void {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${t('finance:ledger.print.invoiceDocTitle', { number: invoiceNumber })}</title>
+        <title>${escapeHtml(t('finance:ledger.print.invoiceDocTitle', { number: invoiceNumber }))}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: Arial, sans-serif; padding: 20px; color: ${paperTokens.text}; }
@@ -156,7 +169,7 @@ export function downloadCompanyInvoice(params: {
     <html>
       <head>
         <meta charset="utf-8">
-        <title>Invoice - ${invoiceNumber}</title>
+        <title>Invoice - ${escapeHtml(invoiceNumber)}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: Arial, sans-serif; padding: 30px; color: ${paperTokens.text}; max-width: 800px; margin: 0 auto; }
@@ -198,46 +211,46 @@ export function downloadCompanyInvoice(params: {
       </head>
       <body>
         <div class="invoice-header">
-          <h1>${hotelSettings.hotel_name}</h1>
-          <p>${hotelSettings.hotel_address}</p>
-          <p>${t('common:field.phone')}: ${hotelSettings.hotel_phone} | ${t('common:field.email')}: ${hotelSettings.hotel_email}</p>
+          <h1>${escapeHtml(hotelSettings.hotel_name)}</h1>
+          <p>${escapeHtml(hotelSettings.hotel_address)}</p>
+          <p>${escapeHtml(t('common:field.phone'))}: ${escapeHtml(hotelSettings.hotel_phone)} | ${escapeHtml(t('common:field.email'))}: ${escapeHtml(hotelSettings.hotel_email)}</p>
         </div>
 
         <div class="title-bar">
-          <h2>${t('finance:ledger.invoice.docTitle')}</h2>
-          <span>#${invoiceNumber}</span>
+          <h2>${escapeHtml(t('finance:ledger.invoice.docTitle'))}</h2>
+          <span>#${escapeHtml(invoiceNumber)}</span>
         </div>
 
         <div class="meta">
           <div class="meta-left">
-            <h3>${t('finance:ledger.invoice.billTo')}</h3>
-            <p><strong>${invoiceCompany?.company_name || ''}</strong></p>
-            ${invoiceCompany?.registration_number ? `<p>${t('finance:ledger.invoice.regNo', { number: invoiceCompany.registration_number })}</p>` : ''}
-            ${invoiceCompany?.billing_address ? `<p>${invoiceCompany.billing_address}</p>` : ''}
+            <h3>${escapeHtml(t('finance:ledger.invoice.billTo'))}</h3>
+            <p><strong>${escapeHtml(invoiceCompany?.company_name || '')}</strong></p>
+            ${invoiceCompany?.registration_number ? `<p>${escapeHtml(t('finance:ledger.invoice.regNo', { number: invoiceCompany.registration_number }))}</p>` : ''}
+            ${invoiceCompany?.billing_address ? `<p>${escapeHtml(invoiceCompany.billing_address)}</p>` : ''}
             ${[invoiceCompany?.billing_city, invoiceCompany?.billing_state, invoiceCompany?.billing_postal_code].filter(Boolean).length > 0
-              ? `<p>${[invoiceCompany?.billing_city, invoiceCompany?.billing_state, invoiceCompany?.billing_postal_code].filter(Boolean).join(', ')}</p>` : ''}
-            ${invoiceCompany?.contact_person ? `<p><span class="label">${t('finance:ledger.invoice.attn')}:</span> <span class="value">${invoiceCompany.contact_person}</span></p>` : ''}
-            ${invoiceCompany?.contact_email ? `<p><span class="label">${t('common:field.email')}:</span> ${invoiceCompany.contact_email}</p>` : ''}
-            ${invoiceCompany?.contact_phone ? `<p><span class="label">${t('common:field.phone')}:</span> ${invoiceCompany.contact_phone}</p>` : ''}
+              ? `<p>${escapeHtml([invoiceCompany?.billing_city, invoiceCompany?.billing_state, invoiceCompany?.billing_postal_code].filter(Boolean).join(', '))}</p>` : ''}
+            ${invoiceCompany?.contact_person ? `<p><span class="label">${escapeHtml(t('finance:ledger.invoice.attn'))}:</span> <span class="value">${escapeHtml(invoiceCompany.contact_person)}</span></p>` : ''}
+            ${invoiceCompany?.contact_email ? `<p><span class="label">${escapeHtml(t('common:field.email'))}:</span> ${escapeHtml(invoiceCompany.contact_email)}</p>` : ''}
+            ${invoiceCompany?.contact_phone ? `<p><span class="label">${escapeHtml(t('common:field.phone'))}:</span> ${escapeHtml(invoiceCompany.contact_phone)}</p>` : ''}
           </div>
           <div class="meta-right">
-            <h3>${t('finance:ledger.invoice.docDetails')}</h3>
-            <div class="detail-row"><span class="dlabel">${t('finance:ledger.field.invoiceDate')}:</span><span class="dvalue">${formatDateForDisplay(invoiceDate)}</span></div>
-            <div class="detail-row"><span class="dlabel">${t('finance:ledger.field.dueDate')}:</span><span class="dvalue">${formatDateForDisplay(invoiceDueDate)}</span></div>
-            <div class="detail-row"><span class="dlabel">${t('finance:ledger.invoice.terms')}:</span><span class="dvalue">${t('finance:ledger.print.termsDays', { days: invoiceCompany?.payment_terms_days || 30 })}</span></div>
-            <div class="detail-row"><span class="dlabel">${t('common:field.status')}:</span><span class="dvalue ${isPositiveMoney(selectedLedgerBalanceDue) ? 'red' : 'green'}">${statusLabel(t, 'ledger', isPositiveMoney(selectedLedgerBalanceDue) ? 'outstanding' : 'settled')}</span></div>
+            <h3>${escapeHtml(t('finance:ledger.invoice.docDetails'))}</h3>
+            <div class="detail-row"><span class="dlabel">${escapeHtml(t('finance:ledger.field.invoiceDate'))}:</span><span class="dvalue">${escapeHtml(formatDateForDisplay(invoiceDate))}</span></div>
+            <div class="detail-row"><span class="dlabel">${escapeHtml(t('finance:ledger.field.dueDate'))}:</span><span class="dvalue">${escapeHtml(formatDateForDisplay(invoiceDueDate))}</span></div>
+            <div class="detail-row"><span class="dlabel">${escapeHtml(t('finance:ledger.invoice.terms'))}:</span><span class="dvalue">${escapeHtml(t('finance:ledger.print.termsDays', { days: invoiceCompany?.payment_terms_days || 30 }))}</span></div>
+            <div class="detail-row"><span class="dlabel">${escapeHtml(t('common:field.status'))}:</span><span class="dvalue ${isPositiveMoney(selectedLedgerBalanceDue) ? 'red' : 'green'}">${escapeHtml(statusLabel(t, 'ledger', isPositiveMoney(selectedLedgerBalanceDue) ? 'outstanding' : 'settled'))}</span></div>
           </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>${t('common:field.description')}</th>
-              <th>${t('common:field.date')}</th>
-              <th>${t('finance:ledger.field.room')}</th>
-              <th class="right">${t('common:field.amount')}</th>
-              <th class="right">${t('finance:ledger.col.paid')}</th>
-              <th class="right">${t('finance:ledger.col.balance')}</th>
+              <th>${escapeHtml(t('common:field.description'))}</th>
+              <th>${escapeHtml(t('common:field.date'))}</th>
+              <th>${escapeHtml(t('finance:ledger.field.room'))}</th>
+              <th class="right">${escapeHtml(t('common:field.amount'))}</th>
+              <th class="right">${escapeHtml(t('finance:ledger.col.paid'))}</th>
+              <th class="right">${escapeHtml(t('finance:ledger.col.balance'))}</th>
             </tr>
           </thead>
           <tbody>
@@ -248,32 +261,32 @@ export function downloadCompanyInvoice(params: {
                 const paidAmount = toMoneyNumber(ledger.paid_amount);
                 const balanceDue = toMoneyNumber(ledger.balance_due);
                 return `<tr class="${idx % 2 !== 0 ? 'alt' : ''}">
-                  <td>${ledger.description}</td>
-                  <td>${formatDateForDisplay(ledger.created_at)}</td>
-                  <td>${ledger.room_number || '-'}</td>
-                  <td class="right">${formatCurrency(amount)}</td>
-                  <td class="right green">${isPositiveMoney(paidAmount) ? formatCurrency(paidAmount) : '-'}</td>
-                  <td class="right ${isPositiveMoney(balanceDue) ? 'red' : 'green'}">${formatCurrency(balanceDue)}</td>
+                  <td>${escapeHtml(ledger.description)}</td>
+                  <td>${escapeHtml(formatDateForDisplay(ledger.created_at))}</td>
+                  <td>${escapeHtml(ledger.room_number || '-')}</td>
+                  <td class="right">${escapeHtml(formatCurrency(amount))}</td>
+                  <td class="right green">${isPositiveMoney(paidAmount) ? escapeHtml(formatCurrency(paidAmount)) : '-'}</td>
+                  <td class="right ${isPositiveMoney(balanceDue) ? 'red' : 'green'}">${escapeHtml(formatCurrency(balanceDue))}</td>
                 </tr>`;
               }).join('')}
             <tr class="subtotal">
-              <td colspan="3" style="text-align:right">${t('finance:ledger.invoice.subtotal')}:</td>
-              <td class="right">${formatCurrency(selectedLedgerTotal)}</td>
+              <td colspan="3" style="text-align:right">${escapeHtml(t('finance:ledger.invoice.subtotal'))}:</td>
+              <td class="right">${escapeHtml(formatCurrency(selectedLedgerTotal))}</td>
               <td colspan="2"></td>
             </tr>
             <tr class="total">
-              <td colspan="5" style="text-align:right">${t('finance:ledger.invoice.totalDue')}:</td>
-              <td class="right">${formatCurrency(selectedLedgerBalanceDue)}</td>
+              <td colspan="5" style="text-align:right">${escapeHtml(t('finance:ledger.invoice.totalDue'))}:</td>
+              <td class="right">${escapeHtml(formatCurrency(selectedLedgerBalanceDue))}</td>
             </tr>
           </tbody>
         </table>
 
-        ${invoiceNotes ? `<div class="notes"><strong>${t('common:field.notes')}:</strong><p>${invoiceNotes}</p></div>` : ''}
+        ${invoiceNotes ? `<div class="notes"><strong>${escapeHtml(t('common:field.notes'))}:</strong><p>${escapeHtml(invoiceNotes)}</p></div>` : ''}
 
         <div class="footer">
-          <p class="thanks">${t('finance:ledger.invoice.thanks')}</p>
-          <p>${t('finance:ledger.invoice.paymentTermsNote', { days: invoiceCompany?.payment_terms_days || 30 })}</p>
-          <p>${t('finance:ledger.invoice.generated')} | ${hotelSettings.hotel_name}</p>
+          <p class="thanks">${escapeHtml(t('finance:ledger.invoice.thanks'))}</p>
+          <p>${escapeHtml(t('finance:ledger.invoice.paymentTermsNote', { days: invoiceCompany?.payment_terms_days || 30 }))}</p>
+          <p>${escapeHtml(t('finance:ledger.invoice.generated'))} | ${escapeHtml(hotelSettings.hotel_name)}</p>
         </div>
       </body>
     </html>
@@ -312,7 +325,7 @@ export function printCompanyStatement(params: {
   const htmlContent = `
     <html>
       <head>
-        <title>${t('finance:ledger.print.statementDocTitle', { company: companyName })}</title>
+        <title>${escapeHtml(t('finance:ledger.print.statementDocTitle', { company: companyName }))}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
           .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
@@ -337,66 +350,66 @@ export function printCompanyStatement(params: {
       </head>
       <body>
         <div class="header">
-          <h1>${hotelSettings.hotel_name}</h1>
-          <h2>${t('finance:ledger.print.statementTitle')}</h2>
+          <h1>${escapeHtml(hotelSettings.hotel_name)}</h1>
+          <h2>${escapeHtml(t('finance:ledger.print.statementTitle'))}</h2>
         </div>
         <div class="company-info">
-          <h3>${companyName}</h3>
-          <p>${t('finance:ledger.print.statementDate')} ${formatHotelDate(new Date())}</p>
+          <h3>${escapeHtml(companyName)}</h3>
+          <p>${escapeHtml(t('finance:ledger.print.statementDate'))} ${escapeHtml(formatHotelDate(new Date()))}</p>
         </div>
         <div class="summary">
           <div class="summary-item">
-            <div class="label">${t('finance:ledger.print.totalEntries')}</div>
+            <div class="label">${escapeHtml(t('finance:ledger.print.totalEntries'))}</div>
             <div class="value">${entries.length}</div>
           </div>
           <div class="summary-item">
-            <div class="label">${t('finance:ledger.payment.totalAmount')}</div>
-            <div class="value">${formatCurrency(totalAmount)}</div>
+            <div class="label">${escapeHtml(t('finance:ledger.payment.totalAmount'))}</div>
+            <div class="value">${escapeHtml(formatCurrency(totalAmount))}</div>
           </div>
           <div class="summary-item">
-            <div class="label">${t('finance:ledger.print.totalPaid')}</div>
-            <div class="value" style="color: green;">${formatCurrency(totalPaid)}</div>
+            <div class="label">${escapeHtml(t('finance:ledger.print.totalPaid'))}</div>
+            <div class="value" style="color: green;">${escapeHtml(formatCurrency(totalPaid))}</div>
           </div>
           <div class="summary-item">
-            <div class="label">${t('finance:ledger.payment.balanceDue')}</div>
-            <div class="value" style="color: ${isPositiveMoney(totalBalance) ? 'red' : 'green'};">${formatCurrency(totalBalance)}</div>
+            <div class="label">${escapeHtml(t('finance:ledger.payment.balanceDue'))}</div>
+            <div class="value" style="color: ${isPositiveMoney(totalBalance) ? 'red' : 'green'};">${escapeHtml(formatCurrency(totalBalance))}</div>
           </div>
         </div>
         <table>
           <thead>
             <tr>
-              <th>${t('finance:ledger.field.invoiceNumber')}</th>
-              <th>${t('common:field.date')}</th>
-              <th>${t('bookings:details.checkIn')}</th>
-              <th>${t('bookings:details.checkOut')}</th>
-              <th>${t('common:field.description')}</th>
-              <th>${t('common:field.type')}</th>
-              <th class="text-right">${t('common:field.amount')}</th>
-              <th class="text-right">${t('finance:ledger.col.paid')}</th>
-              <th class="text-right">${t('finance:ledger.col.balance')}</th>
-              <th>${t('common:field.status')}</th>
+              <th>${escapeHtml(t('finance:ledger.field.invoiceNumber'))}</th>
+              <th>${escapeHtml(t('common:field.date'))}</th>
+              <th>${escapeHtml(t('bookings:details.checkIn'))}</th>
+              <th>${escapeHtml(t('bookings:details.checkOut'))}</th>
+              <th>${escapeHtml(t('common:field.description'))}</th>
+              <th>${escapeHtml(t('common:field.type'))}</th>
+              <th class="text-right">${escapeHtml(t('common:field.amount'))}</th>
+              <th class="text-right">${escapeHtml(t('finance:ledger.col.paid'))}</th>
+              <th class="text-right">${escapeHtml(t('finance:ledger.col.balance'))}</th>
+              <th>${escapeHtml(t('common:field.status'))}</th>
             </tr>
           </thead>
           <tbody>
             ${entries.map(entry => `
               <tr>
-                <td>${entry.invoice_number || '-'}</td>
-                <td>${formatDateForDisplay(entry.created_at)}</td>
-                <td>${formatDateForDisplay(entry.check_in_date)}</td>
-                <td>${formatDateForDisplay(entry.check_out_date)}</td>
-                <td>${entry.description}</td>
-                <td>${entry.expense_type}</td>
-                <td class="text-right">${formatCurrency(toMoneyNumber(entry.amount))}</td>
-                <td class="text-right">${formatCurrency(toMoneyNumber(entry.paid_amount))}</td>
-                <td class="text-right">${formatCurrency(toMoneyNumber(entry.balance_due))}</td>
-                <td class="status-${entry.status}">${statusLabel(t, 'ledger', entry.status)}</td>
+                <td>${escapeHtml(entry.invoice_number || '-')}</td>
+                <td>${escapeHtml(formatDateForDisplay(entry.created_at))}</td>
+                <td>${escapeHtml(formatDateForDisplay(entry.check_in_date))}</td>
+                <td>${escapeHtml(formatDateForDisplay(entry.check_out_date))}</td>
+                <td>${escapeHtml(entry.description)}</td>
+                <td>${escapeHtml(entry.expense_type)}</td>
+                <td class="text-right">${escapeHtml(formatCurrency(toMoneyNumber(entry.amount)))}</td>
+                <td class="text-right">${escapeHtml(formatCurrency(toMoneyNumber(entry.paid_amount)))}</td>
+                <td class="text-right">${escapeHtml(formatCurrency(toMoneyNumber(entry.balance_due)))}</td>
+                <td class="status-${sanitizeStatusClass(entry.status)}">${escapeHtml(statusLabel(t, 'ledger', entry.status))}</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
         <div class="footer">
-          <p>${t('finance:ledger.print.generatedOn', { date: formatHotelDateTime(new Date()) })}</p>
-          <p>${t('finance:ledger.print.appFooter', { hotel: hotelSettings.hotel_name })}</p>
+          <p>${escapeHtml(t('finance:ledger.print.generatedOn', { date: formatHotelDateTime(new Date()) }))}</p>
+          <p>${escapeHtml(t('finance:ledger.print.appFooter', { hotel: hotelSettings.hotel_name }))}</p>
         </div>
       </body>
     </html>
@@ -416,7 +429,7 @@ export function printSingleReceipt(params: {
   const htmlContent = `
     <html>
       <head>
-        <title>${t('finance:ledger.print.receiptDocTitle', { number: entry.invoice_number || entry.folio_number || `#${entry.id}` })}</title>
+        <title>${escapeHtml(t('finance:ledger.print.receiptDocTitle', { number: entry.invoice_number || entry.folio_number || `#${entry.id}` }))}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
           .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px; }
@@ -440,76 +453,76 @@ export function printSingleReceipt(params: {
       </head>
       <body>
         <div class="header">
-          <h1>${hotelSettings.hotel_name}</h1>
-          <h2>${t('finance:ledger.print.receiptTitle')}</h2>
+          <h1>${escapeHtml(hotelSettings.hotel_name)}</h1>
+          <h2>${escapeHtml(t('finance:ledger.print.receiptTitle'))}</h2>
         </div>
         <div class="receipt-info">
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.print.receiptNumber')}</span>
-            <span class="value">${entry.invoice_number || entry.folio_number || `#${entry.id}`}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.print.receiptNumber'))}</span>
+            <span class="value">${escapeHtml(entry.invoice_number || entry.folio_number || `#${entry.id}`)}</span>
           </div>
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.field.company')}</span>
-            <span class="value">${entry.company_name}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.field.company'))}</span>
+            <span class="value">${escapeHtml(entry.company_name)}</span>
           </div>
           <div class="receipt-row">
-            <span class="label">${t('common:field.description')}</span>
-            <span class="value">${entry.description}</span>
+            <span class="label">${escapeHtml(t('common:field.description'))}</span>
+            <span class="value">${escapeHtml(entry.description)}</span>
           </div>
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.field.expenseType')}</span>
-            <span class="value">${entry.expense_type}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.field.expenseType'))}</span>
+            <span class="value">${escapeHtml(entry.expense_type)}</span>
           </div>
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.print.dateCreated')}</span>
-            <span class="value">${formatDateForDisplay(entry.created_at)}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.print.dateCreated'))}</span>
+            <span class="value">${escapeHtml(formatDateForDisplay(entry.created_at))}</span>
           </div>
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.print.checkInDate')}</span>
-            <span class="value">${formatDateForDisplay(entry.check_in_date)}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.print.checkInDate'))}</span>
+            <span class="value">${escapeHtml(formatDateForDisplay(entry.check_in_date))}</span>
           </div>
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.print.checkOutDate')}</span>
-            <span class="value">${formatDateForDisplay(entry.check_out_date)}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.print.checkOutDate'))}</span>
+            <span class="value">${escapeHtml(formatDateForDisplay(entry.check_out_date))}</span>
           </div>
           ${entry.payment_date ? `
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.payment.date')}</span>
-            <span class="value">${formatDateForDisplay(entry.payment_date)}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.payment.date'))}</span>
+            <span class="value">${escapeHtml(formatDateForDisplay(entry.payment_date))}</span>
           </div>` : ''}
           ${entry.payment_method ? `
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.payment.method')}</span>
-            <span class="value">${entry.payment_method}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.payment.method'))}</span>
+            <span class="value">${escapeHtml(entry.payment_method)}</span>
           </div>` : ''}
           ${entry.payment_reference ? `
           <div class="receipt-row">
-            <span class="label">${t('finance:ledger.payment.reference')}</span>
-            <span class="value">${entry.payment_reference}</span>
+            <span class="label">${escapeHtml(t('finance:ledger.payment.reference'))}</span>
+            <span class="value">${escapeHtml(entry.payment_reference)}</span>
           </div>` : ''}
           <div class="receipt-row">
-            <span class="label">${t('common:field.status')}</span>
-            <span class="value"><span class="status status-${entry.status}">${statusLabel(t, 'ledger', entry.status)}</span></span>
+            <span class="label">${escapeHtml(t('common:field.status'))}</span>
+            <span class="value"><span class="status status-${sanitizeStatusClass(entry.status)}">${escapeHtml(statusLabel(t, 'ledger', entry.status))}</span></span>
           </div>
         </div>
         <div class="amount-section">
           <div class="amount-row">
-            <span>${t('finance:ledger.payment.totalAmount')}</span>
-            <span>${formatCurrency(toMoneyNumber(entry.amount))}</span>
+            <span>${escapeHtml(t('finance:ledger.payment.totalAmount'))}</span>
+            <span>${escapeHtml(formatCurrency(toMoneyNumber(entry.amount)))}</span>
           </div>
           <div class="amount-row">
-            <span>${t('finance:ledger.print.paidAmount')}</span>
-            <span style="color: green;">${formatCurrency(toMoneyNumber(entry.paid_amount))}</span>
+            <span>${escapeHtml(t('finance:ledger.print.paidAmount'))}</span>
+            <span style="color: green;">${escapeHtml(formatCurrency(toMoneyNumber(entry.paid_amount)))}</span>
           </div>
           <div class="amount-row total">
-            <span>${t('finance:ledger.payment.balanceDue')}</span>
-            <span style="color: ${isPositiveMoney(entry.balance_due) ? 'red' : 'green'};">${formatCurrency(toMoneyNumber(entry.balance_due))}</span>
+            <span>${escapeHtml(t('finance:ledger.payment.balanceDue'))}</span>
+            <span style="color: ${isPositiveMoney(entry.balance_due) ? 'red' : 'green'};">${escapeHtml(formatCurrency(toMoneyNumber(entry.balance_due)))}</span>
           </div>
         </div>
-        ${entry.notes ? `<div style="margin-top: 15px;"><strong>${t('common:field.notes')}:</strong> ${entry.notes}</div>` : ''}
+        ${entry.notes ? `<div style="margin-top: 15px;"><strong>${escapeHtml(t('common:field.notes'))}:</strong> ${escapeHtml(entry.notes)}</div>` : ''}
         <div class="footer">
-          <p>${t('finance:ledger.print.generatedOn', { date: formatHotelDateTime(new Date()) })}</p>
-          <p>${t('finance:ledger.print.appFooter', { hotel: hotelSettings.hotel_name })}</p>
+          <p>${escapeHtml(t('finance:ledger.print.generatedOn', { date: formatHotelDateTime(new Date()) }))}</p>
+          <p>${escapeHtml(t('finance:ledger.print.appFooter', { hotel: hotelSettings.hotel_name }))}</p>
         </div>
       </body>
     </html>

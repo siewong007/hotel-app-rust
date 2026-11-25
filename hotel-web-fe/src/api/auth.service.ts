@@ -136,8 +136,8 @@ export class AuthService {
     return await api.get('health').json<{ status: string }>();
   }
 
-  static async getWebSocketStatus(): Promise<{ status: string; protocol: string; endpoint: string; message: string }> {
-    return await api.get('ws/status').json<{ status: string; protocol: string; endpoint: string; message: string }>();
+  static async getWebSocketStatus(): Promise<{ status: string }> {
+    return await api.get('ws/status').json<{ status: string }>();
   }
 
   static async getAccessSnapshot(): Promise<AccessSnapshot> {

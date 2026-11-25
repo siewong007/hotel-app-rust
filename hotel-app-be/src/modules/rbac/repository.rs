@@ -512,22 +512,71 @@ impl RbacRepository {
     }
 
     pub async fn max_role_priority_for_user(pool: &DbPool, user_id: i64) -> Result<i64, ApiError> {
-        let query = r#"
-                SELECT COALESCE(MAX(r.priority), 0)::BIGINT
-                FROM roles r
-                JOIN user_roles ur ON r.id = ur.role_id
-                WHERE ur.user_id = $1
-            "#;
+        let query = format!(
+            "{} SELECT COALESCE(MAX(r.priority), 0)::BIGINT \
+             FROM roles r \
+             INNER JOIN effective_roles er ON er.role_id = r.id",
+            crate::core::rbac_cache::EFFECTIVE_ROLES_CTE
+        );
 
-        sqlx::query_scalar(query)
+        sqlx::query_scalar(sqlx::AssertSqlSafe(query))
             .bind(user_id)
             .fetch_one(pool)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))
     }
 
+    pub async fn max_role_priority_for_user_valid_until(
+        pool: &DbPool,
+        user_id: i64,
+        required_end: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<i64, ApiError> {
+        let query = "\
+            WITH qualifying_roles AS ( \
+                SELECT ur.role_id \
+                FROM user_roles ur \
+                WHERE ur.user_id = $1 \
+                  AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP) \
+                  AND (ur.expires_at IS NULL OR ($2::timestamptz IS NOT NULL AND ur.expires_at >= $2::timestamptz)) \
+                UNION \
+                SELECT tr.role_id \
+                FROM team_roles tr \
+                INNER JOIN team_members tm ON tm.team_id = tr.team_id \
+                INNER JOIN teams t ON t.id = tm.team_id \
+                WHERE tm.user_id = $1 \
+                  AND t.is_active \
+                  AND t.deleted_at IS NULL \
+                  AND (tm.expires_at IS NULL OR tm.expires_at > CURRENT_TIMESTAMP) \
+                  AND (tm.expires_at IS NULL OR ($2::timestamptz IS NOT NULL AND tm.expires_at >= $2::timestamptz)) \
+            ) \
+            SELECT COALESCE(MAX(r.priority), 0)::BIGINT \
+            FROM roles r \
+            INNER JOIN qualifying_roles qr ON qr.role_id = r.id";
+
+        sqlx::query_scalar(query)
+            .bind(user_id)
+            .bind(required_end)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))
+    }
+
+    /// Direct `user_roles` assignments (used when replacing direct role rows).
     pub async fn user_role_ids(pool: &DbPool, user_id: i64) -> Result<Vec<i64>, ApiError> {
         sqlx::query_scalar("SELECT role_id FROM user_roles WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))
+    }
+
+    /// Effective active non-expired role ids (direct roles UNION active team roles).
+    pub async fn effective_role_ids(pool: &DbPool, user_id: i64) -> Result<Vec<i64>, ApiError> {
+        let query = format!(
+            "{} SELECT er.role_id FROM effective_roles er",
+            crate::core::rbac_cache::EFFECTIVE_ROLES_CTE
+        );
+        sqlx::query_scalar(sqlx::AssertSqlSafe(query))
             .bind(user_id)
             .fetch_all(pool)
             .await
@@ -656,6 +705,44 @@ impl RbacRepository {
         Ok(names.into_iter().collect())
     }
 
+    pub async fn permission_names_for_user_valid_until(
+        pool: &DbPool,
+        user_id: i64,
+        required_end: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<HashSet<String>, ApiError> {
+        let names: Vec<String> = sqlx::query_scalar(
+            "\
+            WITH qualifying_roles AS ( \
+                SELECT ur.role_id \
+                FROM user_roles ur \
+                WHERE ur.user_id = $1 \
+                  AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP) \
+                  AND (ur.expires_at IS NULL OR ($2::timestamptz IS NOT NULL AND ur.expires_at >= $2::timestamptz)) \
+                UNION \
+                SELECT tr.role_id \
+                FROM team_roles tr \
+                INNER JOIN team_members tm ON tm.team_id = tr.team_id \
+                INNER JOIN teams t ON t.id = tm.team_id \
+                WHERE tm.user_id = $1 \
+                  AND t.is_active \
+                  AND t.deleted_at IS NULL \
+                  AND (tm.expires_at IS NULL OR tm.expires_at > CURRENT_TIMESTAMP) \
+                  AND (tm.expires_at IS NULL OR ($2::timestamptz IS NOT NULL AND tm.expires_at >= $2::timestamptz)) \
+            ) \
+            SELECT DISTINCT p.name \
+            FROM permissions p \
+            INNER JOIN role_permissions rp ON p.id = rp.permission_id \
+            INNER JOIN qualifying_roles qr ON qr.role_id = rp.role_id",
+        )
+        .bind(user_id)
+        .bind(required_end)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+        Ok(names.into_iter().collect())
+    }
+
     /// Permission names conferred by any of `role_ids`, as a set.
     pub async fn permission_names_for_roles(
         pool: &DbPool,
@@ -755,7 +842,7 @@ impl RbacRepository {
         sqlx::query_as::<_, Role>(
             r#"
             UPDATE roles
-            SET name = $1, description = $2, updated_at = NOW()
+            SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP
             WHERE id = $3
             RETURNING id, name, description, created_at
             "#,

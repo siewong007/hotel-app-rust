@@ -221,7 +221,8 @@ pub async fn update_task(
         validate_status_transition(&existing.status, status)?;
     }
 
-    let completed_cleaning = patch.status.as_deref() == Some("completed")
+    let completed_cleaning = existing.status != "completed"
+        && patch.status.as_deref() == Some("completed")
         && matches!(existing.task_type.as_str(), "cleaning" | "checkout_clean");
 
     if completed_cleaning {

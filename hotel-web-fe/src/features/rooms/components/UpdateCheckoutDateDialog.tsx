@@ -20,7 +20,7 @@ import { BookingWithDetails } from '../../../types';
 import { BookingsService } from '../../../api';
 import { useCurrency } from '../../../hooks/useCurrency';
 import { getHotelSettings } from '../../../utils/hotelSettings';
-import { formatLocalDate, addLocalDays, formatHotelDate } from '../../../utils/date';
+import { formatLocalDate, addLocalDays, formatHotelDate, parseLocalDate } from '../../../utils/date';
 import { isGreaterMoney, multiplyMoney, subtractMoney, sumMoney, toMoneyNumber } from '../../../utils/money';
 import { errorMessage } from '../../../utils/errorMessage';
 import { useTranslation } from '../../../i18n/useTranslation';
@@ -71,13 +71,13 @@ const UpdateCheckoutDateDialog: React.FC<UpdateCheckoutDateDialogProps> = ({
   const tourismTaxRate = toMoneyNumber(hotelSettings.tourism_tax_rate);
 
   const currentNights = Math.max(
-    Math.ceil((new Date(currentCheckoutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24)),
+    Math.round((parseLocalDate(currentCheckoutDate).getTime() - parseLocalDate(checkInDate).getTime()) / (1000 * 60 * 60 * 24)),
     1
   );
 
   const newNights = newCheckoutDate
     ? Math.max(
-        Math.ceil((new Date(newCheckoutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24)),
+        Math.round((parseLocalDate(newCheckoutDate).getTime() - parseLocalDate(checkInDate).getTime()) / (1000 * 60 * 60 * 24)),
         0
       )
     : currentNights;

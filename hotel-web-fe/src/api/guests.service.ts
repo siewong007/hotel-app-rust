@@ -186,10 +186,7 @@ export class GuestsService {
         return await grpcGuests.createGuest(payload);
       }
 
-      return await withRetry(
-        () => api.post('guests', { json: payload }).json<Guest>(),
-        { maxAttempts: 2, initialDelay: 1000 }
-      );
+      return await api.post('guests', { json: payload }).json<Guest>();
     } catch (error) {
       throw await toGuestApiError(error, t('generic', undefined, 'errors'));
     }

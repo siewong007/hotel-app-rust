@@ -32,15 +32,19 @@ impl LoyaltyRepository {
         user_id: i64,
     ) -> Result<Option<LoyaltyGuestProfile>, ApiError> {
         let sql = r#"
-                SELECT g.id AS guest_id, g.nick_name, g.email, g.phone
-                FROM users u
-                LEFT JOIN guests g ON g.id = u.guest_id
-                WHERE u.id = $1
-                UNION
-                SELECT g.id AS guest_id, g.nick_name, g.email, g.phone
-                FROM users u
-                JOIN guests g ON lower(g.email) = lower(u.email)
-                WHERE u.id = $1 AND u.guest_id IS NULL
+                SELECT guest_id, nick_name, email, phone
+                FROM (
+                    SELECT 0 AS match_priority, g.id AS guest_id, g.nick_name, g.email, g.phone
+                    FROM users u
+                    JOIN guests g ON g.id = u.guest_id
+                    WHERE u.id = $1
+                    UNION ALL
+                    SELECT 1 AS match_priority, g.id AS guest_id, g.nick_name, g.email, g.phone
+                    FROM users u
+                    JOIN guests g ON lower(g.email) = lower(u.email)
+                    WHERE u.id = $1 AND u.guest_id IS NULL
+                ) matched
+                ORDER BY match_priority ASC, guest_id DESC
                 LIMIT 1
             "#;
 
@@ -111,11 +115,14 @@ impl LoyaltyRepository {
         Ok(row.as_ref().map(row_to_tier))
     }
 
-    pub async fn best_tier_for_metric(
-        pool: &DbPool,
+    pub async fn best_tier_for_metric_tx<'e, E>(
+        executor: E,
         metric: &str,
         value: f64,
-    ) -> Result<LoyaltyTier, ApiError> {
+    ) -> Result<LoyaltyTier, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         let order_column = match metric {
             "nights" => "min_nights",
             "spend" => "min_spend",
@@ -126,10 +133,18 @@ impl LoyaltyRepository {
         );
         let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .bind(value)
-            .fetch_one(pool)
+            .fetch_one(executor)
             .await
             .map_err(ApiError::from)?;
         Ok(row_to_tier(&row))
+    }
+
+    pub async fn best_tier_for_metric(
+        pool: &DbPool,
+        metric: &str,
+        value: f64,
+    ) -> Result<LoyaltyTier, ApiError> {
+        Self::best_tier_for_metric_tx(pool, metric, value).await
     }
 
     pub async fn next_tier_for_metric(
@@ -165,6 +180,46 @@ impl LoyaltyRepository {
         .await
         .map_err(ApiError::from)?;
         Ok(row.as_ref().map(row_to_member_summary))
+    }
+
+    pub async fn lock_member_account_tx(
+        tx: &mut DbTransaction<'_>,
+        member_id: i64,
+    ) -> Result<LoyaltyMemberSummary, ApiError> {
+        sqlx::query("SELECT id FROM loyalty_accounts WHERE member_id = $1 FOR UPDATE")
+            .bind(member_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+
+        let row = sqlx::query(sqlx::AssertSqlSafe(&*member_summary_sql(
+            "WHERE lm.id = $1",
+        )))
+        .bind(member_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("Loyalty member not found.".to_string()))?;
+
+        Ok(row_to_member_summary(&row))
+    }
+
+    pub async fn find_reward_for_update_tx(
+        tx: &mut DbTransaction<'_>,
+        reward_id: i64,
+    ) -> Result<Option<LoyaltyReward>, ApiError> {
+        sqlx::query("SELECT id FROM loyalty_rewards WHERE id = $1 FOR UPDATE")
+            .bind(reward_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+        let sql = format!("{} WHERE lr.id = $1", reward_select_sql());
+        let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            .bind(reward_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+        Ok(row.as_ref().map(row_to_reward))
     }
 
     pub async fn member_by_id(
@@ -487,6 +542,57 @@ impl LoyaltyRepository {
         Ok(rows.iter().map(row_to_award_candidate).collect())
     }
 
+    pub async fn revert_account_earning(
+        tx: &mut DbTransaction<'_>,
+        account_id: i64,
+        points: i32,
+        amount: f64,
+        nights: i32,
+        tier_metric: &str,
+    ) -> Result<(), ApiError> {
+        let row = sqlx::query(
+            r#"
+                UPDATE loyalty_accounts
+                SET lifetime_points = GREATEST(0, lifetime_points - $1),
+                    qualifying_points = GREATEST(0, qualifying_points - $1),
+                    qualifying_spend = GREATEST(0, qualifying_spend - $2),
+                    qualifying_nights = GREATEST(0, qualifying_nights - $3),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $4
+                RETURNING qualifying_points, qualifying_nights, qualifying_spend
+            "#,
+        )
+        .bind(points)
+        .bind(amount)
+        .bind(nights)
+        .bind(account_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
+
+        if let Some(acc) = row {
+            let q_points: i32 = acc.try_get("qualifying_points").unwrap_or_default();
+            let q_nights: i32 = acc.try_get("qualifying_nights").unwrap_or_default();
+            let q_spend = decimal_or_f64(&acc, "qualifying_spend");
+            let metric_after = match tier_metric {
+                "nights" => q_nights as f64,
+                "spend" => q_spend,
+                _ => q_points as f64,
+            };
+            let new_tier =
+                Self::best_tier_for_metric_tx(&mut **tx, tier_metric, metric_after).await?;
+            sqlx::query(
+                "UPDATE loyalty_accounts SET current_tier_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+            )
+            .bind(new_tier.id)
+            .bind(account_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+        }
+        Ok(())
+    }
+
     pub async fn reversible_earned_transactions_for_booking(
         pool: &DbPool,
         booking_id: i64,
@@ -511,6 +617,36 @@ impl LoyaltyRepository {
         )
         .bind(booking_id)
         .fetch_all(pool)
+        .await
+        .map_err(ApiError::from)?;
+        Ok(rows.iter().map(row_to_transaction).collect())
+    }
+
+    pub async fn reversible_earned_transactions_for_payment_tx(
+        tx: &mut DbTransaction<'_>,
+        payment_id: i64,
+    ) -> Result<Vec<LoyaltyTransaction>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT t.id, t.member_id, t.account_id, t.transaction_type, t.points_delta,
+                   t.available_delta, t.balance_after, t.source_type, t.source_id,
+                   t.booking_id, t.payment_id, t.invoice_id, t.related_transaction_id,
+                   t.description, t.metadata, t.actor_user_id, t.created_at
+            FROM loyalty_transactions t
+            WHERE t.payment_id = $1
+              AND t.transaction_type = 'earned'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM loyalty_transactions r
+                  WHERE r.related_transaction_id = t.id
+                    AND r.transaction_type = 'reversed'
+              )
+            ORDER BY t.created_at ASC, t.id ASC
+            FOR UPDATE OF t
+            "#,
+        )
+        .bind(payment_id)
+        .fetch_all(&mut **tx)
         .await
         .map_err(ApiError::from)?;
         Ok(rows.iter().map(row_to_transaction).collect())
@@ -755,7 +891,7 @@ impl LoyaltyRepository {
         redemption_id: i64,
         actor_user_id: i64,
     ) -> Result<LoyaltyRedemption, ApiError> {
-        sqlx::query(
+        let result = sqlx::query(
             r#"
                 UPDATE loyalty_redemptions
                 SET status = 'approved',
@@ -771,6 +907,15 @@ impl LoyaltyRepository {
         .await
         .map_err(ApiError::from)?;
 
+        if result.rows_affected() == 0 {
+            return match Self::find_redemption(pool, redemption_id).await? {
+                Some(_) => Err(ApiError::Conflict(
+                    "Only pending redemptions can be approved.".to_string(),
+                )),
+                None => Err(ApiError::NotFound("Redemption not found".to_string())),
+            };
+        }
+
         Self::find_redemption(pool, redemption_id)
             .await?
             .ok_or_else(|| ApiError::NotFound("Redemption not found".to_string()))
@@ -782,7 +927,7 @@ impl LoyaltyRepository {
         actor_user_id: i64,
         reason: &str,
     ) -> Result<(), ApiError> {
-        sqlx::query(
+        let result = sqlx::query(
             r#"
                 UPDATE loyalty_redemptions
                 SET status = 'rejected',
@@ -799,6 +944,11 @@ impl LoyaltyRepository {
         .execute(&mut **tx)
         .await
         .map_err(ApiError::from)?;
+        if result.rows_affected() == 0 {
+            return Err(ApiError::Conflict(
+                "Only pending redemptions can be rejected.".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -806,18 +956,23 @@ impl LoyaltyRepository {
         tx: &mut DbTransaction<'_>,
         reward_id: i64,
     ) -> Result<(), ApiError> {
-        sqlx::query(
+        let remaining: Option<i32> = sqlx::query_scalar(
             r#"
                 UPDATE loyalty_rewards
                 SET inventory_count = inventory_count - 1,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $1 AND inventory_count IS NOT NULL
+                WHERE id = $1 AND inventory_count IS NOT NULL AND inventory_count > 0
+                RETURNING inventory_count
             "#,
         )
         .bind(reward_id)
-        .execute(&mut **tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(ApiError::from)?;
+
+        if remaining.is_none() {
+            return Err(ApiError::Conflict("Reward is out of stock.".to_string()));
+        }
         Ok(())
     }
 }

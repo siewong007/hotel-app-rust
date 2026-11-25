@@ -436,8 +436,9 @@ pub async fn record_payment(
         // whose room charge is fully paid would reject collection of the
         // tourism tax / extra bed that the checkout invoice still bills.
         let billable_total = summary.billable_total();
-        let balance_due = if billable_total > summary.total_paid {
-            billable_total - summary.total_paid
+        let net_paid = summary.net_room_paid();
+        let balance_due = if billable_total > net_paid {
+            billable_total - net_paid
         } else {
             Decimal::ZERO
         };
@@ -458,10 +459,32 @@ pub async fn record_payment(
         settles_balance_in_full = amount + tolerance >= balance_due;
     }
 
-    let created_at_override = request
+    let created_at_override = match request
         .payment_date
-        .as_ref()
-        .map(|d| format!("{} 12:00:00", d));
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        Some(d) => {
+            let parsed_date = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| {
+                ApiError::BadRequest(format!("Invalid payment_date '{d}'. Expected YYYY-MM-DD"))
+            })?;
+            let closed: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM night_audit_runs WHERE audit_date = $1 AND status = 'completed')",
+            )
+            .bind(parsed_date)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::from)?;
+            if closed {
+                return Err(ApiError::BadRequest(format!(
+                    "Night audit has already closed {parsed_date}; cannot record a payment into a closed business day"
+                )));
+            }
+            Some(format!("{parsed_date} 12:00:00"))
+        }
+        None => None,
+    };
 
     let recorded_payment = PaymentRepository::record_payment(
         &mut tx,
@@ -589,8 +612,9 @@ pub async fn get_payment_workflow_summary(
     // Report against the full invoiced amount (room + tourism tax + extra bed)
     // so the summary's balance mirrors what the checkout invoice bills.
     let billable_total = row.billable_total();
-    let balance_due = if billable_total > row.total_paid {
-        billable_total - row.total_paid
+    let net_paid = row.net_room_paid();
+    let balance_due = if billable_total > net_paid {
+        billable_total - net_paid
     } else {
         Decimal::ZERO
     };
@@ -610,7 +634,7 @@ pub async fn get_payment_workflow_summary(
     {
         warnings.push("Collected deposit has not been fully refunded".to_string());
     }
-    if row.total_refunded > row.total_paid {
+    if row.room_refunded() > row.total_paid || row.deposit_refunded > row.deposit_collected {
         warnings.push("Refund total is greater than collected payments".to_string());
     }
 
@@ -906,14 +930,8 @@ pub async fn generate_invoice(
     user_id: i64,
     booking_id: i64,
 ) -> Result<Invoice, ApiError> {
-    if let Some(invoice) = PaymentRepository::find_invoice_by_booking_id(pool, booking_id).await? {
-        return Ok(invoice);
-    }
-
-    let invoice_number = crate::services::invoice_numbers::next_invoice_number(pool).await?;
     let invoice =
-        PaymentRepository::create_generated_invoice(pool, user_id, booking_id, &invoice_number)
-            .await?;
+        PaymentRepository::create_generated_invoice(pool, user_id, booking_id, None).await?;
 
     let _ = AuditLog::log_event(
         pool,
@@ -924,7 +942,7 @@ pub async fn generate_invoice(
             resource_id: Some(invoice.id),
             details: Some(serde_json::json!({
                 "booking_id": booking_id,
-                "invoice_number": invoice_number,
+                "invoice_number": invoice.invoice_number,
             })),
             ..Default::default()
         },
@@ -939,10 +957,7 @@ pub async fn get_invoice_preview(
     user_id: i64,
     booking_id: i64,
 ) -> Result<InvoicePreview, ApiError> {
-    let invoice = match PaymentRepository::find_invoice_by_booking_id(pool, booking_id).await? {
-        Some(invoice) => invoice,
-        None => generate_invoice(pool, user_id, booking_id).await?,
-    };
+    let invoice = generate_invoice(pool, user_id, booking_id).await?;
 
     let payment = PaymentRepository::find_by_booking_id(pool, booking_id).await?;
     let booking_details = serde_json::json!({
@@ -1064,6 +1079,7 @@ pub async fn delete_payment(
             .unwrap_or(false);
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let group_id = lock_group_of_booking_tx(&mut tx, booking_id).await?;
     PaymentRepository::lock_booking_for_payment_tx(&mut tx, booking_id).await?;
     let (voided, reversal_date) = PaymentRepository::void_payment_tx(
         &mut tx,
@@ -1075,6 +1091,19 @@ pub async fn delete_payment(
     )
     .await?;
     recompute_payment_status_tx(&mut tx, booking_id).await?;
+    crate::modules::loyalty::service::reverse_payment_points_tx(
+        &mut tx,
+        payment_id,
+        Some(user_id),
+        &reason,
+    )
+    .await?;
+    if let Some(group_id) = group_id {
+        crate::modules::booking_groups::repository::BookingGroupRepository::refresh_totals_tx(
+            &mut tx, group_id,
+        )
+        .await?;
+    }
     AuditLog::log_event_tx(
         &mut tx,
         AuditEvent {
@@ -1145,7 +1174,7 @@ pub async fn ensure_invoice_for_booking_tx(
     let invoice_number =
         match PaymentRepository::ledger_invoice_number(&mut **tx, booking_id).await? {
             Some(number) => number,
-            None => crate::services::invoice_numbers::next_invoice_number(&mut **tx).await?,
+            None => crate::services::invoice_numbers::next_invoice_number_tx(tx).await?,
         };
 
     PaymentRepository::insert_checkout_invoice(&mut **tx, booking_id, user_id, &invoice_number)
@@ -1233,7 +1262,15 @@ pub async fn queue_checkout_receipt_email(
         r#"
         SELECT COALESCE(SUM(amount) FILTER (
             WHERE status = 'completed'
-              AND COALESCE(payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')
+              AND COALESCE(payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+        ), 0)
+        - COALESCE((
+            SELECT SUM(amount)
+            FROM payments
+            WHERE booking_id = $1
+              AND status <> 'void'
+              AND COALESCE(payment_type, 'booking') = 'refund'
+              AND COALESCE(notes, '') LIKE 'Room charge refunded%'
         ), 0)
         FROM payments
         WHERE booking_id = $1
@@ -1474,12 +1511,22 @@ async fn create_bank_transfer_claim_inner(
     )
     .await?;
 
+    let due = match PaymentRepository::workflow_summary_row(&mut *tx, booking.id).await? {
+        Some(summary) => (summary.billable_total() - summary.net_room_paid()).max(Decimal::ZERO),
+        None => booking.total_amount.max(Decimal::ZERO),
+    };
+    if due <= Decimal::ZERO {
+        return Err(ApiError::BadRequest(
+            "This booking has nothing left to pay.".to_string(),
+        ));
+    }
+
     let payment_id = PaymentRepository::insert_pending_payment_tx(
         &mut tx,
         PendingPaymentValues {
             booking_id: booking.id,
             guest_id: booking.guest_id,
-            amount: booking.total_amount,
+            amount: due,
             currency,
             payment_method: &PaymentMethod::BankTransfer.to_string(),
             payment_gateway: None,
@@ -1515,7 +1562,7 @@ async fn create_bank_transfer_claim_inner(
             resource_id: Some(payment_id),
             details: Some(serde_json::json!({
                 "booking_id": booking.id,
-                "amount": booking.total_amount.to_string(),
+                "amount": due.to_string(),
                 "method": "bank_transfer",
                 "source": "guest_portal",
             })),
@@ -1620,12 +1667,22 @@ async fn create_paypal_order_inner(
     )
     .await?;
 
+    let due = match PaymentRepository::workflow_summary_row(&mut *tx, booking.id).await? {
+        Some(summary) => (summary.billable_total() - summary.net_room_paid()).max(Decimal::ZERO),
+        None => booking.total_amount.max(Decimal::ZERO),
+    };
+    if due <= Decimal::ZERO {
+        return Err(ApiError::BadRequest(
+            "This booking has nothing left to pay.".to_string(),
+        ));
+    }
+
     let payment_id = PaymentRepository::insert_pending_payment_tx(
         &mut tx,
         PendingPaymentValues {
             booking_id: booking.id,
             guest_id: booking.guest_id,
-            amount: booking.total_amount,
+            amount: due,
             currency,
             payment_method: &PaymentMethod::Paypal.to_string(),
             payment_gateway: Some("paypal"),
@@ -1644,7 +1701,7 @@ async fn create_paypal_order_inner(
             resource_id: Some(payment_id),
             details: Some(serde_json::json!({
                 "booking_id": booking.id,
-                "amount": booking.total_amount.to_string(),
+                "amount": due.to_string(),
                 "method": "paypal",
                 "source": "guest_portal",
             })),
@@ -1674,13 +1731,7 @@ async fn create_paypal_order_inner(
     // `custom_id`. If PayPal cannot create the external order, immediately move
     // that local record to a terminal state so it cannot block the guest from
     // trying again.
-    let order_id = match super::paypal_client::create_order(
-        booking.total_amount,
-        currency,
-        &custom_id,
-    )
-    .await
-    {
+    let order_id = match super::paypal_client::create_order(due, currency, &custom_id).await {
         Ok(order_id) => order_id,
         Err(error) => {
             release_failed_paypal_payment(
@@ -1748,6 +1799,21 @@ pub async fn capture_paypal_payment(
     if review.status != "pending" && review.status != "processing" {
         return Err(ApiError::BadRequest(
             "This PayPal payment is no longer available for capture.".to_string(),
+        ));
+    }
+
+    if order_id.is_empty()
+        || order_id.len() > 64
+        || !order_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return Err(ApiError::BadRequest("Invalid PayPal order id.".to_string()));
+    }
+    let stored_order_id = PaymentRepository::find_gateway_order_id(pool, payment_id).await?;
+    if stored_order_id.as_deref() != Some(order_id) {
+        return Err(ApiError::BadRequest(
+            "PayPal order does not match this payment attempt.".to_string(),
         ));
     }
 
@@ -2315,6 +2381,7 @@ pub async fn approve_payment(
         let mut claim = vec![(payment_id, review.booking_id)];
         claim.extend(pending_group_siblings_tx(&mut tx, &reference, payment_id).await?);
         claim.sort_by_key(|(_, booking_id)| *booking_id);
+        let award_targets = claim.clone();
         let mut primary = None;
         for (id, booking_id) in claim {
             let done = complete_and_confirm_tx(
@@ -2336,6 +2403,20 @@ pub async fn approve_payment(
             .await?;
         }
         tx.commit().await.map_err(ApiError::from)?;
+        for (id, booking_id) in award_targets {
+            if let Err(err) = crate::modules::loyalty::service::award_eligible_booking_points(
+                pool,
+                booking_id,
+                Some(id),
+                Some(actor_user_id),
+            )
+            .await
+            {
+                log::warn!(
+                    "Loyalty award skipped after group payment approval (booking {booking_id}, payment {id}): {err}"
+                );
+            }
+        }
         primary.ok_or_else(|| ApiError::Internal("Group approval lost its payment".to_string()))?
     } else {
         complete_and_confirm(
@@ -2601,6 +2682,18 @@ async fn complete_and_confirm(
         complete_and_confirm_tx(&mut tx, payment_id, booking_id, actor_user_id, audit_action)
             .await?;
     tx.commit().await.map_err(ApiError::from)?;
+    if let Err(err) = crate::modules::loyalty::service::award_eligible_booking_points(
+        pool,
+        booking_id,
+        Some(payment_id),
+        actor_user_id,
+    )
+    .await
+    {
+        log::warn!(
+            "Loyalty award skipped after payment completion (booking {booking_id}, payment {payment_id}): {err}"
+        );
+    }
     Ok(response)
 }
 
@@ -3020,7 +3113,7 @@ pub async fn reject_expired_paypal_attempts(pool: &DbPool) -> Result<usize, ApiE
     let ids = PaymentRepository::expired_paypal_attempt_ids(pool).await?;
     let mut rejected = 0;
     for payment_id in ids {
-        if reject_payment_by(
+        if reject_claim_by(
             pool,
             None,
             payment_id,
@@ -3516,9 +3609,12 @@ async fn unpaid_group_rooms_tx(
     let rooms: Vec<UnpaidGroupRoom> = sqlx::query_as(
         "SELECT b.id, b.booking_number, COALESCE(b.status, 'pending'), \
          (b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) \
-         - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id \
+         - (COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id \
              AND p.status = 'completed' \
-             AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0), \
+             AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) \
+           - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id \
+             AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' \
+             AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0)), \
          b.currency \
          FROM bookings b WHERE b.booking_group_id = $1 AND b.status <> 'voided' \
          AND COALESCE(b.payment_status, 'unpaid') IN ('unpaid', 'unpaid_deposit', 'partial') \
@@ -3534,6 +3630,14 @@ async fn unpaid_group_rooms_tx(
         .collect())
 }
 
+/// Total remaining billable balance across all unpaid rooms in a booking group.
+pub async fn group_remaining_balance(pool: &DbPool, group_id: i64) -> Result<Decimal, ApiError> {
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let payable = unpaid_group_rooms_tx(&mut tx, group_id).await?;
+    tx.rollback().await.map_err(ApiError::from)?;
+    Ok(payable.into_iter().map(|(_, _, _, due, _)| due).sum())
+}
+
 /// Guest action: one bank-transfer claim for every unpaid room of a group.
 ///
 /// Only rooms still unpaid are claimed, so a paid room is never charged twice,
@@ -3545,6 +3649,25 @@ pub async fn create_group_bank_transfer_claim(
     pool: &DbPool,
     guest_id: i64,
     group_id: i64,
+) -> Result<GroupPaymentActionResponse, ApiError> {
+    create_group_bank_transfer_claim_inner(pool, guest_id, group_id, None).await
+}
+
+/// Same group bank-transfer claim flow authorised and consumed via a payment-retry capability.
+pub async fn create_group_bank_transfer_claim_for_capability(
+    pool: &DbPool,
+    guest_id: i64,
+    group_id: i64,
+    capability_id: i64,
+) -> Result<GroupPaymentActionResponse, ApiError> {
+    create_group_bank_transfer_claim_inner(pool, guest_id, group_id, Some(capability_id)).await
+}
+
+async fn create_group_bank_transfer_claim_inner(
+    pool: &DbPool,
+    guest_id: i64,
+    group_id: i64,
+    capability_id: Option<i64>,
 ) -> Result<GroupPaymentActionResponse, ApiError> {
     use crate::modules::booking_groups::repository::BookingGroupRepository;
 
@@ -3644,6 +3767,20 @@ pub async fn create_group_bank_transfer_claim(
     .await?;
     notify_bank_transfer_claim_tx(&mut tx, &group.group_number).await?;
     BookingGroupRepository::refresh_totals_tx(&mut tx, group_id).await?;
+    if let Some(capability_id) = capability_id {
+        let lead_payment_id = payment_ids[0];
+        let spent = crate::modules::payment_retry::repository::PaymentRetryRepository::consume_tx(
+            &mut tx,
+            capability_id,
+            lead_payment_id,
+        )
+        .await?;
+        if !spent {
+            return Err(ApiError::Conflict(
+                "This payment link has already been used.".to_string(),
+            ));
+        }
+    }
     tx.commit().await.map_err(ApiError::from)?;
 
     Ok(GroupPaymentActionResponse {
@@ -3723,6 +3860,7 @@ pub async fn record_group_desk_payment(
 
     let reference = uuid::Uuid::new_v4().to_string();
     let mut payment_ids = Vec::new();
+    let mut award_targets: Vec<(i64, i64)> = Vec::new();
     let mut amount = Decimal::ZERO;
     let mut confirmed_rooms = Vec::new();
     for (booking_id, booking_number, status, due, _) in &payable {
@@ -3767,6 +3905,7 @@ pub async fn record_group_desk_payment(
             confirmed_rooms.push((*booking_id, row.id));
         }
         payment_ids.push(row.id);
+        award_targets.push((*booking_id, row.id));
         amount += *due;
         let _ = booking_number;
     }
@@ -3790,6 +3929,24 @@ pub async fn record_group_desk_payment(
     .await?;
     BookingGroupRepository::refresh_totals_tx(&mut tx, group_id).await?;
     tx.commit().await.map_err(ApiError::from)?;
+
+    for (award_booking_id, award_payment_id) in award_targets {
+        if let Err(err) = crate::modules::loyalty::service::award_eligible_booking_points(
+            pool,
+            award_booking_id,
+            Some(award_payment_id),
+            Some(user_id),
+        )
+        .await
+        {
+            log::warn!(
+                "Loyalty award skipped after group payment {} for booking {}: {}",
+                award_payment_id,
+                award_booking_id,
+                err
+            );
+        }
+    }
 
     for (booking_id, payment_id) in confirmed_rooms {
         crate::modules::bookings::emails::try_queue_payment_confirmation_email(
@@ -3916,6 +4073,25 @@ pub async fn create_group_paypal_order(
     guest_id: i64,
     group_id: i64,
 ) -> Result<PaypalCreateOrderResponse, ApiError> {
+    create_group_paypal_order_inner(pool, guest_id, group_id, None).await
+}
+
+/// Same group PayPal order creation authorised and consumed via a payment-retry capability.
+pub async fn create_group_paypal_order_for_capability(
+    pool: &DbPool,
+    guest_id: i64,
+    group_id: i64,
+    capability_id: i64,
+) -> Result<PaypalCreateOrderResponse, ApiError> {
+    create_group_paypal_order_inner(pool, guest_id, group_id, Some(capability_id)).await
+}
+
+async fn create_group_paypal_order_inner(
+    pool: &DbPool,
+    guest_id: i64,
+    group_id: i64,
+    capability_id: Option<i64>,
+) -> Result<PaypalCreateOrderResponse, ApiError> {
     use crate::modules::booking_groups::repository::BookingGroupRepository;
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
@@ -4005,6 +4181,19 @@ pub async fn create_group_paypal_order(
         },
     )
     .await?;
+    if let Some(capability_id) = capability_id {
+        let spent = crate::modules::payment_retry::repository::PaymentRetryRepository::consume_tx(
+            &mut tx,
+            capability_id,
+            lead_payment,
+        )
+        .await?;
+        if !spent {
+            return Err(ApiError::Conflict(
+                "This payment link has already been used.".to_string(),
+            ));
+        }
+    }
     tx.commit().await.map_err(ApiError::from)?;
 
     let custom_id = format!("{lead_booking}:{lead_payment}");
@@ -4018,6 +4207,14 @@ pub async fn create_group_paypal_order(
                     "PayPal could not create an order. No payment was captured.",
                 )
                 .await?;
+            }
+            if let Some(capability_id) = capability_id {
+                let _ = crate::modules::payment_retry::repository::PaymentRetryRepository::restore(
+                    pool,
+                    capability_id,
+                    lead_payment,
+                )
+                .await;
             }
             return Err(error);
         }
@@ -4075,13 +4272,42 @@ pub async fn capture_group_paypal_payment(
             "This PayPal payment is no longer available for capture.".to_string(),
         ));
     }
-    for (id, _, status, _) in &rows {
-        if status == "pending" && !PaymentRepository::mark_payment_processing(pool, *id).await? {
+    if order_id.is_empty()
+        || order_id.len() > 64
+        || !order_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return Err(ApiError::BadRequest("Invalid PayPal order id.".to_string()));
+    }
+    for (id, _, _, _) in &rows {
+        let stored_order_id = PaymentRepository::find_gateway_order_id(pool, *id).await?;
+        if stored_order_id.as_deref() != Some(order_id) {
             return Err(ApiError::BadRequest(
-                "This PayPal payment is no longer available for capture.".to_string(),
+                "PayPal order does not match this payment attempt.".to_string(),
             ));
         }
     }
+    let mut proc_tx = pool.begin().await.map_err(ApiError::from)?;
+    for (id, _, status, _) in &rows {
+        if status == "pending" {
+            let moved = sqlx::query(
+                "UPDATE payments SET status = 'processing' \
+                 WHERE id = $1 AND status = 'pending'",
+            )
+            .bind(id)
+            .execute(&mut *proc_tx)
+            .await
+            .map_err(ApiError::from)?
+            .rows_affected();
+            if moved == 0 {
+                return Err(ApiError::BadRequest(
+                    "This PayPal payment is no longer available for capture.".to_string(),
+                ));
+            }
+        }
+    }
+    proc_tx.commit().await.map_err(ApiError::from)?;
     let release_all = |reason: String| {
         let ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
         async move {
@@ -4185,7 +4411,22 @@ async fn complete_group_paypal(pool: &DbPool, reference: &str) -> Result<(), Api
         )
         .await?;
     }
-    tx.commit().await.map_err(ApiError::from)
+    tx.commit().await.map_err(ApiError::from)?;
+    for (id, booking_id, _, _) in &rows {
+        if let Err(err) = crate::modules::loyalty::service::award_eligible_booking_points(
+            pool,
+            *booking_id,
+            Some(*id),
+            None,
+        )
+        .await
+        {
+            log::warn!(
+                "Loyalty award skipped after group PayPal completion (booking {booking_id}, payment {id}): {err}"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Webhook `PAYMENT.CAPTURE.COMPLETED` for a group attempt (custom_id names

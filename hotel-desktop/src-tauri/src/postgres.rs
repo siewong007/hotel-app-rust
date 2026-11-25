@@ -92,7 +92,7 @@ pub enum PostgresError {
     #[error("Failed to detect bundled PostgreSQL version: {0}")]
     VersionDetectionFailed(String),
 
-    #[error("Backup destination is outside the allowed data directory: {0}")]
+    #[error("Backup destination must be a new .dump file inside the backups directory: {0}")]
     InvalidBackupDestination(String),
 
     #[error(
@@ -477,13 +477,12 @@ fn tighten_secret_file_permissions(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn read_postgres_password_file() -> Result<Option<String>, PostgresError> {
-    let path = postgres_password_file_path();
+fn read_postgres_password_at(path: &Path) -> Result<Option<String>, PostgresError> {
     if !path.exists() {
         return Ok(None);
     }
 
-    tighten_secret_file_permissions(&path)?;
+    tighten_secret_file_permissions(path)?;
     let password = std::fs::read_to_string(path)?.trim().to_string();
     if password.is_empty() {
         return Ok(None);
@@ -492,8 +491,11 @@ fn read_postgres_password_file() -> Result<Option<String>, PostgresError> {
     Ok(Some(password))
 }
 
-fn write_postgres_password_file(password: &str) -> Result<(), PostgresError> {
-    let path = postgres_password_file_path();
+fn read_postgres_password_file() -> Result<Option<String>, PostgresError> {
+    read_postgres_password_at(&postgres_password_file_path())
+}
+
+fn write_postgres_password_at(path: &Path, password: &str) -> Result<(), PostgresError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -507,20 +509,47 @@ fn write_postgres_password_file(password: &str) -> Result<(), PostgresError> {
         options.mode(0o600);
     }
 
-    let mut file = match options.open(&path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            tighten_secret_file_permissions(&path)?;
-            return Ok(());
+    match options.open(path) {
+        Ok(mut file) => {
+            file.write_all(password.as_bytes())?;
+            file.write_all(b"\n")?;
+            file.flush()?;
+            tighten_secret_file_permissions(path)?;
+            Ok(())
         }
-        Err(err) => return Err(err.into()),
-    };
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            tighten_secret_file_permissions(path)?;
+            let existing = std::fs::read_to_string(path).unwrap_or_default();
+            if !existing.trim().is_empty() {
+                return Ok(());
+            }
+            // Recover cleanly if a previous crash left an empty 0-byte credential file.
+            let parent = path.parent().unwrap_or_else(|| Path::new("."));
+            let tmp_name = format!(".postgres-password.tmp.{}", std::process::id());
+            let tmp_path = parent.join(tmp_name);
+            let _ = std::fs::remove_file(&tmp_path);
+            let mut tmp_opts = OpenOptions::new();
+            tmp_opts.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                tmp_opts.mode(0o600);
+            }
+            let mut tmp_file = tmp_opts.open(&tmp_path)?;
+            tmp_file.write_all(password.as_bytes())?;
+            tmp_file.write_all(b"\n")?;
+            tmp_file.flush()?;
+            drop(tmp_file);
+            std::fs::rename(&tmp_path, path)?;
+            tighten_secret_file_permissions(path)?;
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
+}
 
-    file.write_all(password.as_bytes())?;
-    file.write_all(b"\n")?;
-    file.flush()?;
-    tighten_secret_file_permissions(&path)?;
-    Ok(())
+fn write_postgres_password_file(password: &str) -> Result<(), PostgresError> {
+    write_postgres_password_at(&postgres_password_file_path(), password)
 }
 
 fn read_or_create_postgres_password() -> Result<String, PostgresError> {
@@ -791,16 +820,17 @@ async fn reload_postgres_config(app_handle: &AppHandle) -> Result<(), PostgresEr
 async fn ensure_postgres_password_auth(app_handle: &AppHandle) -> Result<(), PostgresError> {
     let password = read_or_create_postgres_password()?;
     let sql = format!(
-        "SET password_encryption = 'scram-sha-256'; ALTER ROLE {} WITH PASSWORD {};",
+        "SET password_encryption = 'scram-sha-256';\nALTER ROLE {} WITH PASSWORD {};\n",
         POSTGRES_USER,
         sql_string_literal(&password)
     );
 
-    run_psql_scalar_sql_in_database(
+    run_psql_stdin_sql_in_database(
         app_handle,
         "postgres",
         "psql set desktop role password",
         &sql,
+        Some(&password),
     )
     .await?;
     write_pg_hba_for_desktop(&get_pgdata_dir())?;
@@ -1006,6 +1036,7 @@ pub async fn create_database_if_needed(app_handle: &AppHandle) -> Result<(), Pos
     let mut check_cmd = tokio::process::Command::new(&psql_path);
     check_cmd
         .args([
+            "-X",
             "-h",
             "localhost",
             "-p",
@@ -1051,6 +1082,7 @@ pub async fn create_database_if_needed(app_handle: &AppHandle) -> Result<(), Pos
     let mut create_cmd = tokio::process::Command::new(&psql_path);
     create_cmd
         .args([
+            "-X",
             "-h",
             "localhost",
             "-p",
@@ -1173,6 +1205,84 @@ async fn run_psql_scalar_sql(
     run_psql_scalar_sql_in_database(app_handle, POSTGRES_DB, label, sql).await
 }
 
+fn redact_secret_text(text: &str, secret: Option<&str>) -> String {
+    match secret.filter(|s| !s.is_empty()) {
+        Some(secret) => text.replace(secret, "[REDACTED]"),
+        None => text.to_string(),
+    }
+}
+
+async fn run_psql_stdin_sql_in_database(
+    app_handle: &AppHandle,
+    database: &str,
+    label: &str,
+    sql: &str,
+    redact_secret: Option<&str>,
+) -> Result<Output, PostgresError> {
+    use tokio::io::AsyncWriteExt;
+
+    let pgsql_bin = get_pgsql_bin_dir(app_handle);
+    let psql_path = pgsql_bin.join(format!("psql{}", EXE_SUFFIX));
+
+    if !psql_path.exists() {
+        return Err(PostgresError::BinaryNotFound(
+            psql_path.to_string_lossy().to_string(),
+        ));
+    }
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!(
+        "{}{}{}",
+        pgsql_bin.to_string_lossy(),
+        PATH_SEP,
+        current_path
+    );
+    let port = POSTGRES_PORT.to_string();
+
+    let mut cmd = tokio::process::Command::new(&psql_path);
+    cmd.args([
+        "-X",
+        "-h",
+        "localhost",
+        "-p",
+        &port,
+        "-U",
+        POSTGRES_USER,
+        "-d",
+        database,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-tA",
+    ])
+    .env("PGPASSWORD", read_or_create_postgres_password()?)
+    .env("PATH", &new_path)
+    .current_dir(&pgsql_bin)
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = cmd.spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(sql.as_bytes()).await;
+        let _ = stdin.shutdown().await;
+    }
+
+    let output = child.wait_with_output().await?;
+    if !output.status.success() {
+        let details = redact_secret_text(&command_output_details(label, &output), redact_secret);
+        log::error!("{} failed: {}", label, details);
+        return Err(PostgresError::MigrationFailed(format!(
+            "{} failed: {}",
+            label, details
+        )));
+    }
+
+    Ok(output)
+}
+
 async fn run_psql_scalar_sql_in_database(
     app_handle: &AppHandle,
     database: &str,
@@ -1199,6 +1309,7 @@ async fn run_psql_scalar_sql_in_database(
 
     let mut cmd = tokio::process::Command::new(&psql_path);
     cmd.args([
+        "-X",
         "-h",
         "localhost",
         "-p",
@@ -1232,14 +1343,13 @@ async fn run_psql_scalar_sql_in_database(
     Ok(output)
 }
 
-/// Ensure a requested backup destination stays inside the app's data directory.
-///
-/// The backup command is exposed over Tauri IPC and reachable from any script
-/// running in the webview, so `candidate` is untrusted. This resolves symlinks
-/// in the existing portion of the path and rejects `..` traversal or any
-/// absolute path that escapes the data directory, so a full pg_dump (guest PII
-/// and payment data) can never be written outside the app's own storage.
-fn ensure_within_data_dir(candidate: &Path) -> Result<PathBuf, PostgresError> {
+/// Ensure a requested backup destination stays strictly inside `root_dir` as a
+/// brand-new `.dump` file (no traversal, no symlinks escaping `root_dir`, and no
+/// overwriting of existing files).
+fn resolve_new_dump_within_dir(
+    root_dir: &Path,
+    candidate: &Path,
+) -> Result<PathBuf, PostgresError> {
     use std::path::Component;
 
     let reject =
@@ -1253,11 +1363,14 @@ fn ensure_within_data_dir(candidate: &Path) -> Result<PathBuf, PostgresError> {
         return Err(reject());
     }
 
-    let data_dir = get_data_directory();
-    // Creating the app's own data directory is always safe and lets us
-    // canonicalize the allow-list root even on a first run.
-    std::fs::create_dir_all(&data_dir)?;
-    let root = std::fs::canonicalize(&data_dir)?;
+    // Require `.dump` extension.
+    if candidate.extension().and_then(|ext| ext.to_str()) != Some("dump") {
+        return Err(reject());
+    }
+
+    // Creating the allow-list directory lets us canonicalize it even on first run.
+    std::fs::create_dir_all(root_dir)?;
+    let root = std::fs::canonicalize(root_dir)?;
 
     // Canonicalize the longest existing prefix of `candidate` (resolving any
     // symlinks in it), then re-append the not-yet-created trailing components.
@@ -1285,11 +1398,16 @@ fn ensure_within_data_dir(candidate: &Path) -> Result<PathBuf, PostgresError> {
         resolved.push(name);
     }
 
-    if !resolved.starts_with(&root) {
+    if !resolved.starts_with(&root) || resolved == root || resolved.exists() {
         return Err(reject());
     }
 
     Ok(resolved)
+}
+
+/// Restrict custom backup destinations strictly to the managed `backups/` directory.
+fn ensure_within_backups_dir(candidate: &Path) -> Result<PathBuf, PostgresError> {
+    resolve_new_dump_within_dir(&backups_directory(), candidate)
 }
 
 /// Mutual exclusion for operations that dump or overwrite the live
@@ -1365,8 +1483,8 @@ async fn backup_database_inner(
     };
 
     // `destination` is untrusted (the command is reachable from any webview
-    // script); keep the dump inside the app's data directory.
-    let backup_path = ensure_within_data_dir(&requested_path)?;
+    // script); keep the dump strictly inside the managed `backups/` directory.
+    let backup_path = ensure_within_backups_dir(&requested_path)?;
 
     if let Some(parent) = backup_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1910,77 +2028,133 @@ fn uploads_entry_is_restorable(
     Ok(())
 }
 
-/// Extract a `-uploads.tar.gz` into the data dir. Current uploads/ and
-/// private_uploads/ are renamed aside FIRST and only deleted after a clean
-/// extract — a corrupt tarball can never leave the app without its files.
-/// Every entry is validated by [`uploads_entry_is_restorable`] before the
-/// filesystem is touched: plain files and directories under the two upload
-/// roots only — no links, no traversal, no absolute paths.
-async fn restore_uploads_tarball(tarball_path: &Path) -> Result<(), PostgresError> {
-    let data_dir = get_data_directory();
+/// Extract a `-uploads.tar.gz` into `data_dir` synchronously (meant to run under
+/// `spawn_blocking`). Validates and copies each entry from one open archive
+/// handle into a private staging directory (eliminating TOCTOU races), swaps
+/// `uploads/` and `private_uploads/` with rollback on error, and ensures both
+/// upload directories exist even if the tarball omitted one of them.
+fn restore_uploads_tarball_sync(data_dir: &Path, tarball_path: &Path) -> Result<(), PostgresError> {
     let file = std::fs::File::open(tarball_path)?;
     let decoder = flate2::read::GzDecoder::new(file);
     let mut archive = tar::Archive::new(decoder);
 
-    // Pre-validate every entry before touching the filesystem.
-    for entry in archive.entries()? {
-        let entry = entry?;
-        let path = entry.path()?;
-        uploads_entry_is_restorable(&path, entry.header().entry_type()).map_err(|err| {
-            PostgresError::MigrationFailed(format!("Refusing uploads archive: {}", err))
-        })?;
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let staging_dir = data_dir.join(format!(".uploads-staging-{}", stamp));
+    if staging_dir.exists() {
+        std::fs::remove_dir_all(&staging_dir)?;
+    }
+    std::fs::create_dir_all(&staging_dir)?;
+
+    let extract_result: Result<(), PostgresError> = (|| {
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            let path = entry.path()?.into_owned();
+            let entry_type = entry.header().entry_type();
+            uploads_entry_is_restorable(&path, entry_type).map_err(|err| {
+                PostgresError::MigrationFailed(format!("Refusing uploads archive: {}", err))
+            })?;
+
+            let dest = staging_dir.join(&path);
+            match entry_type {
+                tar::EntryType::Directory => {
+                    std::fs::create_dir_all(&dest)?;
+                }
+                tar::EntryType::Regular => {
+                    if let Some(parent) = dest.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    let mut out = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&dest)?;
+                    std::io::copy(&mut entry, &mut out)?;
+                    out.flush()?;
+                }
+                _ => unreachable!("uploads_entry_is_restorable restricts to Regular/Directory"),
+            }
+        }
+        Ok(())
+    })();
+
+    if let Err(err) = extract_result {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(err);
     }
 
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    // Ensure both upload trees always exist after a restore, even when the
+    // archive omitted an empty directory.
+    for name in ["uploads", "private_uploads"] {
+        std::fs::create_dir_all(staging_dir.join(name))?;
+    }
+
     let mut retired: Vec<(PathBuf, PathBuf)> = Vec::new();
     for name in ["uploads", "private_uploads"] {
-        let dir = data_dir.join(name);
-        if dir.exists() {
+        let live_dir = data_dir.join(name);
+        if live_dir.exists() {
             let aside = data_dir.join(format!("{}.prerestore-{}", name, stamp));
-            std::fs::rename(&dir, &aside)?;
-            retired.push((aside, dir));
+            if let Err(err) = std::fs::rename(&live_dir, &aside) {
+                for (moved_aside, orig) in retired {
+                    let _ = std::fs::rename(&moved_aside, &orig);
+                }
+                let _ = std::fs::remove_dir_all(&staging_dir);
+                return Err(err.into());
+            }
+            retired.push((aside, live_dir));
         }
     }
 
-    // Re-open (entries() consumed the archive) and extract.
-    let file = std::fs::File::open(tarball_path)?;
-    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    match archive.unpack(&data_dir) {
-        Ok(()) => {
-            for (aside, _) in retired {
-                let _ = std::fs::remove_dir_all(&aside);
-            }
-            Ok(())
-        }
-        Err(err) => {
-            // Roll the renamed dirs back; name any that could not be moved
-            // back so their pre-restore contents stay findable at the aside
-            // path for manual recovery.
-            let mut stranded: Vec<PathBuf> = Vec::new();
-            for (aside, original) in retired {
-                let _ = std::fs::remove_dir_all(&original);
-                if std::fs::rename(&aside, &original).is_err() && aside.exists() {
-                    stranded.push(aside);
-                }
-            }
-            let rollback_note = if stranded.is_empty() {
-                "the previous uploads directories were restored in place".to_string()
-            } else {
-                format!(
-                    "the previous uploads directories could not be moved back; they are preserved at {}",
-                    stranded
-                        .iter()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            Err(PostgresError::MigrationFailed(format!(
-                "uploads restore failed: {}. {}",
-                err, rollback_note
-            )))
+    let mut install_err: Option<std::io::Error> = None;
+    for name in ["uploads", "private_uploads"] {
+        let staged = staging_dir.join(name);
+        let live_dir = data_dir.join(name);
+        if let Err(err) = std::fs::rename(&staged, &live_dir) {
+            install_err = Some(err);
+            break;
         }
     }
+
+    if let Some(err) = install_err {
+        let mut stranded: Vec<PathBuf> = Vec::new();
+        for (aside, original) in retired {
+            let _ = std::fs::remove_dir_all(&original);
+            if std::fs::rename(&aside, &original).is_err() && aside.exists() {
+                stranded.push(aside);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        let rollback_note = if stranded.is_empty() {
+            "the previous uploads directories were restored in place".to_string()
+        } else {
+            format!(
+                "the previous uploads directories could not be moved back; they are preserved at {}",
+                stranded
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        return Err(PostgresError::MigrationFailed(format!(
+            "uploads restore failed: {}. {}",
+            err, rollback_note
+        )));
+    }
+
+    let _ = std::fs::remove_dir_all(&staging_dir);
+    for (aside, _) in retired {
+        let _ = std::fs::remove_dir_all(&aside);
+    }
+    Ok(())
+}
+
+async fn restore_uploads_tarball(tarball_path: &Path) -> Result<(), PostgresError> {
+    let data_dir = get_data_directory();
+    let tarball = tarball_path.to_path_buf();
+    tokio::task::spawn_blocking(move || restore_uploads_tarball_sync(&data_dir, &tarball))
+        .await
+        .map_err(|err| {
+            PostgresError::MigrationFailed(format!("uploads restore task failed: {}", err))
+        })?
 }
 
 /// A managed-restore request that has passed validation: the named dump is a
@@ -2029,6 +2203,35 @@ pub async fn prepare_restore(
 /// failure can leave a half-restored database; the safety dump is the
 /// mitigation, which is why rollback is attempted immediately rather than
 /// left to the user.
+/// Recreate `hotel_management` from scratch before `pg_restore`, eliminating
+/// `--clean` dependency failures when restoring a dump that predates newer
+/// foreign-key-dependent tables.
+async fn reset_database_for_restore(app_handle: &AppHandle) -> Result<(), PostgresError> {
+    let sql = format!(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = {db_lit} AND pid <> pg_backend_pid();\nDROP DATABASE IF EXISTS {db};\nCREATE DATABASE {db} ENCODING 'UTF8';\n",
+        db = POSTGRES_DB,
+        db_lit = sql_string_literal(POSTGRES_DB),
+    );
+    run_psql_stdin_sql_in_database(
+        app_handle,
+        "postgres",
+        "psql reset desktop database",
+        &sql,
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn restore_and_patch_database(
+    app_handle: &AppHandle,
+    dump_path: &Path,
+) -> Result<(), PostgresError> {
+    reset_database_for_restore(app_handle).await?;
+    restore_backup_dump(app_handle, dump_path).await?;
+    run_database_setup(app_handle).await
+}
+
 pub async fn restore_prepared(
     app_handle: &AppHandle,
     prepared: PreparedRestore,
@@ -2043,9 +2246,9 @@ pub async fn restore_prepared(
         .to_string_lossy()
         .to_string();
 
-    if let Err(err) = restore_backup_dump(app_handle, &prepared.dump_path).await {
+    if let Err(err) = restore_and_patch_database(app_handle, &prepared.dump_path).await {
         // Best-effort auto-rollback to the pre-restore state.
-        let rollback_note = match restore_backup_dump(app_handle, &safety_path).await {
+        let rollback_note = match restore_and_patch_database(app_handle, &safety_path).await {
             Ok(()) => format!(
                 "The pre-restore state was rolled back automatically (safety backup: {}).",
                 safety_name
@@ -2391,8 +2594,7 @@ WITH updated AS (
         failed_login_attempts = 0,
         is_locked = false,
         locked_until = NULL
-    WHERE password_hash LIKE '$2a$%'
-       OR password_hash = {}
+    WHERE password_hash = {}
     RETURNING 1
 )
 SELECT COUNT(*) FROM updated;
@@ -2496,7 +2698,8 @@ async fn run_sql_file(app_handle: &AppHandle, file_path: &Path) -> Result<(), Po
     log::info!("Running SQL file: {:?}", file_path.file_name());
 
     let mut cmd = tokio::process::Command::new(&psql_path);
-    cmd.arg("-h")
+    cmd.arg("-X")
+        .arg("-h")
         .arg("localhost")
         .arg("-p")
         .arg(&port)
@@ -2828,5 +3031,99 @@ mod tests {
         assert!(is_valid_restore_filename(
             "hotel-backup-20260918-120000.dump"
         ));
+    }
+
+    #[test]
+    fn custom_backup_destination_is_confined_to_backups_dir() {
+        let base = std::env::temp_dir().join(format!("hotel-bakpath-{}", std::process::id()));
+        let backups_dir = base.join("backups");
+        let uploads_public = base.join("uploads").join("public");
+        std::fs::create_dir_all(&backups_dir).unwrap();
+        std::fs::create_dir_all(&uploads_public).unwrap();
+        let existing_dump = backups_dir.join("existing.dump");
+        std::fs::write(&existing_dump, b"old").unwrap();
+
+        // Valid new .dump inside backups_dir succeeds.
+        assert!(
+            resolve_new_dump_within_dir(&backups_dir, &backups_dir.join("manual.dump")).is_ok()
+        );
+
+        // Escapes, uploads/public, credentials, overwrite, and non-.dump fail.
+        for bad in [
+            uploads_public.join("db.dump"),
+            base.join("postgres-password.txt"),
+            base.join("pgdata").join("postgresql.conf"),
+            backups_dir.join("../uploads/db.dump"),
+            backups_dir.join("manual.sql"),
+            existing_dump,
+        ] {
+            assert!(
+                resolve_new_dump_within_dir(&backups_dir, &bad).is_err(),
+                "{bad:?} should be rejected"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn write_postgres_password_recovers_from_zero_byte_file() {
+        let dir = std::env::temp_dir().join(format!("hotel-pw-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pw_path = dir.join("postgres-password.txt");
+        std::fs::write(&pw_path, b"").unwrap();
+
+        assert_eq!(read_postgres_password_at(&pw_path).unwrap(), None);
+        write_postgres_password_at(&pw_path, "fresh-secret-pw").unwrap();
+        assert_eq!(
+            read_postgres_password_at(&pw_path).unwrap(),
+            Some("fresh-secret-pw".to_string())
+        );
+
+        // Non-empty file must not be overwritten.
+        write_postgres_password_at(&pw_path, "other-secret").unwrap();
+        assert_eq!(
+            read_postgres_password_at(&pw_path).unwrap(),
+            Some("fresh-secret-pw".to_string())
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_uploads_tarball_preserves_empty_private_uploads_and_rejects_links() {
+        let base = std::env::temp_dir().join(format!("hotel-uploads-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("uploads")).unwrap();
+        std::fs::create_dir_all(base.join("private_uploads")).unwrap();
+        std::fs::write(base.join("private_uploads/old.txt"), b"stale").unwrap();
+
+        let tarball = base.join("backup-uploads.tar.gz");
+        {
+            let gz = flate2::write::GzEncoder::new(
+                std::fs::File::create(&tarball).unwrap(),
+                flate2::Compression::default(),
+            );
+            let mut builder = tar::Builder::new(gz);
+            builder.append_dir("uploads", base.join("uploads")).unwrap();
+            let mut hdr = tar::Header::new_gnu();
+            let data = b"hello";
+            hdr.set_size(data.len() as u64);
+            hdr.set_mode(0o644);
+            hdr.set_cksum();
+            builder
+                .append_data(&mut hdr, "uploads/photo.jpg", &data[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+
+        restore_uploads_tarball_sync(&base, &tarball).unwrap();
+        assert_eq!(
+            std::fs::read(base.join("uploads/photo.jpg")).unwrap(),
+            b"hello"
+        );
+        assert!(base.join("private_uploads").is_dir());
+        assert!(!base.join("private_uploads/old.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

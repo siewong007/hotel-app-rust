@@ -239,6 +239,8 @@ jobs:
             "$bundle_dir/database/patches/0030_hotel_currency_defaults.sql"
           cp hotel-app-be/database/postgres/patches/0031_manager_owns_user_management.sql \
             "$bundle_dir/database/patches/0031_manager_owns_user_management.sql"
+          cp hotel-app-be/database/postgres/patches/0032_full_audit_schema_fixes.sql \
+            "$bundle_dir/database/patches/0032_full_audit_schema_fixes.sql"
           cp hotel-app-be/database/postgres/patches/0025_booking_groups.sql \
             "$bundle_dir/database/patches/0025_booking_groups.sql"
           cp deploy/db-least-privilege.sql "$bundle_dir/database/db-least-privilege.sql"
@@ -287,6 +289,7 @@ jobs:
               database/patches/0029_voucher_allocation_per_room_night.sql \
               database/patches/0030_hotel_currency_defaults.sql \
               database/patches/0031_manager_owns_user_management.sql \
+              database/patches/0032_full_audit_schema_fixes.sql \
               database/db-least-privilege.sql \
               > SHA256SUMS
           )
@@ -328,10 +331,32 @@ jobs:
              docker image prune -f >/dev/null 2>&1 || true
              # Failed deploys leave per-SHA image tags behind; deploy.sh's
              # cleanup_old_images only runs after a *successful* release, so
-             # they accumulate until this check fails. Docker refuses to
-             # remove images still referenced by a container, so the live
-             # release stays untouched.
+             # they accumulate until this check fails. Protect active/rollback
+             # tags across both production and staging plus recently loaded images.
+             protected_tags='$DEPLOY_SHA'
+             for tag_file in /opt/saliminn/current-tag /opt/saliminn-staging/current-tag; do
+               if [ -r \"\$tag_file\" ]; then
+                 protected_tags=\"\$protected_tags \$(tr -d '[:space:]' < \"\$tag_file\")\"
+               fi
+             done
+             for rel_dir in /opt/saliminn/releases /opt/saliminn-staging/releases; do
+               if [ -d \"\$rel_dir\" ]; then
+                 for recent in \$(ls -1t \"\$rel_dir\" 2>/dev/null | head -n 4 || true); do
+                   protected_tags=\"\$protected_tags \${recent%.incoming}\"
+                 done
+               fi
+             done
+             now_epoch=\$(date -u +%s)
              for release_image in \$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E ':[0-9a-f]{40}\$' || true); do
+               image_tag=\${release_image##*:}
+               case \" \$protected_tags \" in
+                 *\" \$image_tag \"*) continue ;;
+               esac
+               created_at=\$(docker image inspect --format '{{.Created}}' \"\$release_image\" 2>/dev/null || true)
+               created_epoch=\$(date -u -d \"\$created_at\" +%s 2>/dev/null || echo 0)
+               if [ \"\$created_epoch\" -gt 0 ] && [ \$((now_epoch - created_epoch)) -lt 3600 ]; then
+                 continue
+               fi
                docker image rm \"\$release_image\" >/dev/null 2>&1 || true
              done
              find /tmp -maxdepth 1 -name 'saliminn-*.tar.gz*' -mmin +60 -delete 2>/dev/null || true

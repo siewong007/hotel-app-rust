@@ -3,6 +3,8 @@
 // from the staff-facing Guest/Booking types — the portal only ever exposes a
 // guest-safe subset of fields, so these are intentionally their own shapes.
 
+import type { ConsentAcceptance } from '../features/legal/useConsent';
+
 /** Guest-safe profile returned by the guest portal login/me endpoints. */
 export interface GuestPortalGuest {
   nick_name: string;
@@ -289,6 +291,7 @@ export interface GuestPortalEkycSubmission {
   phone?: string | null;
   email?: string | null;
   current_address?: string | null;
+  consents?: ConsentAcceptance[];
 }
 
 /** Response from `POST /guest-portal/me/ekyc/documents`. */

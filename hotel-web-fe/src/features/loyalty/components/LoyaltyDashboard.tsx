@@ -341,7 +341,16 @@ const LoyaltyDashboard: React.FC = () => {
 
   // Show eKYC requirement for guests
   if (ekycRequired && !isAdmin) {
-    const showButton = ekycStatus !== 'pending' && ekycStatus !== 'under_review';
+    const isEkycPending = [
+      'pending',
+      'submitted',
+      'automated_review',
+      'pending_manual_review',
+      'in_review',
+      'escalated',
+      'under_review',
+    ].includes(ekycStatus ?? '');
+    const showButton = !isEkycPending;
 
     return (
       <Box sx={{ m: 3 }}>
@@ -359,7 +368,7 @@ const LoyaltyDashboard: React.FC = () => {
           }}>
             {t('dashboard.ekycStatus', { status: ekycStatus ? statusLabel(t, 'ekyc', ekycStatus) : t('dashboard.ekycNotStarted') })}
           </Typography>
-          {(ekycStatus === 'pending' || ekycStatus === 'under_review') && (
+          {isEkycPending && (
             <Typography variant="body2" sx={{
               color: "text.secondary"
             }}>
@@ -473,7 +482,7 @@ const LoyaltyDashboard: React.FC = () => {
         ) : (
           <Grid container spacing={3}>
             {rewards.map((reward) => {
-              const tierConfig = getTierConfig(reward.minimum_tier_level);
+              const tierConfig = getTierConfig(reward.minimum_tier_level ?? 1);
 
               return (
                 <Grid key={reward.id} size={{ xs: 12, sm: 6, md: 4 }}>
@@ -656,7 +665,7 @@ const LoyaltyDashboard: React.FC = () => {
                     title={reward.name}
                     subtitle={t('dashboard.subtitlePts', { category: categoryLabel(reward.category), points: formatNumber(reward.points_cost) })}
                     meta={t('dashboard.metaStock', {
-                      tier: tierName(reward.minimum_tier_level),
+                      tier: tierName(reward.minimum_tier_level ?? 1),
                       stock: reward.stock_quantity !== null && reward.stock_quantity !== undefined ? formatNumber(reward.stock_quantity) : '∞',
                     }) + (reward.monetary_value ? t('dashboard.metaValue', { symbol: currencySymbol, amount: formatNumber(reward.monetary_value) }) : '')}
                     footer={
@@ -712,11 +721,11 @@ const LoyaltyDashboard: React.FC = () => {
                     <TableCell>{formatNumber(reward.points_cost)}</TableCell>
                     <TableCell>
                       <Chip
-                        label={tierName(reward.minimum_tier_level)}
+                        label={tierName(reward.minimum_tier_level ?? 1)}
                         size="small"
                         sx={{
-                          bgcolor: getTierConfig(reward.minimum_tier_level).bgColor,
-                          color: getTierConfig(reward.minimum_tier_level).color,
+                          bgcolor: getTierConfig(reward.minimum_tier_level ?? 1).bgColor,
+                          color: getTierConfig(reward.minimum_tier_level ?? 1).color,
                         }}
                       />
                     </TableCell>
@@ -1070,10 +1079,10 @@ const LoyaltyDashboard: React.FC = () => {
                         zIndex: 1,
                       }}
                     >
-                      <Tooltip title={t('dashboard.requiresTier', { tier: tierName(reward.minimum_tier_level) })}>
+                      <Tooltip title={t('dashboard.requiresTier', { tier: tierName(reward.minimum_tier_level ?? 1) })}>
                         <Chip
                           icon={<LockIcon />}
-                          label={tierName(reward.minimum_tier_level)}
+                          label={tierName(reward.minimum_tier_level ?? 1)}
                           size="small"
                           sx={{
                             bgcolor: 'var(--hotel-scrim)',
@@ -1107,7 +1116,7 @@ const LoyaltyDashboard: React.FC = () => {
                       height: 200,
                       background: reward.image_url
                         ? `url(${reward.image_url})`
-                        : `color-mix(in srgb, ${getTierConfig(reward.minimum_tier_level).color} 16%, var(--hotel-surface-raised))`,
+                        : `color-mix(in srgb, ${getTierConfig(reward.minimum_tier_level ?? 1).color} 16%, var(--hotel-surface-raised))`,
                       backgroundSize: 'cover',
                       backgroundPosition: 'center',
                       display: 'flex',

@@ -45,7 +45,7 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { useIsPhone } from '../../../hooks/useIsPhone';
 import { useBookingsWithDetails } from '../../bookings/hooks/useBookingQueries';
 import { useRooms } from '../hooks/useRoomQueries';
-import { formatLocalDate } from '../../../utils/date';
+import { formatLocalDate, parseLocalDate } from '../../../utils/date';
 import { formatHoldRange, selectSoonestHoldingBooking } from '../utils/roomManagementUtils';
 import { useTranslation } from '../../../i18n/useTranslation';
 import { dateFormatter } from '../../../i18n/format';
@@ -265,8 +265,8 @@ const RoomReservationTimeline: React.FC = () => {
         if (['checked_out', 'voided'].includes(b.status as string)) return false;
         const isCheckedIn = b.status === 'checked_in' || b.status === 'auto_checked_in';
         if (isCheckedIn) return true;
-        const bookingEnd = new Date(b.check_out_date);
-        const bookingStart = new Date(b.check_in_date);
+        const bookingEnd = parseLocalDate(b.check_out_date);
+        const bookingStart = parseLocalDate(b.check_in_date);
         return bookingStart <= endDate && bookingEnd >= startDate;
       })
       .map((b: BookingWithDetails) => ({
@@ -333,7 +333,7 @@ const RoomReservationTimeline: React.FC = () => {
     day.setHours(0, 0, 0, 0);
     const t = day.getTime();
     const dayTime = (v: string) => {
-      const d = new Date(v);
+      const d = parseLocalDate(v);
       d.setHours(0, 0, 0, 0);
       return d.getTime();
     };
@@ -669,9 +669,9 @@ const RoomReservationTimeline: React.FC = () => {
                                 textOverflow: 'ellipsis',
                               }}
                             >
-                              {dateFormatter({ month: 'short', day: 'numeric' }).format(new Date(b.check_in_date))}
+                              {dateFormatter({ month: 'short', day: 'numeric' }).format(parseLocalDate(b.check_in_date))}
                               {' → '}
-                              {dateFormatter({ month: 'short', day: 'numeric' }).format(new Date(b.check_out_date))}
+                              {dateFormatter({ month: 'short', day: 'numeric' }).format(parseLocalDate(b.check_out_date))}
                               {b.number_of_guests ? ` · ${t('common:count.guests', { count: b.number_of_guests })}` : ''}
                             </Typography>
                           </Box>
@@ -1094,9 +1094,9 @@ const RoomReservationTimeline: React.FC = () => {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
                 <CalendarToday sx={{ fontSize: 16, color: PALETTE.ink }} />
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {dateFormatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(hoveredBooking.check_in_date))}
+                  {dateFormatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(parseLocalDate(hoveredBooking.check_in_date))}
                   {' → '}
-                  {dateFormatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(hoveredBooking.check_out_date))}
+                  {dateFormatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(parseLocalDate(hoveredBooking.check_out_date))}
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', gap: 2 }}>
@@ -1105,7 +1105,7 @@ const RoomReservationTimeline: React.FC = () => {
                     color: "text.secondary"
                   }}>{t('fields.nights')}</Typography>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {hoveredBooking.number_of_nights || Math.ceil((new Date(hoveredBooking.check_out_date).getTime() - new Date(hoveredBooking.check_in_date).getTime()) / 86400000)}
+                    {hoveredBooking.number_of_nights || Math.round((parseLocalDate(hoveredBooking.check_out_date).getTime() - parseLocalDate(hoveredBooking.check_in_date).getTime()) / 86400000)}
                   </Typography>
                 </Box>
                 {hoveredBooking.number_of_guests && (

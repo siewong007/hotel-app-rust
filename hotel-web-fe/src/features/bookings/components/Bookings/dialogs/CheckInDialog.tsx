@@ -5,7 +5,7 @@ import { GuestsService } from '../../../../../api';
 import { useCheckInGuestMutation } from '../../../hooks/useBookingQueries';
 import { useCurrency } from '../../../../../hooks/useCurrency';
 import { getHotelSettings } from '../../../../../utils/hotelSettings';
-import { isPositiveMoney, toMoneyNumber } from '../../../../../utils/money';
+import { isPositiveMoney, subtractMoney, toMoneyNumber } from '../../../../../utils/money';
 import { emitApiNotification } from '../../../../../utils/apiNotifications';
 import { getErrorMessage } from '../../../utils/bookingPageUtils';
 import { useTranslation } from '../../../../../i18n';
@@ -43,9 +43,14 @@ const CheckInDialog: React.FC<CheckInDialogProps> = ({ open, booking, onClose, o
     setSeededFor({ open, booking });
     if (open && booking) {
       const totalAmt = toMoneyNumber(booking.total_amount);
-      setPaymentChoice(booking.payment_status === 'paid' ? 'pay_now' : 'pay_later');
+      const remainingDue =
+        booking.balance_due !== undefined && booking.balance_due !== null
+          ? Math.max(0, toMoneyNumber(booking.balance_due))
+          : Math.max(0, subtractMoney(totalAmt, toMoneyNumber(booking.total_paid)));
+      const alreadyPaid = booking.payment_status === 'paid' || !isPositiveMoney(remainingDue);
+      setPaymentChoice('pay_later');
       setPaymentMethod(booking.payment_method || 'Cash');
-      setAmountPaid(totalAmt);
+      setAmountPaid(alreadyPaid ? 0 : remainingDue);
       setDepositChoice('receive');
       setDepositAmount(getHotelSettings().deposit_amount);
       setDepositMethod('Cash');
@@ -111,7 +116,10 @@ const CheckInDialog: React.FC<CheckInDialogProps> = ({ open, booking, onClose, o
           ...(phone.trim() ? { phone: phone.trim() } : {}),
         },
       };
-      if (paymentChoice === 'pay_now' && isPositiveMoney(amountPaid)) {
+      const isAlreadyPaid =
+        booking.payment_status === 'paid' ||
+        (booking.balance_due !== undefined && booking.balance_due !== null && !isPositiveMoney(booking.balance_due));
+      if (!isAlreadyPaid && paymentChoice === 'pay_now' && isPositiveMoney(amountPaid)) {
         checkinPayload.payment_record = {
           amount: toMoneyNumber(amountPaid),
           payment_method: paymentMethod,

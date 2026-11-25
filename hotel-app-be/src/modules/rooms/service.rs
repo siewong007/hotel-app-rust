@@ -981,14 +981,22 @@ pub async fn end_maintenance_handler(
         ));
     }
 
-    rq::end_maintenance_set_available(&pool, room_id).await?;
+    if matches!(status.as_str(), "dirty" | "cleaning" | "reserved_dirty") {
+        return Err(ApiError::BadRequest(format!(
+            "Room is not in maintenance status (current status: {})",
+            status
+        )));
+    }
+
+    let next_status = rq::next_room_status(&pool, room_id).await?;
+    rq::end_maintenance_set_available(&pool, &next_status, room_id).await?;
 
     let status_label = current_status.clone();
 
     let _ = rq::insert_room_status_event(
         &pool,
         room_id,
-        format!("Ended {} - Room available", status_label),
+        format!("Ended {} - Room now {}", status_label, next_status),
         user_id,
     )
     .await;
@@ -1006,7 +1014,7 @@ pub async fn end_maintenance_handler(
             details: Some(serde_json::json!({
                 "room_number": room.room_number,
                 "from_status": status_label,
-                "to_status": "available"
+                "to_status": next_status
             })),
             ..Default::default()
         },
@@ -1274,7 +1282,8 @@ pub async fn get_room_change_history_handler(
     let limit = params
         .get("limit")
         .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(50);
+        .unwrap_or(50)
+        .clamp(1, 500);
 
     let rows = rq::fetch_room_change_history(&pool, booking_id, guest_id, room_id, limit).await?;
 
@@ -1338,12 +1347,30 @@ pub async fn create_room_event_handler(
 
     let scheduled_date = if let Some(date_str) = &input.scheduled_date {
         Some(
-            NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+            crate::utils::date::parse_date_flexible(date_str)
                 .map_err(|_| ApiError::BadRequest("Invalid date. Use YYYY-MM-DD".to_string()))?,
         )
     } else {
         None
     };
+
+    let today = crate::core::db::hotel_today(&pool)
+        .await
+        .unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    let is_immediate = scheduled_date.is_none_or(|d| d <= today);
+    let current_status = rq::room_status(&pool, room_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Room not found".to_string()))?;
+    if input.event_type == "maintenance"
+        && input.status != "completed"
+        && input.status != "void"
+        && is_immediate
+        && current_status == "occupied"
+    {
+        return Err(ApiError::BadRequest(
+            "Cannot schedule maintenance while room is occupied".to_string(),
+        ));
+    }
 
     let priority = input.priority.as_deref().unwrap_or("normal");
 
@@ -1369,7 +1396,12 @@ pub async fn create_room_event_handler(
     )
     .await?;
 
-    if input.event_type == "cleaning" || input.event_type == "maintenance" {
+    if (input.event_type == "cleaning" || input.event_type == "maintenance")
+        && input.status != "completed"
+        && input.status != "void"
+        && is_immediate
+        && current_status != "occupied"
+    {
         let _ = rq::set_room_status_simple(&pool, &input.event_type, room_id).await;
     }
 

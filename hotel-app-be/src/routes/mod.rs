@@ -387,6 +387,7 @@ pub fn create_router(pool: DbPool) -> Router {
                     axum::http::HeaderName::from_static(
                         crate::modules::data_transfer::routes::BACKUP_PASSPHRASE_HEADER,
                     ),
+                    axum::http::HeaderName::from_static("x-booking-access-token"),
                     // Connect/gRPC-Web request headers — needed for cross-origin
                     // browser calls to the tonic services (dev mode's Any
                     // branch already permits them).
@@ -402,6 +403,7 @@ pub fn create_router(pool: DbPool) -> Router {
                     // can only read when exposed.
                     axum::http::HeaderName::from_static("grpc-status"),
                     axum::http::HeaderName::from_static("grpc-message"),
+                    axum::http::HeaderName::from_static("grpc-status-details-bin"),
                     axum::http::HeaderName::from_static("grpc-encoding"),
                     axum::http::HeaderName::from_static("grpc-accept-encoding"),
                 ])
@@ -481,7 +483,11 @@ pub fn create_router(pool: DbPool) -> Router {
     // canonical `/{package}.{Service}/{Method}` URLs. Built before `app`
     // because the pool moves into `with_state` below; the tonic router is
     // Router<()> and merges into the completed Router<()> afterwards.
-    let grpc_router = crate::grpc::grpc_router(pool.clone());
+    let grpc_router = crate::grpc::grpc_router(
+        pool.clone(),
+        data_change_hub.clone(),
+        availability_hub.clone(),
+    );
 
     // Build all routes
     let app = Router::new()

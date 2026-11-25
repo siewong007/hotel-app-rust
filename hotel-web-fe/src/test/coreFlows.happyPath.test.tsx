@@ -300,10 +300,10 @@ describe('Core Hotel Business Flows (Happy Path Integration)', () => {
       post.mockReturnValue(mockJsonResponse(checkedInBooking));
 
       const checkInResult = await BookingsService.checkInGuest('99', {
-        checkin_notes: 'Key card issued at reception',
+        booking_update: { remarks: 'Key card issued at reception' },
       });
       expect(post).toHaveBeenCalledWith('bookings/99/checkin', {
-        json: { checkin_notes: 'Key card issued at reception' },
+        json: { booking_update: { remarks: 'Key card issued at reception' } },
       });
       expect(checkInResult.status).toBe('checked_in');
 
@@ -365,19 +365,27 @@ describe('Core Hotel Business Flows (Happy Path Integration)', () => {
       });
       expect(review.summary.status).toBe('approved');
 
-      const mockStats = {
-        total_members: 120,
-        active_members: 115,
-        tier_counts: { silver: 80, gold: 30, platinum: 10 },
-        total_points_issued: 50000,
-        total_points_redeemed: 15000,
-      };
-      get.mockReturnValue(mockJsonResponse(mockStats));
+      const mockRewards = [
+        {
+          id: 1,
+          name: 'Late Checkout',
+          category: 'service',
+          points_cost: 500,
+          minimum_tier_id: 2,
+          minimum_tier_name: 'Silver',
+          inventory_count: 10,
+          is_active: true,
+        },
+      ];
+      get.mockReturnValue(mockJsonResponse(mockRewards));
 
-      const stats = await LoyaltyService.getLoyaltyStatistics();
-      expect(get).toHaveBeenCalledWith('loyalty/statistics');
-      expect(stats.total_members).toBe(120);
-      expect(stats.active_members).toBe(115);
+      const rewards = await LoyaltyService.getRewards();
+      expect(get).toHaveBeenCalledWith('admin/loyalty/rewards', {
+        searchParams: { include_inactive: true },
+      });
+      expect(rewards).toHaveLength(1);
+      expect(rewards[0].minimum_tier_level).toBe(2);
+      expect(rewards[0].stock_quantity).toBe(10);
     });
   });
 });

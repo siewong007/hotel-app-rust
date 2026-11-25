@@ -552,6 +552,16 @@ impl AuthService {
         .execute(pool)
         .await?;
 
+        sqlx::query(
+            r#"
+            DELETE FROM guest_portal_sessions
+            WHERE guest_id = (SELECT guest_id FROM users WHERE id = $1)
+            "#,
+        )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+
         Ok(())
     }
 
@@ -946,6 +956,7 @@ impl AuthService {
         secret: &str,
         recovery_codes: &[String],
     ) -> Result<(), sqlx::Error> {
+        let encrypted_secret = Self::encrypt_stored_totp_secret(secret);
         let recovery_code_hashes = Self::recovery_codes_for_storage(recovery_codes);
 
         sqlx::query(
@@ -959,7 +970,7 @@ impl AuthService {
             "#,
         )
         .bind(user_id)
-        .bind(secret)
+        .bind(&encrypted_secret)
         .bind(&recovery_code_hashes)
         .execute(pool)
         .await?;

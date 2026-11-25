@@ -166,8 +166,8 @@ async fn delete_guest(
     headers: HeaderMap,
     path: Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_permission_helper(&pool, &headers, "guests:delete").await?;
-    handlers::delete_guest_handler(State(pool), path).await
+    let user_id = require_permission_helper(&pool, &headers, "guests:delete").await?;
+    handlers::delete_guest_handler(State(pool), Extension(user_id), path).await
 }
 
 async fn get_guest_bookings(

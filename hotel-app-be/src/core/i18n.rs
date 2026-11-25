@@ -137,7 +137,7 @@ impl Locale {
                     part.strip_prefix("q=").and_then(|q| q.trim().parse().ok())
                 })
                 .unwrap_or(1.0_f32);
-            if quality <= 0.0 {
+            if !quality.is_finite() || quality <= 0.0 {
                 continue;
             }
             let Some(locale) = Locale::parse(tag) else {

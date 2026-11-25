@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   roles: [] as string[],
+  permissions: [] as string[],
+  userType: 'guest' as 'guest' | 'admin',
   navigate: vi.fn(),
 }));
 
@@ -12,7 +14,33 @@ vi.mock('../../../router', () => ({
 
 vi.mock('../../../auth/AuthContext', () => ({
   useAuth: () => ({
+    user: { user_type: mocks.userType },
     hasRole: (role: string) => mocks.roles.includes(role),
+    hasPermission: (perm: string) => mocks.permissions.includes(perm),
+    getRoutePolicy: (routeId: string) => {
+      if (routeId === 'support') {
+        return {
+          route_id: 'support',
+          path: '/support',
+          required_permissions: ['support:read'],
+          required_roles: [],
+          excluded_roles: [],
+          nav_permissions: ['support:read'],
+          nav_roles: [],
+          nav_excluded_roles: [],
+        };
+      }
+      return {
+        route_id: routeId,
+        path: `/${routeId}`,
+        required_permissions: ['restricted:none'],
+        required_roles: [],
+        excluded_roles: [],
+        nav_permissions: ['restricted:none'],
+        nav_roles: [],
+        nav_excluded_roles: [],
+      };
+    },
   }),
 }));
 
@@ -29,6 +57,8 @@ import DashboardRouter from './DashboardRouter';
 describe('DashboardRouter', () => {
   beforeEach(() => {
     mocks.roles = [];
+    mocks.permissions = [];
+    mocks.userType = 'guest';
     mocks.navigate.mockReset();
   });
 
@@ -76,5 +106,26 @@ describe('DashboardRouter', () => {
 
     expect(screen.getByTestId('receptionist-dashboard')).toBeTruthy();
     expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('routes non-dashboard staff roles to their first allowed route instead of /guest-portal', () => {
+    mocks.userType = 'admin';
+    mocks.roles = ['support_readonly'];
+    mocks.permissions = ['support:read', 'navigation_support:read'];
+
+    render(<DashboardRouter />);
+
+    expect(mocks.navigate).toHaveBeenCalledWith('/support', { replace: true });
+    expect(mocks.navigate).not.toHaveBeenCalledWith('/guest-portal', expect.anything());
+  });
+
+  it('falls back to /profile when a staff user holds no permitted sidebar routes', () => {
+    mocks.userType = 'admin';
+    mocks.roles = ['custom_limited'];
+    mocks.permissions = [];
+
+    render(<DashboardRouter />);
+
+    expect(mocks.navigate).toHaveBeenCalledWith('/profile', { replace: true });
   });
 });

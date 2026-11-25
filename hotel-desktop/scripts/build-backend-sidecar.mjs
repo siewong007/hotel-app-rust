@@ -49,6 +49,8 @@ const inputs = [
   join(backendRoot, 'Cargo.toml'),
   join(backendRoot, 'Cargo.lock'),
   join(backendRoot, 'build.rs'),
+  join(backendRoot, 'database', 'postgres', 'patches', 'manifest.tsv'),
+  join(backendRoot, 'proto'),
   join(repoRoot, 'rust-toolchain.toml'),
   join(repoRoot, '.cargo'),
 ];

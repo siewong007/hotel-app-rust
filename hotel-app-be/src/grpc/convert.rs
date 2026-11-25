@@ -148,12 +148,12 @@ pub fn opt_ts(dt: &Option<DateTime<Utc>>) -> Option<Timestamp> {
     dt.as_ref().map(ts)
 }
 
-/// Proto timestamp → RFC 3339 string, for the couple of REST inputs that
-/// take a string datetime.
-pub fn ts_to_rfc3339(t: Option<&Timestamp>) -> Result<Option<String>, Status> {
+/// Proto timestamp → `"YYYY-MM-DD"` date string for REST inputs that take a
+/// date string.
+pub fn ts_to_ymd(t: Option<&Timestamp>) -> Result<Option<String>, Status> {
     t.map(|t| {
         DateTime::from_timestamp(t.seconds, t.nanos as u32)
-            .map(|dt| dt.to_rfc3339())
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
             .ok_or_else(|| Status::invalid_argument("invalid timestamp value"))
     })
     .transpose()

@@ -67,6 +67,9 @@ pub async fn authenticate(pool: &DbPool, metadata: &MetadataMap) -> Result<GrpcA
     match AuthService::is_session_active(pool, user_id, &session_id).await {
         Ok(true) => Ok(GrpcAuth { user_id, headers }),
         Ok(false) => Err(Status::unauthenticated("Session has been logged out")),
-        Err(e) => Err(Status::internal(format!("Session validation failed: {e}"))),
+        Err(e) => {
+            log::error!("gRPC session validation failed: {e}");
+            Err(Status::internal("Session validation failed"))
+        }
     }
 }

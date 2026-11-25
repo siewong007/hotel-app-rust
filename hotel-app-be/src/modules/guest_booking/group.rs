@@ -828,6 +828,7 @@ async fn create_group_inner(
         ),
     };
 
+    let locale = crate::core::i18n::mail_locale(pool, language.as_deref()).await;
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let room_type_ids: Vec<i64> = input.rooms.iter().map(|room| room.room_type_id).collect();
     BookingGroupRepository::lock_room_types_tx(&mut tx, &room_type_ids).await?;
@@ -932,7 +933,7 @@ async fn create_group_inner(
             settled_by_credits: false,
             anonymous: access.is_some(),
             access_token: access.as_ref().map(|(token, _)| token.as_str()),
-            locale: crate::core::i18n::mail_locale(pool, language.as_deref()).await,
+            locale,
         });
         CommunicationsRepository::insert_delivery_tx(
             &mut tx,
@@ -1152,10 +1153,11 @@ fn complimentary_reason(quote: &GuestBookingQuote) -> Option<String> {
     })
 }
 
-/// A room whose every payable cent was settled by credits is confirmed at
-/// once, exactly like a fully comped single-room booking.
+/// A room whose every payable cent was settled by credits or a 100% voucher is
+/// confirmed at once, preserving the 0-balance confirmation semantics.
 fn room_settled_by_credits(room: &GroupRoomQuote) -> bool {
-    room.quote.complimentary_nights > 0 && room.room_total <= Decimal::ZERO
+    (room.quote.complimentary_nights > 0 || room.quote.discount_amount > Decimal::ZERO)
+        && room.room_total <= Decimal::ZERO
 }
 
 /// Spend the cart's credits (per room type) and its voucher.

@@ -54,7 +54,7 @@ const guestProfilePath = (guestId: number) => `/guest-relations/guests/${guestId
  * through `useCompleteFollowUp`.
  */
 const GuestRelationsFollowUpsPage: React.FC = () => {
-  const { t } = useTranslation('guests');
+  const { t, tOr } = useTranslation('guests');
   const navigate = useNavigate();
   const [pageSearchParams] = useSearchParams();
   const { hasPermission } = useAuth();
@@ -161,7 +161,7 @@ const GuestRelationsFollowUpsPage: React.FC = () => {
         // intentional: dynamic key — interaction_type is a DB enum value; unknown values humanize
         <Chip
           size="small"
-          label={formatStatusLabel(info.row.original.interaction_type)}
+          label={tOr(`interactions.types.${info.row.original.interaction_type}`, formatStatusLabel(info.row.original.interaction_type))}
           sx={{ bgcolor: GUEST_DESIGN.paper3, color: GUEST_DESIGN.ink2, fontWeight: 600 }}
         />
       ),
@@ -271,7 +271,7 @@ const GuestRelationsFollowUpsPage: React.FC = () => {
         );
       },
     },
-  ], [completingFollowUp, completingVariables, handleMarkDone, t]);
+  ], [completingFollowUp, completingVariables, handleMarkDone, t, tOr]);
 
   const pagination = React.useMemo(
     () => getPaginationState({ page: currentPage, pageSize, totalItems: total }),

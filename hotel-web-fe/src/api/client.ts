@@ -179,8 +179,15 @@ function isAuthEndpoint(url: string): boolean {
     '/auth/passkey',
     '/auth/refresh',
     '/auth/register',
+    '/auth/google',
+    '/auth/2fa/',
+    '/profile/2fa/',
+    '/profile/password',
+    '/data-transfer/step-up',
   ].some(endpoint => pathname.includes(endpoint));
 }
+
+let authGeneration = 0;
 
 // Guest-portal endpoints use their own bearer token (sessionStorage-backed,
 // see src/features/guest-portal/api/portalTokenStore.ts) — a 401 there says
@@ -195,6 +202,7 @@ function isGuestPortalRequest(url: string): boolean {
 }
 
 function clearStoredAuth(): void {
+  authGeneration += 1;
   clearAccessToken();
   storage.removeItem('user');
   storage.removeItem('roles');
@@ -210,6 +218,7 @@ function clearStoredAuth(): void {
  */
 export async function refreshAccessToken(): Promise<RefreshTokenResponse | null> {
   if (!refreshPromise) {
+    const startGeneration = authGeneration;
     const requestRefresh = () => ky.post(apiUrl('auth/refresh'), {
       credentials: 'include',
       timeout: REFRESH_TIMEOUT_MS,
@@ -218,6 +227,9 @@ export async function refreshAccessToken(): Promise<RefreshTokenResponse | null>
     // Never race a sign-out: refresh only once its revoke has landed.
     refreshPromise = (pendingLogout ? pendingLogout.then(requestRefresh) : requestRefresh())
       .then(tokens => {
+        if (startGeneration !== authGeneration) {
+          return null;
+        }
         setAccessToken(tokens.access_token);
         window.dispatchEvent(new CustomEvent('auth:tokens-refreshed', {
           detail: { accessToken: tokens.access_token },
@@ -241,6 +253,7 @@ export async function refreshAccessToken(): Promise<RefreshTokenResponse | null>
  * must not reject — AuthContext.logout swallows the request's errors.
  */
 export function trackPendingLogout(logout: Promise<void>): void {
+  authGeneration += 1;
   pendingLogout = logout;
   void logout.finally(() => {
     if (pendingLogout === logout) {
@@ -380,9 +393,13 @@ export const api = ky.create({
           console.error('401 Unauthorized response for:', request.method, request.url);
 
           // Only refresh/logout for 401s on protected STAFF endpoints — auth
-          // endpoints and guest-portal requests (separate session, handled by
-          // the portal's own hooks) must not clear the staff session.
-          if (!isAuthEndpoint(request.url) && !isGuestPortalRequest(request.url)) {
+          // endpoints, step-up verified calls, and guest-portal requests
+          // must not rotate or clear the staff session.
+          if (
+            !isAuthEndpoint(request.url) &&
+            !isGuestPortalRequest(request.url) &&
+            !request.headers.has('X-Step-Up')
+          ) {
             const refreshed = await refreshAccessToken();
             if (refreshed) {
               const retryResponse = await retryWithFreshAccessToken(request, options);

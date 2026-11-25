@@ -174,8 +174,8 @@ async fn preview_import(
     headers: HeaderMap,
     Json(request): Json<models::ImportPreviewRequest>,
 ) -> Result<Json<models::ImportPreview>, ApiError> {
-    require_permission_helper(&pool, &headers, "data_transfer:import").await?;
-    handlers::preview_import_handler(State(pool), Json(request)).await
+    let user_id = require_permission_helper(&pool, &headers, "data_transfer:import").await?;
+    handlers::preview_import_handler(State(pool), user_id, Json(request)).await
 }
 
 async fn execute_import(

@@ -131,6 +131,7 @@ export interface BookingWithDetails extends Booking {
   complimentary_end_date?: string;
   original_total_amount?: number | string;
   complimentary_nights?: number;
+  discount_amount?: number | string;
   company_id?: number;
   company_name?: string;
   payment_note?: string;
@@ -281,7 +282,6 @@ export interface CheckInPaymentRecord {
 export interface CheckInRequest {
   guest_update?: GuestUpdateRequest;
   booking_update?: BookingUpdateRequest;
-  checkin_notes?: string;
   payment_record?: CheckInPaymentRecord;
 }
 

@@ -88,6 +88,7 @@ pub fn row_to_booking_with_details(row: &DbRow) -> BookingWithDetails {
         adults: row.try_get("adults").ok(),
         children: row.try_get("children").ok(),
         room_rate: get_decimal(row, "room_rate"),
+        discount_amount: get_opt_decimal(row, "discount_amount"),
         total_amount: get_decimal(row, "total_amount"),
         status: row.try_get("status").unwrap_or_default(),
         payment_status: row.try_get("payment_status").ok(),

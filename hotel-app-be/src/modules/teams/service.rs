@@ -80,6 +80,15 @@ pub async fn update_team(
     let before = TeamRepository::find(pool, team_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Team not found".to_string()))?;
+    if input.is_active.is_some() && input.is_active != Some(before.is_active) {
+        let role_ids = TeamRepository::role_ids(pool, team_id).await?;
+        crate::modules::rbac::service::ensure_actor_can_manage_roles(
+            pool,
+            actor_user_id,
+            &role_ids,
+        )
+        .await?;
+    }
     let team = TeamRepository::update(pool, team_id, &input, actor_user_id).await?;
 
     audit(
@@ -107,6 +116,9 @@ pub async fn delete_team(pool: &DbPool, actor_user_id: i64, team_id: i64) -> Res
     let before = TeamRepository::find(pool, team_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Team not found".to_string()))?;
+    let role_ids = TeamRepository::role_ids(pool, team_id).await?;
+    crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &role_ids)
+        .await?;
 
     if !TeamRepository::soft_delete(pool, team_id, actor_user_id).await? {
         return Err(ApiError::NotFound("Team not found".to_string()));
@@ -170,11 +182,24 @@ pub async fn add_member(
     }
 
     // Joining a team confers its roles, so adding a member must clear the same
-    // bar as granting those roles directly -- otherwise teams become a
-    // laundering path around the escalation guard.
+    // bar as granting those roles directly and protect peer/superior targets --
+    // otherwise teams become a laundering path around the escalation guard.
     let role_ids = TeamRepository::role_ids(pool, team_id).await?;
-    crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &role_ids)
+    if input.user_id != actor_user_id {
+        crate::modules::rbac::service::ensure_actor_can_manage_user(
+            pool,
+            actor_user_id,
+            input.user_id,
+        )
         .await?;
+    }
+    crate::modules::rbac::service::ensure_actor_can_manage_roles_until(
+        pool,
+        actor_user_id,
+        &role_ids,
+        input.expires_at,
+    )
+    .await?;
 
     TeamRepository::upsert_member(pool, team_id, &input, actor_user_id).await?;
 
@@ -206,6 +231,18 @@ pub async fn remove_member(
     member_user_id: i64,
 ) -> Result<(), ApiError> {
     ensure_can_manage_membership(pool, actor_user_id, team_id).await?;
+
+    let role_ids = TeamRepository::role_ids(pool, team_id).await?;
+    if member_user_id != actor_user_id {
+        crate::modules::rbac::service::ensure_actor_can_manage_user(
+            pool,
+            actor_user_id,
+            member_user_id,
+        )
+        .await?;
+    }
+    crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &role_ids)
+        .await?;
 
     if !TeamRepository::remove_member(pool, team_id, member_user_id).await? {
         return Err(ApiError::NotFound(

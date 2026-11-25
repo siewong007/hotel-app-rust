@@ -80,9 +80,16 @@ struct Fixture {
 }
 
 async fn fixture(pool: &PgPool, n: u64) -> Fixture {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static BASE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
+        chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_default()
+            .unsigned_abs()
+    });
     let tag = format!(
         "{:x}{n}",
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        *BASE + SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
     let guest_id: i64 =
         sqlx::query_scalar("INSERT INTO guests (nick_name, email) VALUES ($1, $2) RETURNING id")

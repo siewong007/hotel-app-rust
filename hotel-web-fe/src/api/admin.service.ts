@@ -57,10 +57,7 @@ export class AdminService {
     routeId: string,
     input: RouteAccessPolicyInput
   ): Promise<RouteAccessPolicy> {
-    return await withRetry(
-      () => api.put(`rbac/route-policies/${routeId}`, { json: input }).json<RouteAccessPolicy>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.put(`rbac/route-policies/${routeId}`, { json: input }).json<RouteAccessPolicy>();
   }
 
   static async getAllRoles(): Promise<Role[]> {
@@ -71,17 +68,11 @@ export class AdminService {
   }
 
   static async createRole(roleData: RoleInput): Promise<Role> {
-    return await withRetry(
-      () => api.post('rbac/roles', { json: roleData }).json<Role>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.post('rbac/roles', { json: roleData }).json<Role>();
   }
 
   static async updateRole(roleId: string, roleData: RoleInput): Promise<Role> {
-    return await withRetry(
-      () => api.put(`rbac/roles/${roleId}`, { json: roleData }).json<Role>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.put(`rbac/roles/${roleId}`, { json: roleData }).json<Role>();
   }
 
   static async deleteRole(roleId: string): Promise<void> {
@@ -96,17 +87,11 @@ export class AdminService {
   }
 
   static async createPermission(permissionData: PermissionInput): Promise<Permission> {
-    return await withRetry(
-      () => api.post('rbac/permissions', { json: permissionData }).json<Permission>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.post('rbac/permissions', { json: permissionData }).json<Permission>();
   }
 
   static async updatePermission(permissionId: string, permissionData: PermissionInput): Promise<Permission> {
-    return await withRetry(
-      () => api.put(`rbac/permissions/${permissionId}`, { json: permissionData }).json<Permission>(),
-      { maxAttempts: 2, initialDelay: 1000 }
-    );
+    return await api.put(`rbac/permissions/${permissionId}`, { json: permissionData }).json<Permission>();
   }
 
   static async deletePermission(permissionId: string): Promise<void> {

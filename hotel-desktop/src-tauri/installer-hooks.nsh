@@ -20,8 +20,10 @@
     nsExec::ExecToLog `"$INSTDIR\pgsql\bin\pg_ctl.exe" stop -D "$LOCALAPPDATA\HotelApp\pgdata" -m fast -w -t 30`
   ; Clean up orphaned postgres processes from this install dir (if any remain
   ; after the graceful stop). PostgreSQL is crash-safe via WAL, and pgdata
-  ; itself is never touched.
-  nsExec::ExecToLog `powershell -NoProfile -Command "Get-Process postgres -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '$INSTDIR\*' } | Stop-Process -Force"`
+  ; itself is never touched. Pass $INSTDIR via environment variable so quotes
+  ; or wildcard brackets in the install path cannot break PowerShell parsing.
+  System::Call 'Kernel32::SetEnvironmentVariable(t "HOTEL_INSTDIR", t "$INSTDIR")'
+  nsExec::ExecToLog `powershell -NoProfile -Command "Get-Process postgres -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith($$env:HOTEL_INSTDIR + '\', [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"`
   ; Give Windows a moment to release file locks after process termination.
   Sleep 2000
 !macroend

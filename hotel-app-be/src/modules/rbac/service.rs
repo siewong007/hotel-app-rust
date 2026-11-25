@@ -302,7 +302,10 @@ pub async fn assign_role_to_user(
     actor_user_id: i64,
     input: AssignRoleInput,
 ) -> Result<(), ApiError> {
-    ensure_actor_can_manage_roles(pool, actor_user_id, &[input.role_id]).await?;
+    if input.user_id != actor_user_id {
+        ensure_actor_can_manage_user(pool, actor_user_id, input.user_id).await?;
+    }
+    ensure_actor_can_manage_roles_until(pool, actor_user_id, &[input.role_id], None).await?;
     RbacRepository::assign_role_to_user(pool, input.user_id, input.role_id, actor_user_id).await?;
     // Name lookup is audit enrichment only — never fail the assignment for it.
     let role_name = RbacRepository::find_role_by_id(pool, input.role_id)
@@ -328,6 +331,9 @@ pub async fn remove_role_from_user(
     user_id: i64,
     role_id: i64,
 ) -> Result<(), ApiError> {
+    if user_id != actor_user_id {
+        ensure_actor_can_manage_user(pool, actor_user_id, user_id).await?;
+    }
     ensure_actor_can_manage_roles(pool, actor_user_id, &[role_id]).await?;
     RbacRepository::remove_role_from_user(pool, user_id, role_id).await?;
     let role_name = RbacRepository::find_role_by_id(pool, role_id)
@@ -438,10 +444,13 @@ pub async fn replace_user_roles(
         return Err(ApiError::NotFound("User not found".to_string()));
     }
 
+    if user_id != admin_user_id {
+        ensure_actor_can_manage_user(pool, admin_user_id, user_id).await?;
+    }
     let current_role_ids = RbacRepository::user_role_ids(pool, user_id).await?;
     let role_ids = unique_ids(input.role_ids);
     ensure_actor_can_manage_roles(pool, admin_user_id, &current_role_ids).await?;
-    ensure_actor_can_manage_roles(pool, admin_user_id, &role_ids).await?;
+    ensure_actor_can_manage_roles_until(pool, admin_user_id, &role_ids, None).await?;
     RbacRepository::replace_user_roles(pool, user_id, &role_ids, admin_user_id).await?;
 
     let current: HashSet<i64> = current_role_ids.into_iter().collect();
@@ -718,6 +727,25 @@ pub(crate) async fn ensure_actor_can_manage_roles(
     actor_user_id: i64,
     role_ids: &[i64],
 ) -> Result<(), ApiError> {
+    ensure_actor_can_manage_roles_inner(pool, actor_user_id, role_ids, false, None).await
+}
+
+pub(crate) async fn ensure_actor_can_manage_roles_until(
+    pool: &DbPool,
+    actor_user_id: i64,
+    role_ids: &[i64],
+    required_end: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<(), ApiError> {
+    ensure_actor_can_manage_roles_inner(pool, actor_user_id, role_ids, true, required_end).await
+}
+
+async fn ensure_actor_can_manage_roles_inner(
+    pool: &DbPool,
+    actor_user_id: i64,
+    role_ids: &[i64],
+    enforce_expiry: bool,
+    required_end: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<(), ApiError> {
     if role_ids.is_empty() {
         return Ok(());
     }
@@ -726,7 +754,12 @@ pub(crate) async fn ensure_actor_can_manage_roles(
         return Ok(());
     }
 
-    let actor_priority = RbacRepository::max_role_priority_for_user(pool, actor_user_id).await?;
+    let actor_priority = if enforce_expiry {
+        RbacRepository::max_role_priority_for_user_valid_until(pool, actor_user_id, required_end)
+            .await?
+    } else {
+        RbacRepository::max_role_priority_for_user(pool, actor_user_id).await?
+    };
     for role_id in role_ids {
         let role_priority = RbacRepository::role_priority(pool, *role_id)
             .await?
@@ -736,13 +769,27 @@ pub(crate) async fn ensure_actor_can_manage_roles(
 
         if role_priority >= actor_priority {
             return Err(ApiError::Forbidden(
-                "Cannot manage a role at or above your access priority".to_string(),
+                if enforce_expiry
+                    && RbacRepository::max_role_priority_for_user(pool, actor_user_id).await?
+                        > actor_priority
+                {
+                    "Cannot grant a role beyond your own grant expiration".to_string()
+                } else {
+                    "Cannot manage a role at or above your access priority".to_string()
+                },
             ));
         }
     }
 
     let conferred = RbacRepository::permission_names_for_roles(pool, role_ids).await?;
-    ensure_actor_holds_all(pool, actor_user_id, &conferred).await
+    ensure_actor_holds_all_inner(
+        pool,
+        actor_user_id,
+        &conferred,
+        enforce_expiry,
+        required_end,
+    )
+    .await
 }
 
 /// Reject a direct permission grant the actor does not itself hold.
@@ -790,11 +837,26 @@ async fn ensure_actor_holds_all(
     actor_user_id: i64,
     conferred: &HashSet<String>,
 ) -> Result<(), ApiError> {
+    ensure_actor_holds_all_inner(pool, actor_user_id, conferred, false, None).await
+}
+
+async fn ensure_actor_holds_all_inner(
+    pool: &DbPool,
+    actor_user_id: i64,
+    conferred: &HashSet<String>,
+    enforce_expiry: bool,
+    required_end: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<(), ApiError> {
     if conferred.is_empty() {
         return Ok(());
     }
 
-    let held = RbacRepository::permission_names_for_user(pool, actor_user_id).await?;
+    let held = if enforce_expiry {
+        RbacRepository::permission_names_for_user_valid_until(pool, actor_user_id, required_end)
+            .await?
+    } else {
+        RbacRepository::permission_names_for_user(pool, actor_user_id).await?
+    };
     match conferred.iter().find(|name| !holds(&held, name)) {
         Some(missing) => Err(ApiError::Forbidden(format!(
             "Cannot grant a permission you do not hold: {missing}"
@@ -820,16 +882,16 @@ pub(crate) async fn ensure_actor_can_manage_user(
     target_user_id: i64,
 ) -> Result<(), ApiError> {
     // A super-admin account sits above every role, whatever it is assigned
-    // (the System Administrator account holds only `admin`), so the
-    // role-priority guard alone would let a manager edit, suspend or reset it.
-    if crate::core::middleware::is_super_admin(pool, target_user_id).await?
+    // (even when currently suspended `is_active = false`), so a non-super-admin
+    // may never edit, reset or unsuspend it.
+    if crate::core::middleware::is_super_admin_account(pool, target_user_id).await?
         && !crate::core::middleware::is_super_admin(pool, actor_user_id).await?
     {
         return Err(ApiError::Forbidden(
             "Only a super administrator can manage a super administrator account".to_string(),
         ));
     }
-    let target_role_ids = RbacRepository::user_role_ids(pool, target_user_id).await?;
+    let target_role_ids = RbacRepository::effective_role_ids(pool, target_user_id).await?;
     ensure_actor_can_manage_roles(pool, actor_user_id, &target_role_ids).await
 }
 

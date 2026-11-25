@@ -50,6 +50,7 @@ import { BookingsService, GuestsService, RoomsService } from '../../../api';
 import { useAuth } from '../../../auth/AuthContext';
 import { BookingWithDetails, Guest, Booking } from '../../../types';
 import { errorMessage } from '../../../utils';
+import { isPositiveMoney, subtractMoney, toMoneyNumber } from '../../../utils/money';
 import { dateFormatter, statusLabel } from '../../../i18n';
 import { Room, BookingUpdateRequest, CheckInRequest } from '../../../types';
 import { useCurrency } from '../../../hooks/useCurrency';
@@ -380,12 +381,17 @@ const ReceptionistDashboard: React.FC = () => {
     try {
       setLoading(true);
       const booking = await BookingsService.getBookingById(bookingId);
-      const totalAmt = Number(booking.total_amount || 0);
+      const totalAmt = toMoneyNumber(booking.total_amount);
+      const remainingDue =
+        booking.balance_due !== undefined && booking.balance_due !== null
+          ? Math.max(0, toMoneyNumber(booking.balance_due))
+          : Math.max(0, subtractMoney(totalAmt, toMoneyNumber(booking.total_paid)));
+      const alreadyPaid = booking.payment_status === 'paid' || !isPositiveMoney(remainingDue);
       const settingsDeposit = getHotelSettings().deposit_amount;
       setCheckinBooking(booking);
-      setCiPaymentChoice(booking.payment_status === 'paid' ? 'pay_now' : 'pay_later');
+      setCiPaymentChoice('pay_later');
       setCiPaymentMethod(booking.payment_method || 'Cash');
-      setCiAmountPaid(totalAmt);
+      setCiAmountPaid(alreadyPaid ? 0 : remainingDue);
       setCiDepositChoice('receive');
       setCiDepositAmount(settingsDeposit);
       setCiDepositMethod('Cash');
@@ -423,34 +429,27 @@ const ReceptionistDashboard: React.FC = () => {
     }
     try {
       setProcessingCheckIn(true);
-      const updateData: BookingUpdateRequest = {};
-      if (ciPaymentChoice === 'pay_now') {
-        updateData.payment_status = 'paid';
-        updateData.amount_paid = ciAmountPaid;
-        updateData.payment_method = ciPaymentMethod;
-      } else {
-        updateData.payment_status = 'unpaid';
-      }
+      const bookingUpdate: BookingUpdateRequest = {};
       if (ciDepositChoice === 'receive') {
-        updateData.deposit_paid = true;
-        updateData.deposit_amount = ciDepositAmount;
-        updateData.payment_note = `Deposit received (${ciDepositMethod})`;
-        updateData.deposit_payment_method = ciDepositMethod;
+        bookingUpdate.deposit_paid = true;
+        bookingUpdate.deposit_amount = toMoneyNumber(ciDepositAmount);
+        bookingUpdate.payment_note = `Deposit received (${ciDepositMethod})`;
+        bookingUpdate.deposit_payment_method = ciDepositMethod;
       } else {
-        updateData.deposit_paid = false;
-        updateData.deposit_amount = 0;
-        updateData.payment_note = `Deposit waived: ${ciWaiveReason}`;
+        bookingUpdate.deposit_paid = false;
+        bookingUpdate.deposit_amount = 0;
+        bookingUpdate.payment_note = `Deposit waived: ${ciWaiveReason}`;
       }
-      await BookingsService.updateBooking(checkinBooking.id, updateData);
       const checkinPayload: CheckInRequest = {
         guest_update: {
           ic_number: ciIcNumber.trim(),
           ...(ciPhone.trim() ? { phone: ciPhone.trim() } : {}),
         },
+        booking_update: bookingUpdate,
       };
-      if (ciPaymentChoice === 'pay_now' && ciAmountPaid > 0) {
+      if (!ciIsAlreadyPaid && ciPaymentChoice === 'pay_now' && isPositiveMoney(ciAmountPaid)) {
         checkinPayload.payment_record = {
-          amount: ciAmountPaid,
+          amount: toMoneyNumber(ciAmountPaid),
           payment_method: ciPaymentMethod,
           payment_type: 'booking',
           notes: 'Payment collected at check-in',
@@ -472,13 +471,11 @@ const ReceptionistDashboard: React.FC = () => {
   // opens the room event dialog.
   const handleRoomClick = (room: RoomStatus) => {
     if (room.status === 'reserved' && room.booking_id && room.check_in_date) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const checkInDate = new Date(room.check_in_date);
-      checkInDate.setHours(0, 0, 0, 0);
+      const todayKey = toHotelDateString(new Date());
+      const checkInKey = room.check_in_date.split('T')[0];
 
       // If check-in date is today or past, open check-in modal
-      if (checkInDate <= today) {
+      if (checkInKey && todayKey && checkInKey <= todayKey) {
         handleCheckInFromRoom(room.booking_id);
         return;
       }
@@ -630,6 +627,12 @@ const ReceptionistDashboard: React.FC = () => {
   // Online reservations are settled on the booking platform; the backend
   // auto-records a payment for the outstanding balance when `source === 'online'`.
   const ciIsOnlineReservation = (checkinBooking?.source || '').trim().toLowerCase() === 'online';
+  const ciRemainingDue = checkinBooking
+    ? checkinBooking.balance_due !== undefined && checkinBooking.balance_due !== null
+      ? Math.max(0, toMoneyNumber(checkinBooking.balance_due))
+      : Math.max(0, subtractMoney(toMoneyNumber(checkinBooking.total_amount), toMoneyNumber(checkinBooking.total_paid)))
+    : 0;
+  const ciIsAlreadyPaid = Boolean(checkinBooking) && (checkinBooking.payment_status === 'paid' || !isPositiveMoney(ciRemainingDue));
   const ciOnlinePlatformName =
     (checkinBooking ? getBookingChannelInfo(checkinBooking)?.name : null) || t('checkIn.onlinePlatformFallback');
 
@@ -1469,42 +1472,50 @@ const ReceptionistDashboard: React.FC = () => {
               </Grid>
 
               <Typography variant="subtitle2" component="h3" color="primary" sx={{ mb: 1 }}>{t('checkIn.paymentSection')}</Typography>
-              {ciIsOnlineReservation && (
+              {ciIsAlreadyPaid ? (
                 <Alert severity="success" sx={{ mb: 1.5, py: 0 }}>
-                  {t('checkIn.settledOnlineNotice', {
-                    platform: ciOnlinePlatformName,
-                    amount: formatCurrency(Number(checkinBooking.total_amount || 0)),
-                  })}
+                  {t('payment.paid')} ({formatCurrency(toMoneyNumber(checkinBooking.total_paid ?? checkinBooking.total_amount))})
                 </Alert>
-              )}
-              <ToggleButtonGroup value={ciPaymentChoice} exclusive onChange={(_, val) => { if (val) setCiPaymentChoice(val); }} fullWidth size="small" sx={{ mb: 1.5 }}>
-                <ToggleButton value="pay_now" color="success" sx={{ py: 1, fontWeight: 600 }}>
-                  <PaymentIcon sx={{ mr: 0.5, fontSize: 18 }} /> {t('checkIn.makePaymentNow')}
-                </ToggleButton>
-                <ToggleButton value="pay_later" color="warning" sx={{ py: 1, fontWeight: 600 }}>
-                  <MoneyOffIcon sx={{ mr: 0.5, fontSize: 18 }} /> {ciIsOnlineReservation ? t('checkIn.settledOnline') : t('checkIn.payLater')}
-                </ToggleButton>
-              </ToggleButtonGroup>
-              {ciPaymentChoice === 'pay_now' && (
-                <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
-                  <Grid size={6}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>{t('checkIn.paymentMethod')}</InputLabel>
-                      <Select value={ciPaymentMethod} onChange={(e) => setCiPaymentMethod(e.target.value as string)} label={t('checkIn.paymentMethod')}>
-                        {PAYMENT_METHODS.map((m: string) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid size={6}>
-                    <TextField fullWidth size="small" label={t('checkIn.amountPaid')} type="number" value={ciAmountPaid} onChange={(e) => setCiAmountPaid(parseFloat(e.target.value) || 0)}
-                      slotProps={{
-                        input: { startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>, inputProps: { min: 0, step: 0.01 } }
-                      }} />
-                  </Grid>
-                </Grid>
-              )}
-              {ciPaymentChoice === 'pay_later' && !ciIsOnlineReservation && (
-                <Alert severity="info" sx={{ mb: 1.5, py: 0 }}>{t('checkIn.payLaterNotice')}</Alert>
+              ) : (
+                <>
+                  {ciIsOnlineReservation && (
+                    <Alert severity="success" sx={{ mb: 1.5, py: 0 }}>
+                      {t('checkIn.settledOnlineNotice', {
+                        platform: ciOnlinePlatformName,
+                        amount: formatCurrency(Number(checkinBooking.total_amount || 0)),
+                      })}
+                    </Alert>
+                  )}
+                  <ToggleButtonGroup value={ciPaymentChoice} exclusive onChange={(_, val) => { if (val) setCiPaymentChoice(val); }} fullWidth size="small" sx={{ mb: 1.5 }}>
+                    <ToggleButton value="pay_now" color="success" sx={{ py: 1, fontWeight: 600 }}>
+                      <PaymentIcon sx={{ mr: 0.5, fontSize: 18 }} /> {t('checkIn.makePaymentNow')}
+                    </ToggleButton>
+                    <ToggleButton value="pay_later" color="warning" sx={{ py: 1, fontWeight: 600 }}>
+                      <MoneyOffIcon sx={{ mr: 0.5, fontSize: 18 }} /> {ciIsOnlineReservation ? t('checkIn.settledOnline') : t('checkIn.payLater')}
+                    </ToggleButton>
+                  </ToggleButtonGroup>
+                  {ciPaymentChoice === 'pay_now' && (
+                    <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+                      <Grid size={6}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>{t('checkIn.paymentMethod')}</InputLabel>
+                          <Select value={ciPaymentMethod} onChange={(e) => setCiPaymentMethod(e.target.value as string)} label={t('checkIn.paymentMethod')}>
+                            {PAYMENT_METHODS.map((m: string) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                      <Grid size={6}>
+                        <TextField fullWidth size="small" label={t('checkIn.amountPaid')} type="number" value={ciAmountPaid} onChange={(e) => setCiAmountPaid(parseFloat(e.target.value) || 0)}
+                          slotProps={{
+                            input: { startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>, inputProps: { min: 0, step: 0.01 } }
+                          }} />
+                      </Grid>
+                    </Grid>
+                  )}
+                  {ciPaymentChoice === 'pay_later' && !ciIsOnlineReservation && (
+                    <Alert severity="info" sx={{ mb: 1.5, py: 0 }}>{t('checkIn.payLaterNotice')}</Alert>
+                  )}
+                </>
               )}
 
               <Typography variant="subtitle2" component="h3" color="primary" sx={{ mb: 1 }}>{t('checkIn.depositSection')}</Typography>

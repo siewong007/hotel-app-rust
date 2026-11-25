@@ -77,4 +77,24 @@ describe('usePortalSession', () => {
     expect(queryClient.getQueryData(portalCatalogKey)).toBeUndefined();
     expect(queryClient.getQueryData(portalVoucherKey)).toBeUndefined();
   });
+
+  it('reads live storage token during logout when token is stored after hook mount', () => {
+    const queryClient = createQueryClient();
+    const { result } = renderHook(() => usePortalSession(), {
+      wrapper: createQueryClientWrapper(queryClient),
+    });
+
+    setPortalToken('late-guest-token', '2999-01-01T00:00:00Z');
+    const sessionScope = portalSessionScope('late-guest-token');
+    const portalCatalogKey = queryKeys.promotions.portalCatalog(sessionScope, {
+      page: 1,
+      page_size: 50,
+    });
+    queryClient.setQueryData(portalCatalogKey, { items: ['kept'] });
+
+    act(() => result.current.logout());
+
+    expect(getPortalToken()).toBeNull();
+    expect(queryClient.getQueryData(portalCatalogKey)).toBeUndefined();
+  });
 });

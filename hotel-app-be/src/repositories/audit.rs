@@ -152,7 +152,9 @@ impl AuditRepository {
                 count_sqlx = count_sqlx.bind(id);
             }
         }
-        if let Some(types) = category_types {
+        if let Some(types) = category_types
+            && !types.is_empty()
+        {
             count_sqlx = count_sqlx.bind(types.to_vec());
         }
 
@@ -561,7 +563,9 @@ fn bind_log_filters<'q, O>(
             query = query.bind(id);
         }
     }
-    if let Some(types) = category_types {
+    if let Some(types) = category_types
+        && !types.is_empty()
+    {
         query = query.bind(types.to_vec());
     }
 

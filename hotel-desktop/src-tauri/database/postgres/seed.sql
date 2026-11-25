@@ -343,7 +343,8 @@ SELECT
             'write', 'verify', 'review', 'assign', 'approve', 'reject', 'escalate',
             'override', 'export', 'download', 'reveal', 'request_resubmission',
             'view_provider_raw', 'manage_reason_codes', 'manage_risk_rules',
-            'compose', 'send'
+            'compose', 'send', 'view', 'import', 'import_sensitive',
+            'export_sensitive', 'restore'
         ) THEN 'Invalid action' END
     ),
     to_jsonb(p)
@@ -360,7 +361,8 @@ WHERE p.is_system_permission IS TRUE
           'write', 'verify', 'review', 'assign', 'approve', 'reject', 'escalate',
           'override', 'export', 'download', 'reveal', 'request_resubmission',
           'view_provider_raw', 'manage_reason_codes', 'manage_risk_rules',
-          'compose', 'send'
+          'compose', 'send', 'view', 'import', 'import_sensitive',
+          'export_sensitive', 'restore'
       )
   );
 
@@ -1215,7 +1217,7 @@ VALUES
     ('payment-approvals', '/payment-approvals', 'Payment Approvals', 'admin', '["payments:approve","payments:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["payments:approve","payments:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
     ('audit-log', '/audit-log', 'Audit Log', 'admin', '["audit:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["audit:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
     ('complimentary', '/complimentary', 'Complimentary Nights', 'admin', '["bookings:read","bookings:update"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["bookings:read","bookings:update"]'::jsonb, '[]'::jsonb, '["guest"]'::jsonb, true, true),
-    ('loyalty', '/loyalty', 'Loyalty', 'admin', '["analytics:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["analytics:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
+    ('loyalty', '/loyalty', 'Loyalty', 'admin', '["loyalty:read","loyalty:manage","analytics:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["loyalty:read","loyalty:manage","analytics:read"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
     ('data-transfer', '/data-transfer', 'Data Transfer', 'admin', '["data_transfer:view"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["data_transfer:view","data_transfer:manage"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
     ('system-health', '/system-health', 'System Health', 'admin', '["settings:manage"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["settings:manage"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
     ('jobs', '/jobs', 'Jobs', 'admin', '["settings:manage"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '["settings:manage"]'::jsonb, '[]'::jsonb, '[]'::jsonb, true, true),
@@ -1661,6 +1663,40 @@ WHERE u.username = 'admin'
       SELECT 1 FROM audit_logs
       WHERE action = 'system.seed' AND resource_type = 'system'
   );
+
+-- ============================================================================
+-- ROOM STATUS TRANSITIONS
+-- ============================================================================
+INSERT INTO public.room_status_transitions (from_status, to_status, is_allowed) VALUES
+    ('available', 'occupied', true), ('available', 'reserved', true),
+    ('available', 'reserved_dirty', true), ('available', 'cleaning', true),
+    ('available', 'dirty', true), ('available', 'maintenance', true),
+    ('available', 'out_of_order', true),
+    ('occupied', 'available', true), ('occupied', 'dirty', true),
+    ('occupied', 'maintenance', true), ('occupied', 'out_of_order', true),
+    ('occupied', 'reserved', true), ('occupied', 'reserved_dirty', true),
+    ('reserved', 'occupied', true), ('reserved', 'available', true),
+    ('reserved', 'dirty', true), ('reserved', 'reserved_dirty', true),
+    ('reserved', 'cleaning', true), ('reserved', 'maintenance', true),
+    ('reserved', 'out_of_order', true),
+    ('dirty', 'available', true), ('dirty', 'cleaning', true),
+    ('dirty', 'maintenance', true), ('dirty', 'out_of_order', true),
+    ('dirty', 'reserved', true), ('dirty', 'reserved_dirty', true),
+    ('dirty', 'occupied', true),
+    ('cleaning', 'available', true), ('cleaning', 'dirty', true),
+    ('cleaning', 'reserved', true), ('cleaning', 'reserved_dirty', true),
+    ('cleaning', 'maintenance', true), ('cleaning', 'out_of_order', true),
+    ('reserved_dirty', 'reserved', true), ('reserved_dirty', 'dirty', true),
+    ('reserved_dirty', 'cleaning', true), ('reserved_dirty', 'maintenance', true),
+    ('reserved_dirty', 'out_of_order', true), ('reserved_dirty', 'available', true),
+    ('reserved_dirty', 'occupied', true),
+    ('maintenance', 'available', true), ('maintenance', 'dirty', true),
+    ('maintenance', 'reserved', true), ('maintenance', 'reserved_dirty', true),
+    ('maintenance', 'out_of_order', true),
+    ('out_of_order', 'available', true), ('out_of_order', 'maintenance', true),
+    ('out_of_order', 'dirty', true), ('out_of_order', 'reserved', true),
+    ('out_of_order', 'reserved_dirty', true)
+ON CONFLICT (from_status, to_status) DO UPDATE SET is_allowed = EXCLUDED.is_allowed;
 
 -- ============================================================================
 -- STARTER TEAMS

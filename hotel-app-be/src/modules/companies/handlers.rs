@@ -42,20 +42,22 @@ pub async fn create_company_handler(
 /// Update a company
 pub async fn update_company_handler(
     State(pool): State<DbPool>,
+    actor_id: i64,
     Path(company_id): Path<i64>,
     Json(input): Json<CompanyUpdateRequest>,
 ) -> Result<Json<Company>, ApiError> {
     Ok(Json(
-        company_service::update_company(&pool, company_id, input).await?,
+        company_service::update_company_as(&pool, Some(actor_id), company_id, input).await?,
     ))
 }
 
 /// Delete a company
 pub async fn delete_company_handler(
     State(pool): State<DbPool>,
+    actor_id: i64,
     Path(company_id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    company_service::delete_company(&pool, company_id).await?;
+    company_service::delete_company_as(&pool, Some(actor_id), company_id).await?;
 
     Ok(Json(serde_json::json!({
         "message": "Company deleted successfully"

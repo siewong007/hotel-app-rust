@@ -5,8 +5,7 @@ use rust_decimal::Decimal;
 use sqlx::Row;
 use std::collections::HashMap;
 
-use crate::core::db::DbPool;
-use crate::core::db::decimal_to_db;
+use crate::core::db::{DbPool, DbTransaction, decimal_to_db};
 use crate::core::error::ApiError;
 use crate::core::settings_cache;
 use crate::models::row_mappers;
@@ -38,12 +37,11 @@ pub async fn preview(pool: &DbPool, audit_date: NaiveDate) -> Result<NightAuditP
         FROM bookings b
         JOIN guests g ON b.guest_id = g.id
         JOIN rooms r ON b.room_id = r.id
-        WHERE b.status NOT IN ('pending', 'confirmed', 'voided')
-        AND (
-            -- Overnight stay: occupied the room the night of the audit date
-            (b.check_in_date <= $1 AND b.check_out_date > $1)
+        WHERE (
+            (b.status IN ('checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
+             AND b.check_in_date <= $1 AND b.check_out_date > $1)
             -- Same-day (hourly) checkout: check-in and check-out both on the audit date
-            OR (b.status = 'checked_out' AND b.check_in_date = $1 AND b.check_out_date = $1)
+            OR (b.status IN ('checked_out', 'completed') AND b.check_in_date = $1 AND b.check_out_date = $1)
         )
         AND NOT EXISTS (
             SELECT 1 FROM night_audit_posted_nights napn
@@ -455,8 +453,13 @@ pub async fn backfill_booking_posted_nights(
 ) -> Result<u32, ApiError> {
     let row = sqlx::query(
         r#"
-        SELECT b.check_in_date, b.check_out_date, b.room_rate,
+        SELECT b.check_in_date, b.check_out_date, b.room_rate, b.total_amount,
+               COALESCE(b.discount_amount, 0) as discount_amount,
                COALESCE(b.daily_rates, '{}'::jsonb) as daily_rates,
+               COALESCE(b.is_complimentary, false) as is_complimentary,
+               b.complimentary_start_date,
+               b.complimentary_end_date,
+               COALESCE(b.complimentary_nights, 0) as complimentary_nights,
                COALESCE(b.is_tourist, false) as is_tourist,
                COALESCE(b.tourism_tax_amount, 0) as tourism_tax_amount,
                COALESCE(b.extra_bed_charge, 0) as extra_bed_charge,
@@ -472,9 +475,9 @@ pub async fn backfill_booking_posted_nights(
     .ok_or_else(|| ApiError::NotFound(format!("Booking {} not found", booking_id)))?;
 
     let status: String = row.get("status");
-    if matches!(
+    if !matches!(
         status.as_str(),
-        "pending" | "confirmed" | "void" | "no_show" | "voided"
+        "checked_in" | "auto_checked_in" | "late_checkout" | "checked_out" | "completed"
     ) {
         return Ok(0);
     }
@@ -482,10 +485,34 @@ pub async fn backfill_booking_posted_nights(
     let check_in: NaiveDate = row.get("check_in_date");
     let check_out: NaiveDate = row.get("check_out_date");
     let room_rate = row_mappers::get_decimal(&row, "room_rate");
+    let total_amount = row_mappers::get_decimal(&row, "total_amount");
+    let discount_amount = row_mappers::get_decimal(&row, "discount_amount");
     let daily_rates: serde_json::Value = row.get("daily_rates");
+    let is_complimentary: bool = row.get("is_complimentary");
+    let complimentary_start_date: Option<NaiveDate> = row.get("complimentary_start_date");
+    let complimentary_end_date: Option<NaiveDate> = row.get("complimentary_end_date");
+    let complimentary_nights: i64 = row.get::<i32, _>("complimentary_nights") as i64;
     let is_tourist: bool = row.get("is_tourist");
     let tourism_tax_amount = row_mappers::get_decimal(&row, "tourism_tax_amount");
     let extra_bed_charge_full = row_mappers::get_decimal(&row, "extra_bed_charge");
+
+    let allocated_rows = sqlx::query(
+        r#"
+        SELECT vra.stay_date, vra.net_amount
+        FROM voucher_redemption_allocations vra
+        JOIN voucher_redemptions vr ON vr.id = vra.redemption_id
+        WHERE vra.booking_id = $1 AND vr.status = 'applied'
+        "#,
+    )
+    .bind(booking_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    let mut allocations: HashMap<NaiveDate, Decimal> = HashMap::new();
+    for ar in &allocated_rows {
+        let d: NaiveDate = ar.get("stay_date");
+        allocations.insert(d, row_mappers::get_decimal(ar, "net_amount"));
+    }
 
     let tax_rate_pct =
         settings_cache::get_positive_decimal(pool, "service_tax_rate", Decimal::new(8, 0)).await;
@@ -503,11 +530,10 @@ pub async fn backfill_booking_posted_nights(
         Decimal::ZERO
     };
 
-    let (eb_charge_per_night, eb_tax_per_night) = if extra_bed_charge_full > Decimal::ZERO {
-        let c = (extra_bed_charge_full / divisor).round_dp(2);
-        (c, extra_bed_charge_full - c)
+    let base_extra_bed = if extra_bed_charge_full > Decimal::ZERO && !is_hourly {
+        (extra_bed_charge_full / Decimal::from(nights_total)).round_dp(2)
     } else {
-        (Decimal::ZERO, Decimal::ZERO)
+        Decimal::ZERO
     };
 
     let iter_end = if is_hourly {
@@ -531,20 +557,63 @@ pub async fn backfill_booking_posted_nights(
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
         if let Some(run_id) = audit_run_id {
-            let date_key = date.format("%Y-%m-%d").to_string();
-            let night_rate = daily_rates
-                .as_object()
-                .and_then(|o| o.get(&date_key))
-                .and_then(|v| {
-                    v.as_str()
-                        .and_then(|s| s.parse::<Decimal>().ok())
-                        .or_else(|| v.as_f64().and_then(Decimal::from_f64_retain))
-                })
-                .unwrap_or(room_rate);
+            let night_rate = if is_complimentary
+                && (complimentary_start_date
+                    .zip(complimentary_end_date)
+                    .is_some_and(|(s, e)| date >= s && date < e)
+                    || total_amount <= Decimal::ZERO)
+            {
+                Decimal::ZERO
+            } else if let Some(&allocated_net) = allocations.get(&date) {
+                allocated_net
+            } else {
+                let date_key = date.format("%Y-%m-%d").to_string();
+                let base_night = daily_rates
+                    .as_object()
+                    .and_then(|o| o.get(&date_key))
+                    .and_then(|v| {
+                        v.as_str()
+                            .and_then(|s| s.parse::<Decimal>().ok())
+                            .or_else(|| v.as_f64().and_then(Decimal::from_f64_retain))
+                    })
+                    .unwrap_or(room_rate);
+
+                if discount_amount > Decimal::ZERO {
+                    let night_discount = if is_hourly {
+                        discount_amount
+                    } else {
+                        let billable_nights =
+                            (nights_total - complimentary_nights.clamp(0, nights_total)).max(1);
+                        (discount_amount / Decimal::from(billable_nights)).round_dp(2)
+                    };
+                    (base_night - night_discount).max(Decimal::ZERO)
+                } else {
+                    base_night
+                }
+            };
+
+            let eb_gross_per_night = if extra_bed_charge_full > Decimal::ZERO {
+                if is_hourly {
+                    extra_bed_charge_full
+                } else if date == check_out - chrono::Duration::days(1) {
+                    (extra_bed_charge_full - base_extra_bed * Decimal::from(nights_total - 1))
+                        .max(Decimal::ZERO)
+                } else {
+                    base_extra_bed
+                }
+            } else {
+                Decimal::ZERO
+            };
+            let eb_charge_per_night = if eb_gross_per_night > Decimal::ZERO {
+                (eb_gross_per_night / divisor).round_dp(2)
+            } else {
+                Decimal::ZERO
+            };
+            let eb_tax_per_night = eb_gross_per_night - eb_charge_per_night;
 
             let room_charge = (night_rate / divisor).round_dp(2);
             let service_tax = night_rate - room_charge;
-            let night_total = night_rate + extra_bed_charge_full + tourism_tax_per_night;
+            let night_total = night_rate + eb_gross_per_night + tourism_tax_per_night;
 
             let res = sqlx::query(
                 r#"
@@ -609,11 +678,14 @@ pub async fn is_audit_completed(pool: &DbPool, audit_date: NaiveDate) -> bool {
     .unwrap_or(false)
 }
 
-/// Delete all records from a previous audit run so it can be re-executed.
-pub async fn reset_audit(pool: &DbPool, audit_date: NaiveDate) -> Result<(), ApiError> {
+/// Delete all records from a previous audit run inside an existing transaction.
+pub async fn reset_audit_tx(
+    tx: &mut DbTransaction<'_>,
+    audit_date: NaiveDate,
+) -> Result<(), ApiError> {
     sqlx::query("DELETE FROM night_audit_posted_nights WHERE audit_date = $1")
         .bind(audit_date)
-        .execute(pool)
+        .execute(&mut **tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -622,7 +694,7 @@ pub async fn reset_audit(pool: &DbPool, audit_date: NaiveDate) -> Result<(), Api
          WHERE posted_date = $1",
     )
     .bind(audit_date)
-    .execute(pool)
+    .execute(&mut **tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -631,17 +703,47 @@ pub async fn reset_audit(pool: &DbPool, audit_date: NaiveDate) -> Result<(), Api
          WHERE audit_run_id IN (SELECT id FROM night_audit_runs WHERE audit_date = $1)",
     )
     .bind(audit_date)
-    .execute(pool)
+    .execute(&mut **tx)
     .await
-    .ok();
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
     sqlx::query("DELETE FROM night_audit_runs WHERE audit_date = $1")
         .bind(audit_date)
-        .execute(pool)
+        .execute(&mut **tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(())
+}
+
+/// Delete all records from a previous audit run so it can be re-executed.
+pub async fn reset_audit(pool: &DbPool, audit_date: NaiveDate) -> Result<(), ApiError> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    reset_audit_tx(&mut tx, audit_date).await?;
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    Ok(())
+}
+
+/// Call the `run_night_audit` stored procedure inside an existing transaction.
+pub async fn run_audit_procedure_tx(
+    tx: &mut DbTransaction<'_>,
+    audit_date: NaiveDate,
+    user_id: Option<i64>,
+) -> Result<i64, ApiError> {
+    sqlx::query_scalar("SELECT run_night_audit($1, $2)")
+        .bind(audit_date)
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| {
+            log::error!("Failed to run night audit: {}", e);
+            ApiError::Database(format!("Failed to run night audit: {}", e))
+        })
 }
 
 /// Call the `run_night_audit` stored procedure and return the new audit run ID.
@@ -960,12 +1062,11 @@ pub async fn generate_journal_sections(
                 COALESCE(b.tourism_tax_amount, 0) as tourism_tax_amount
             FROM bookings b
             JOIN rooms r ON b.room_id = r.id
-            WHERE b.status NOT IN ('pending', 'confirmed', 'voided')
-            AND (
-                -- Overnight stay: occupied the room the night of the audit date
-                (b.check_in_date <= $1 AND b.check_out_date > $1)
+            WHERE (
+                (b.status IN ('checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
+                 AND b.check_in_date <= $1 AND b.check_out_date > $1)
                 -- Same-day (hourly) checkout: check-in and check-out both on the audit date
-                OR (b.status = 'checked_out' AND b.check_in_date = $1 AND b.check_out_date = $1)
+                OR (b.status IN ('checked_out', 'completed') AND b.check_in_date = $1 AND b.check_out_date = $1)
             )
             AND NOT EXISTS (
                 SELECT 1 FROM night_audit_posted_nights napn
@@ -1013,8 +1114,22 @@ pub async fn generate_journal_sections(
                     }
 
                     if extra_bed_charge_raw > Decimal::ZERO {
-                        let extra_bed_charge = (extra_bed_charge_raw / divisor).round_dp(2);
-                        let extra_bed_tax = extra_bed_charge_raw - extra_bed_charge;
+                        let nights = (check_out_date - check_in_date).num_days().max(1);
+                        let is_hourly = check_in_date == check_out_date;
+                        let eb_gross_per_night = if is_hourly {
+                            extra_bed_charge_raw
+                        } else {
+                            let base_eb =
+                                (extra_bed_charge_raw / Decimal::from(nights)).round_dp(2);
+                            if audit_date == check_out_date - chrono::Duration::days(1) {
+                                (extra_bed_charge_raw - base_eb * Decimal::from(nights - 1))
+                                    .max(Decimal::ZERO)
+                            } else {
+                                base_eb
+                            }
+                        };
+                        let extra_bed_charge = (eb_gross_per_night / divisor).round_dp(2);
+                        let extra_bed_tax = eb_gross_per_night - extra_bed_charge;
 
                         entries.push(JournalEntry {
                             booking_number: booking_number.clone(),

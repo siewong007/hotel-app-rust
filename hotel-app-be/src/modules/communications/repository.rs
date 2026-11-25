@@ -1346,7 +1346,7 @@ impl CommunicationsRepository {
                 let clause = segment_rules::compile_rules(rules, 2)?;
                 (
                     format!(" AND {}", clause.sql),
-                    format!(" AND NOT {}", clause.sql),
+                    format!(" AND NOT COALESCE(({}), false)", clause.sql),
                     Some(clause),
                 )
             }

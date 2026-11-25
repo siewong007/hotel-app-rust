@@ -11,8 +11,8 @@ pub struct CompanyRepository;
 
 impl CompanyRepository {
     pub async fn list(pool: &DbPool, query: &CompanyListQuery) -> Result<Vec<Company>, ApiError> {
-        let limit = query.limit.unwrap_or(100).min(500) as i64;
-        let offset = query.offset.unwrap_or(0) as i64;
+        let limit = query.limit.unwrap_or(100).clamp(1, 500) as i64;
+        let offset = query.offset.unwrap_or(0).max(0) as i64;
 
         let rows = {
             sqlx::query(
@@ -169,7 +169,7 @@ impl CompanyRepository {
                     credit_limit = COALESCE($12, credit_limit),
                     payment_terms_days = COALESCE($13, payment_terms_days),
                     notes = COALESCE($14, notes),
-                    updated_at = NOW()
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = $15
                 "#,
             )

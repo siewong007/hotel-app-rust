@@ -201,10 +201,11 @@ describe('getPaymentStatusColor', () => {
 });
 
 describe('canVoidBooking / canModifyBooking / isBookingActive', () => {
-  it('allows voiding confirmed, pending, or checked-in bookings', () => {
+  it('allows voiding confirmed, pending, or checked-in (including auto_checked_in) bookings', () => {
     expect(canVoidBooking(buildBooking({ status: BookingStatus.CONFIRMED }))).toBe(true);
     expect(canVoidBooking(buildBooking({ status: BookingStatus.PENDING }))).toBe(true);
     expect(canVoidBooking(buildBooking({ status: BookingStatus.CHECKED_IN }))).toBe(true);
+    expect(canVoidBooking(buildBooking({ status: BookingStatus.AUTO_CHECKED_IN }))).toBe(true);
   });
 
   it('does not allow voiding a checked-out or voided booking', () => {
@@ -233,8 +234,9 @@ describe('canVoidBooking / canModifyBooking / isBookingActive', () => {
     ).toBe(false);
   });
 
-  it('treats only checked-in bookings as active', () => {
+  it('treats checked-in and auto_checked_in bookings as active', () => {
     expect(isBookingActive(buildBooking({ status: BookingStatus.CHECKED_IN }))).toBe(true);
+    expect(isBookingActive(buildBooking({ status: BookingStatus.AUTO_CHECKED_IN }))).toBe(true);
     expect(isBookingActive(buildBooking({ status: BookingStatus.CONFIRMED }))).toBe(false);
   });
 });

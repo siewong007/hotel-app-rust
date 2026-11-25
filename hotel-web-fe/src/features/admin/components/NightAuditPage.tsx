@@ -64,6 +64,18 @@ import {
 /** An audit's business day as the run endpoint takes it (`YYYY-MM-DD`). */
 const auditDay = (date: string) => date.split('T')[0];
 
+const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
+
+/**
+ * Neutralizes spreadsheet formula triggers (`=`, `+`, `-`, `@`, `\t`, `\r`)
+ * and wraps every CSV cell in RFC 4180 quotes.
+ */
+export function csvCell(value: unknown): string {
+  const raw = value === null || value === undefined ? '' : String(value);
+  const safe = FORMULA_PREFIX_RE.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
 const NightAuditPage: React.FC = () => {
   const { t } = useTranslation('nightAudit');
   const { hasPermission } = useAuth();
@@ -164,32 +176,32 @@ const NightAuditPage: React.FC = () => {
       const lines: string[] = [];
 
       // Header section
-      lines.push('NIGHT AUDIT REPORT');
-      lines.push(`Audit Date,${formatHotelDate(audit.audit_date)}`);
-      lines.push(`Run At,${formatHotelDateTime(audit.run_at)}`);
-      lines.push(`Run By,${audit.run_by_username || t('history.system')}`);
-      lines.push(`Status,${audit.status}`);
+      lines.push(csvCell('NIGHT AUDIT REPORT'));
+      lines.push([csvCell('Audit Date'), csvCell(formatHotelDate(audit.audit_date))].join(','));
+      lines.push([csvCell('Run At'), csvCell(formatHotelDateTime(audit.run_at))].join(','));
+      lines.push([csvCell('Run By'), csvCell(audit.run_by_username || t('history.system'))].join(','));
+      lines.push([csvCell('Status'), csvCell(audit.status)].join(','));
       lines.push('');
 
       // Summary statistics
-      lines.push('SUMMARY STATISTICS');
-      lines.push(`Bookings Posted,${audit.total_bookings_posted}`);
-      lines.push(`Check-ins,${audit.total_checkins}`);
-      lines.push(`Check-outs,${audit.total_checkouts}`);
-      lines.push(`Occupancy Rate,${Number(audit.occupancy_rate).toFixed(1)}%`);
+      lines.push(csvCell('SUMMARY STATISTICS'));
+      lines.push([csvCell('Bookings Posted'), csvCell(audit.total_bookings_posted)].join(','));
+      lines.push([csvCell('Check-ins'), csvCell(audit.total_checkins)].join(','));
+      lines.push([csvCell('Check-outs'), csvCell(audit.total_checkouts)].join(','));
+      lines.push([csvCell('Occupancy Rate'), csvCell(`${Number(audit.occupancy_rate).toFixed(1)}%`)].join(','));
       if (audit.notes) {
-        lines.push(`Notes,"${audit.notes.replace(/"/g, '""')}"`);
+        lines.push([csvCell('Notes'), csvCell(audit.notes)].join(','));
       }
       lines.push('');
 
       // Booking details
-      lines.push('POSTED BOOKINGS');
-      lines.push('Booking #,Guest Name,Room,Room Type,Check-in,Check-out,Nights,Status,Payment Method,Payment Status,Channel');
+      lines.push(csvCell('POSTED BOOKINGS'));
+      lines.push(['Booking #', 'Guest Name', 'Room', 'Room Type', 'Check-in', 'Check-out', 'Nights', 'Status', 'Payment Method', 'Payment Status', 'Channel'].map(csvCell).join(','));
 
       bookings.forEach(booking => {
         lines.push([
           booking.booking_number,
-          `"${booking.guest_name.replace(/"/g, '""')}"`,
+          booking.guest_name,
           booking.room_number,
           booking.room_type,
           formatHotelDate(booking.check_in_date),
@@ -199,70 +211,76 @@ const NightAuditPage: React.FC = () => {
           booking.payment_method || 'N/A',
           booking.payment_status || 'N/A',
           booking.source || 'N/A'
-        ].join(','));
+        ].map(csvCell).join(','));
       });
 
       lines.push('');
-      lines.push(`Total Bookings,${bookings.length}`);
+      lines.push([csvCell('Total Bookings'), csvCell(bookings.length)].join(','));
 
       // Journal Sections
       if (details.journal_sections && details.journal_sections.length > 0) {
         lines.push('');
-        lines.push('JOURNAL ENTRIES');
+        lines.push(csvCell('JOURNAL ENTRIES'));
 
         details.journal_sections.forEach(section => {
           lines.push('');
-          lines.push(`${section.display_name.toUpperCase()}`);
-          lines.push('Booking #,Room,Description,Debit,Credit');
+          lines.push(csvCell(section.display_name.toUpperCase()));
+          lines.push(['Booking #', 'Room', 'Description', 'Debit', 'Credit'].map(csvCell).join(','));
 
           section.entries.forEach(entry => {
             lines.push([
               entry.booking_number,
               entry.room_number,
-              `"${(entry.description || '').replace(/"/g, '""')}"`,
+              entry.description || '',
               Number(entry.debit) > 0 ? Number(entry.debit).toFixed(2) : '',
               Number(entry.credit) > 0 ? Number(entry.credit).toFixed(2) : ''
-            ].join(','));
+            ].map(csvCell).join(','));
           });
 
-          lines.push(`Total,,, ${Number(section.total_debit) > 0 ? Number(section.total_debit).toFixed(2) : ''}, ${Number(section.total_credit) > 0 ? Number(section.total_credit).toFixed(2) : ''}`);
+          lines.push([
+            'Total',
+            '',
+            '',
+            Number(section.total_debit) > 0 ? Number(section.total_debit).toFixed(2) : '',
+            Number(section.total_credit) > 0 ? Number(section.total_credit).toFixed(2) : ''
+          ].map(csvCell).join(','));
         });
 
         // Grand totals
         const grandDebit = details.journal_sections.reduce((sum, s) => sum + Number(s.total_debit), 0);
         const grandCredit = details.journal_sections.reduce((sum, s) => sum + Number(s.total_credit), 0);
         lines.push('');
-        lines.push(`GRAND TOTAL,,, ${grandDebit.toFixed(2)}, ${grandCredit.toFixed(2)}`);
+        lines.push(['GRAND TOTAL', '', '', grandDebit.toFixed(2), grandCredit.toFixed(2)].map(csvCell).join(','));
 
         // Guest Ledger summary (mirrors PDF page 2)
         lines.push('');
-        lines.push('GUEST LEDGER');
-        lines.push('Account,Debits,Credits');
+        lines.push(csvCell('GUEST LEDGER'));
+        lines.push(['Account', 'Debits', 'Credits'].map(csvCell).join(','));
         details.journal_sections.forEach(section => {
           lines.push([
             section.display_name,
             Number(section.total_debit) > 0 ? Number(section.total_debit).toFixed(2) : '',
             Number(section.total_credit) > 0 ? Number(section.total_credit).toFixed(2) : ''
-          ].join(','));
+          ].map(csvCell).join(','));
         });
-        lines.push(`Total,${grandDebit.toFixed(2)},${grandCredit.toFixed(2)}`);
+        lines.push(['Total', grandDebit.toFixed(2), grandCredit.toFixed(2)].map(csvCell).join(','));
       }
 
       // Room Sold Detail by Date (mirrors PDF page 2)
       if (bookings.length > 0) {
         lines.push('');
-        lines.push('ROOM SOLD DETAIL BY DATE');
-        lines.push('Room,Type,Guest Name');
+        lines.push(csvCell('ROOM SOLD DETAIL BY DATE'));
+        lines.push(['Room', 'Type', 'Guest Name'].map(csvCell).join(','));
         bookings.forEach(b => {
           const abbr = channelAbbreviation(b);
           const guestName = abbr ? `${b.guest_name} (${abbr})` : b.guest_name;
           lines.push([
             b.room_number,
             b.room_type_code || b.room_type || '',
-            `"${guestName.replace(/"/g, '""')}"`
-          ].join(','));
+            guestName
+          ].map(csvCell).join(','));
         });
-        lines.push(`Total Room Sold,${bookings.length},`);
+        lines.push(['Total Room Sold', bookings.length, ''].map(csvCell).join(','));
       }
 
       const csvContent = lines.join('\n');

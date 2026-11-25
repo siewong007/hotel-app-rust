@@ -17,6 +17,10 @@ use crate::modules::system::repository;
 /// for an uptime display, and impossible to get wrong at startup.
 static PROCESS_STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
 
+pub fn mark_process_started() {
+    let _ = *PROCESS_STARTED;
+}
+
 const RECENT_FAILURES_LIMIT: i64 = 25;
 
 pub async fn system_health(pool: &DbPool) -> Result<SystemHealthResponse, ApiError> {

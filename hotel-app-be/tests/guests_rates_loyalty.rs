@@ -1814,4 +1814,143 @@ mod postgres_tests {
         assert_eq!(guest.bookings_count, None);
         assert_eq!(guest.last_stay_date, None);
     }
+
+    #[tokio::test]
+    async fn postgres_upgrade_guest_to_user_creates_user_and_links_atomically() {
+        let Some(pool) = setup_pg_pool().await else {
+            return;
+        };
+        let guest_id = 985_240;
+        let username = "gst985_upgraded_guest";
+
+        sqlx::query("DELETE FROM users WHERE username = $1")
+            .bind(username)
+            .execute(&pool)
+            .await
+            .unwrap();
+        delete_guests(&pool, &[guest_id]).await;
+
+        upsert_guest(
+            &pool,
+            guest_id,
+            "Gst985 Upgrade Guest",
+            Some("gst985.upgrade@hotel.local"),
+            Some("+60123450000"),
+            None,
+        )
+        .await;
+
+        let new_user_id = GuestRepository::upgrade_guest_to_user(
+            &pool,
+            guest_id,
+            username,
+            "$argon2id$stubhash",
+            "guest",
+        )
+        .await
+        .expect("upgrade_guest_to_user must create user and user_guests link");
+
+        let linked_guest: Option<i64> =
+            sqlx::query_scalar("SELECT guest_id FROM users WHERE id = $1")
+                .bind(new_user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(linked_guest, Some(guest_id));
+        assert!(
+            GuestRepository::has_link(&pool, new_user_id, guest_id)
+                .await
+                .unwrap(),
+            "user_guests link row must exist"
+        );
+
+        let dup = GuestRepository::upgrade_guest_to_user(
+            &pool,
+            guest_id,
+            "gst985_upgraded_guest_dup",
+            "$argon2id$stubhash",
+            "guest",
+        )
+        .await;
+        assert!(
+            matches!(dup, Err(ApiError::BadRequest(_))),
+            "re-upgrading the same guest must return BadRequest: {dup:?}"
+        );
+
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(new_user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        delete_guests(&pool, &[guest_id]).await;
+    }
+
+    #[tokio::test]
+    async fn postgres_guest_credits_decodes_bigint_id_and_null_timestamps() {
+        let Some(pool) = setup_pg_pool().await else {
+            return;
+        };
+        let guest_id = 985_241;
+        let room_type_id = 985_420;
+
+        sqlx::query("DELETE FROM guest_complimentary_credits WHERE guest_id = $1")
+            .bind(guest_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        delete_guests(&pool, &[guest_id]).await;
+        sqlx::query("DELETE FROM room_types WHERE id = $1")
+            .bind(room_type_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        upsert_guest(
+            &pool,
+            guest_id,
+            "Gst985 Credit Guest",
+            Some("gst985.credit@hotel.local"),
+            None,
+            None,
+        )
+        .await;
+        sqlx::query(
+            "INSERT INTO room_types (id, code, name, base_price, max_occupancy) \
+             OVERRIDING SYSTEM VALUE VALUES ($1, 'G985C', 'Gst985 Credit Suite', 250.00, 2)",
+        )
+        .bind(room_type_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO guest_complimentary_credits (guest_id, room_type_id, nights_available, created_at, updated_at) \
+             VALUES ($1, $2, 3, NULL, NULL)",
+        )
+        .bind(guest_id)
+        .bind(room_type_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let credits = GuestRepository::guest_credits(&pool, guest_id)
+            .await
+            .expect("guest_credits must decode bigint id and NULL timestamps");
+        assert_eq!(credits.len(), 1);
+        assert!(credits[0].id > 0);
+        assert_eq!(credits[0].guest_id, guest_id);
+        assert_eq!(credits[0].room_type_id, room_type_id);
+        assert_eq!(credits[0].nights_available, 3);
+
+        sqlx::query("DELETE FROM guest_complimentary_credits WHERE guest_id = $1")
+            .bind(guest_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        delete_guests(&pool, &[guest_id]).await;
+        sqlx::query("DELETE FROM room_types WHERE id = $1")
+            .bind(room_type_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
 }

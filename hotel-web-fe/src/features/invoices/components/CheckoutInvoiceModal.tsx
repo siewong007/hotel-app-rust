@@ -60,7 +60,8 @@ import RoomPaymentMethodSelect, { getRoomMethodContext } from '../../bookings/co
 import ReasonDialog from './ReasonDialog';
 import type { DepositForfeitInput, DepositRefundInput } from './DepositSection';
 import { formatHotelDate, formatHotelDateTime, formatLocalDate, parseLocalDate, addLocalDays, toHotelDateString } from '../../../utils/date';
-import { divideMoney, isGreaterMoney, isPositiveMoney, subtractMoney, toMoneyNumber } from '../../../utils/money';
+import { divideMoney, isGreaterMoney, isPositiveMoney, subtractMoney, sumMoney, toMoneyNumber } from '../../../utils/money';
+import { escapeHtml } from '../../admin/components/CustomerLedger/customerLedgerPrint';
 import { formatStatusLabel } from '../../../utils/formatters';
 import { getIdempotencyAttempt, type IdempotencyAttempt } from '../../../utils/idempotency';
 import { getHotelSettings } from '../../../utils/hotelSettings';
@@ -232,6 +233,7 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
 
   // Editable daily rates UI state
   const [editingRates, setEditingRates] = useState(false);
+  const [rateDrafts, setRateDrafts] = useState<Record<string, string>>({});
   const [savingRates, setSavingRates] = useState(false);
 
   // Derived charges (pure calculation, no state mutation needed)
@@ -244,6 +246,8 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
   // Reset UI state when booking/open changes
   useEffect(() => {
     if (open && booking) {
+      setEditingRates(false);
+      setRateDrafts({});
       setCheckoutStep('preview');
       setShowPaymentForm(true);
       setPaymentAmount(0);
@@ -615,7 +619,10 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
 
       // Save daily rates if edited but not yet saved
       if (booking && editingRates && Object.keys(editableDailyRates).length > 0) {
-        await handleSaveDailyRates();
+        const saved = await handleSaveDailyRates();
+        if (!saved) {
+          return;
+        }
       }
 
       if (requiresFullPaymentBeforeCheckout) {
@@ -632,19 +639,23 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
     }
   };
 
-  const handleSaveDailyRates = async () => {
-    if (!booking) return;
+  const handleSaveDailyRates = async (): Promise<boolean> => {
+    if (!booking) return false;
     try {
       setSavingRates(true);
-      const totalFromRates = Object.values(editableDailyRates).reduce((sum, r) => sum + (r || 0), 0);
+      const rateValues = Object.values(editableDailyRates).map((r) => toMoneyNumber(r || 0));
+      const totalFromRates = sumMoney(rateValues);
       await BookingsService.updateBooking(booking.id, {
         daily_rates: editableDailyRates,
-        room_rate_override: totalFromRates / Object.keys(editableDailyRates).length,
+        room_rate_override: rateValues.length > 0 ? divideMoney(totalFromRates, rateValues.length) : 0,
       });
       invalidateInvoiceState();
+      setRateDrafts({});
       setEditingRates(false);
+      return true;
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : t('checkout.errors.saveDailyRates'));
+      return false;
     } finally {
       setSavingRates(false);
     }
@@ -684,7 +695,7 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Invoice - ${booking?.invoice_number || booking?.folio_number || `#${booking?.id}`}</title>
+          <title>Invoice - ${escapeHtml(String(booking?.invoice_number || booking?.folio_number || `#${booking?.id ?? ''}`))}</title>
           <style>
             * {
               margin: 0;
@@ -1174,7 +1185,10 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                             size="small"
                             variant="outlined"
                             startIcon={<EditIcon />}
-                            onClick={() => setEditingRates(true)}
+                            onClick={() => {
+                              setRateDrafts({});
+                              setEditingRates(true);
+                            }}
                           >{t('checkout.editRates')}</Button>
                         )}
                       </Box>
@@ -1207,9 +1221,11 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                                     <TextField
                                       size="small"
                                       type="number"
-                                      value={taxInclusiveRate || ''}
+                                      value={rateDrafts[dateKey] ?? String(taxInclusiveRate)}
                                       onChange={(e) => {
-                                        const val = toMoneyNumber(e.target.value);
+                                        const raw = e.target.value;
+                                        setRateDrafts(prev => ({ ...prev, [dateKey]: raw }));
+                                        const val = raw.trim() === '' ? 0 : toMoneyNumber(raw);
                                         setEditableDailyRates(prev => ({ ...prev, [dateKey]: val }));
                                       }}
                                       sx={{ width: { xs: '100%', sm: 160 }, '& .MuiInputBase-input': { textAlign: 'right', py: 0.5 } }}
@@ -1337,6 +1353,40 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                 )}
 
 
+
+                {isPositiveMoney(charges.complimentaryDeduction) && (
+                  <Box sx={{ p: 1.5, borderBottom: '1px solid var(--hotel-border)' }}>
+                    <Grid container>
+                      <Grid size={8}>
+                        <Typography variant="body2" color="success.main">
+                          {tOr('checkout.complimentaryDeduction', 'Complimentary Deduction')}
+                        </Typography>
+                      </Grid>
+                      <Grid sx={{ textAlign: 'right' }} size={4}>
+                        <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
+                          - {formatCurrency(charges.complimentaryDeduction)}
+                        </Typography>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                )}
+
+                {isPositiveMoney(charges.discountAmount) && (
+                  <Box sx={{ p: 1.5, borderBottom: '1px solid var(--hotel-border)' }}>
+                    <Grid container>
+                      <Grid size={8}>
+                        <Typography variant="body2" color="success.main">
+                          {tOr('checkout.discountDeduction', 'Discount')}
+                        </Typography>
+                      </Grid>
+                      <Grid sx={{ textAlign: 'right' }} size={4}>
+                        <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
+                          - {formatCurrency(charges.discountAmount)}
+                        </Typography>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                )}
 
                 {/* Grand Total */}
                 <Box sx={{ p: 2, bgcolor: 'var(--hotel-surface-sunken)', borderTop: '3px double var(--hotel-primary)' }}>
@@ -2169,6 +2219,36 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
                 <Grid size={12}>
                   <Divider sx={{ my: 1 }} />
                 </Grid>
+
+                {isPositiveMoney(charges.complimentaryDeduction) && (
+                  <>
+                    <Grid size={8}>
+                      <Typography variant="body2" color="success.main">
+                        {tOr('checkout.complimentaryDeduction', 'Complimentary Deduction')}
+                      </Typography>
+                    </Grid>
+                    <Grid sx={{ textAlign: 'right' }} size={4}>
+                      <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
+                        - {formatCurrency(charges.complimentaryDeduction)}
+                      </Typography>
+                    </Grid>
+                  </>
+                )}
+
+                {isPositiveMoney(charges.discountAmount) && (
+                  <>
+                    <Grid size={8}>
+                      <Typography variant="body2" color="success.main">
+                        {tOr('checkout.discountDeduction', 'Discount')}
+                      </Typography>
+                    </Grid>
+                    <Grid sx={{ textAlign: 'right' }} size={4}>
+                      <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
+                        - {formatCurrency(charges.discountAmount)}
+                      </Typography>
+                    </Grid>
+                  </>
+                )}
 
                 {/* Grand Total */}
                 <Grid size={8}>

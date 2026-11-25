@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CustomerLedger } from '../../../../types';
 import type { HotelSettings } from '../../../../utils/hotelSettings';
-import { printCompanyStatement, printSingleReceipt } from './customerLedgerPrint';
+import { escapeHtml, printCompanyStatement, printSingleReceipt } from './customerLedgerPrint';
 
 const hotelSettings = {
   hotel_name: 'Grand Hotel',
@@ -96,5 +96,31 @@ describe('customer ledger printable stay dates', () => {
     expect(html[0]).toContain('Check-out Date');
     expect(html[0]).toContain('Apr 10, 2031');
     expect(html[0]).toContain('Apr 13, 2031');
+  });
+
+  it('escapes HTML special characters in escapeHtml and printed fields', () => {
+    expect(escapeHtml(`<script>alert("x'&")</script>`)).toBe(
+      '&lt;script&gt;alert(&quot;x&#39;&amp;&quot;)&lt;/script&gt;',
+    );
+
+    const html = capturePrintHtml();
+    printCompanyStatement({
+      companyName: '<img src=x onerror=alert(1)>',
+      ledgers: [
+        buildLedger({
+          company_name: '<img src=x onerror=alert(1)>',
+          description: '<script>evil()</script>',
+          status: 'paid" onclick="alert(1)' as CustomerLedger['status'],
+        }),
+      ],
+      hotelSettings,
+      formatCurrency: (value) => `$${value.toFixed(2)}`,
+      onEmpty: () => undefined,
+    });
+
+    expect(html).toHaveLength(1);
+    expect(html[0]).not.toContain('<script>');
+    expect(html[0]).not.toContain('<img src=x');
+    expect(html[0]).toContain('&lt;script&gt;evil()&lt;/script&gt;');
   });
 });

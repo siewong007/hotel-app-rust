@@ -109,18 +109,18 @@ export function getTierProgress(membership: Pick<UserLoyaltyMembership, 'lifetim
 }
 
 export function canRedeem(
-  reward: { points_cost: number; minimum_tier_level: number },
+  reward: { points_cost: number; minimum_tier_level?: number },
   membership: Pick<UserLoyaltyMembership, 'points_balance' | 'tier_level'>,
 ): boolean {
   return membership.points_balance >= reward.points_cost &&
-    membership.tier_level >= reward.minimum_tier_level;
+    membership.tier_level >= (reward.minimum_tier_level ?? 1);
 }
 
 export function isTierLocked(
-  reward: { minimum_tier_level: number },
+  reward: { minimum_tier_level?: number },
   membership: Pick<UserLoyaltyMembership, 'tier_level'>,
 ): boolean {
-  return membership.tier_level < reward.minimum_tier_level;
+  return membership.tier_level < (reward.minimum_tier_level ?? 1);
 }
 
 /** Localized reward-category label (`loyalty:categories.*`); an unmapped or

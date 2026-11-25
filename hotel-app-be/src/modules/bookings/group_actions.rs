@@ -357,7 +357,7 @@ pub async fn reactivate_group(
             SELECT EXISTS (
                 SELECT 1 FROM bookings
                 WHERE room_id = $1
-                  AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation')
+                  AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')
                   AND id <> $4
                   AND check_in_date < $3 AND check_out_date > $2
             )
@@ -378,15 +378,53 @@ pub async fn reactivate_group(
     }
     let ids: Vec<i64> = rooms.iter().map(|(id, ..)| *id).collect();
     for (id, _, room_id, _, _) in &rooms {
+        let target_status: String = sqlx::query_scalar(
+            r#"
+            SELECT CASE
+                WHEN (
+                    SELECT bh.previous_status
+                    FROM booking_history bh
+                    WHERE bh.booking_id = b.id
+                      AND bh.new_status = 'voided'
+                    ORDER BY bh.created_at DESC
+                    LIMIT 1
+                ) IN ('pending_payment', 'pending', 'pending_confirmation')
+                AND NOT EXISTS (
+                    SELECT 1 FROM payments p
+                    WHERE p.booking_id = b.id
+                      AND p.status = 'completed'
+                      AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                ) THEN 'pending_payment'
+                ELSE 'confirmed'
+            END
+            FROM bookings b WHERE b.id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
         let updated = sqlx::query(
-            "UPDATE bookings SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP, \
+            "UPDATE bookings SET status = $2, updated_at = CURRENT_TIMESTAMP, \
              remarks = COALESCE(remarks, '') || ' | Group reactivated from voided status' \
              WHERE id = $1 AND status = 'voided'",
         )
         .bind(id)
+        .bind(&target_status)
         .execute(&mut *tx)
         .await
-        .map_err(ApiError::from)?
+        .map_err(|e| {
+            if let sqlx::Error::Database(db_err) = &e
+                && db_err.code().as_deref() == Some("23P01")
+            {
+                ApiError::BadRequest(
+                    "Booking cannot be reactivated because the room is already booked for these dates."
+                        .to_string(),
+                )
+            } else {
+                ApiError::from(e)
+            }
+        })?
         .rows_affected();
         if updated != 1 {
             return Err(ApiError::BadRequest(
@@ -399,7 +437,7 @@ pub async fn reactivate_group(
             &mut tx,
             *id,
             Some("voided"),
-            "confirmed",
+            &target_status,
             Some(user_id),
             Some("Group reactivated"),
             serde_json::json!({ "booking_group_id": group_id }),

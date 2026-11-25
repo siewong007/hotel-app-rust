@@ -1291,7 +1291,9 @@ pub async fn create(
             quote.complimentary_nights, stay_nights, quote.room_type_name, dates
         )
     });
-    let settled_by_credits = quote.complimentary_nights > 0 && quote.total_amount <= Decimal::ZERO;
+    let settled_by_credits = (quote.complimentary_nights > 0
+        || quote.discount_amount > Decimal::ZERO)
+        && quote.total_amount <= Decimal::ZERO;
     let booking_status = if settled_by_credits {
         "confirmed"
     } else {
@@ -1300,6 +1302,7 @@ pub async fn create(
     let (commission_amount, net_revenue, channel_pricing_snapshot) =
         channel_economics(pool, booking_channel_id, &quote).await?;
 
+    let locale = crate::core::i18n::mail_locale(pool, contact.language_preference.as_deref()).await;
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     Repository::ensure_online_room_available_tx(
         &mut tx,
@@ -1381,7 +1384,7 @@ pub async fn create(
                 actor_user_id: contact.actor_user_id,
                 subtotal: quote.subtotal,
                 discount_amount: quote.discount_amount,
-                total_amount: quote.total_amount,
+                total_amount: quote.total_amount - quote.tax_amount,
                 allocations: nightly_redemption_allocations(
                     &quote.nightly_rates,
                     &quote.complimentary_dates,
@@ -1465,8 +1468,7 @@ pub async fn create(
             settled_by_credits,
             anonymous: false,
             access_token: None,
-            locale: crate::core::i18n::mail_locale(pool, contact.language_preference.as_deref())
-                .await,
+            locale,
         });
         CommunicationsRepository::insert_delivery_tx(
             &mut tx,
@@ -1604,6 +1606,8 @@ pub async fn create_anonymous(
         anonymous_access_token_expiry(chrono::Utc::now(), quote.check_in_date);
     let (commission_amount, net_revenue, channel_pricing_snapshot) =
         channel_economics(pool, booking_channel_id, &quote).await?;
+    let language_preference = consent_validation::preferred_locale(&request.consents);
+    let locale = crate::core::i18n::mail_locale(pool, Some(language_preference.as_str())).await;
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     Repository::ensure_online_room_available_tx(
@@ -1623,7 +1627,6 @@ pub async fn create_anonymous(
     .await?;
     let room_id = allocated.room_id;
     let preference_note = smoking_preference_note(smoking_preference, allocated.is_smoking);
-    let language_preference = consent_validation::preferred_locale(&request.consents);
     let guest_id =
         Repository::insert_anonymous_guest_tx(&mut tx, &guest, &language_preference).await?;
     let insert = BookingInsert {
@@ -1659,7 +1662,33 @@ pub async fn create_anonymous(
         net_revenue,
         channel_pricing_snapshot,
     };
-    let booking_id = Repository::insert_booking_tx(&mut tx, &insert).await?;
+    let booking_id = match Repository::insert_booking_tx(&mut tx, &insert).await {
+        Ok(booking_id) => booking_id,
+        Err(error) => {
+            let _ = tx.rollback().await;
+            if let Some(mut existing) =
+                Repository::find_anonymous_by_request_id(pool, &request_id, &guest.email).await?
+            {
+                let access_token = crate::modules::guest_portal::service::generate_session_token();
+                let access_token_expires_at = replay_anonymous_access_token_expiry(
+                    chrono::Utc::now(),
+                    existing.check_in_date,
+                    existing.access_token_expires_at,
+                );
+                crate::modules::guest_portal::repository::GuestPortalRepository::update_precheckin_token(
+                    pool,
+                    existing.booking_id,
+                    &access_token,
+                    access_token_expires_at,
+                )
+                .await?;
+                existing.access_token = Some(access_token);
+                existing.access_token_expires_at = Some(access_token_expires_at);
+                return Ok(existing);
+            }
+            return Err(error);
+        }
+    };
     Repository::issue_access_token_tx(&mut tx, booking_id, &access_token, access_token_expires_at)
         .await?;
     Repository::mark_room_reserved_tx(&mut tx, room_id).await?;
@@ -1730,7 +1759,7 @@ pub async fn create_anonymous(
         settled_by_credits: false,
         anonymous: true,
         access_token: Some(&access_token),
-        locale: crate::core::i18n::mail_locale(pool, Some(language_preference.as_str())).await,
+        locale,
     });
     CommunicationsRepository::insert_delivery_tx(
         &mut tx,

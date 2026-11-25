@@ -84,7 +84,10 @@ export function useRevealEkycField() {
 export function useApproveEkyc() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (verificationId: number) => EkycService.approveEkycVerification(verificationId),
+    mutationFn: (input: number | { verificationId: number; expectedVersion?: number }) =>
+      typeof input === 'number'
+        ? EkycService.approveEkycVerification(input)
+        : EkycService.approveEkycVerification(input.verificationId, input.expectedVersion),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.ekyc.all });
     },
@@ -94,8 +97,15 @@ export function useApproveEkyc() {
 export function useRejectEkyc() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ verificationId, reason }: { verificationId: number; reason: string }) =>
-      EkycService.rejectEkycVerification(verificationId, reason),
+    mutationFn: ({
+      verificationId,
+      reason,
+      expectedVersion,
+    }: {
+      verificationId: number;
+      reason: string;
+      expectedVersion?: number;
+    }) => EkycService.rejectEkycVerification(verificationId, reason, expectedVersion),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.ekyc.all });
     },

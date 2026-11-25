@@ -799,8 +799,26 @@ pub async fn preview_import(
     upload_id: Uuid,
     passphrase: Option<String>,
 ) -> Result<ImportPreview, ApiError> {
-    let file = read_staged_backup(upload_id, passphrase.clone()).await?;
-    let tier = staged_file_tier(upload_id, passphrase).await;
+    let file = read_staged_backup(upload_id, passphrase).await?;
+    let (_, tier) = classify_backup_file(&file);
+    preview_structured(pool, upload_id, file, tier).await
+}
+
+/// Authorized pre-flight diff enforcing super-admin access on System-tier
+/// backups before inspecting destination database rows. Business-tier sensitive
+/// files remain previewable by `data_transfer:import` holders (returning
+/// `requiresPermissions: ["data_transfer:import_sensitive"]`).
+pub async fn preview_import_for_user(
+    pool: &DbPool,
+    user_id: i64,
+    upload_id: Uuid,
+    passphrase: Option<String>,
+) -> Result<ImportPreview, ApiError> {
+    let file = read_staged_backup(upload_id, passphrase).await?;
+    let (_, tier) = classify_backup_file(&file);
+    if tier == TransferTier::System {
+        crate::core::middleware::ensure_super_admin(pool, user_id).await?;
+    }
     preview_structured(pool, upload_id, file, tier).await
 }
 
@@ -1500,48 +1518,12 @@ pub fn import_job_status(job_id: Uuid) -> Option<ImportJobStatus> {
 // Execute + job runner
 // ---------------------------------------------------------------------------
 
-/// Classify decoded JSON using the same parser as the importer. Raw-text
-/// searches are unsafe here: JSON escapes can hide table names and flags.
-/// Unreadable files fail closed; execute surfaces the parse error later.
-fn staged_file_is_sensitive_sync(path: &Path, passphrase: Option<&str>) -> bool {
-    let Ok(file) = parse_staged_file(path, passphrase) else {
-        return true;
-    };
-    file.format != "hotel-backup"
+fn classify_backup_file(file: &BackupFile) -> (bool, TransferTier) {
+    let sensitive = file.format != "hotel-backup"
         || file.version != 1
         || file.includes_sensitive_data == Some(true)
-        || file.tables.keys().any(|key| table_is_sensitive(key))
-}
-
-async fn staged_file_is_sensitive(upload_id: Uuid, passphrase: Option<String>) -> bool {
-    let path = staged_upload_path(upload_id);
-    if !path.exists() {
-        // Missing uploads fail closed; execute reports NotFound separately.
-        return true;
-    }
-    tokio::task::spawn_blocking(move || staged_file_is_sensitive_sync(&path, passphrase.as_deref()))
-        .await
-        .unwrap_or(true)
-}
-
-/// Which tier a staged file demands, decided by what it actually contains
-/// rather than by the `exportType` it declares — a hand-edited header must
-/// not be able to smuggle `public.users` in under a `full` label.
-///
-/// Fails closed: anything unreadable is treated as a system file so the
-/// stricter gate applies and execute reports the real error later.
-fn staged_file_tier_sync(path: &Path, passphrase: Option<&str>) -> TransferTier {
-    let file = match parse_staged_file(path, passphrase) {
-        Ok(file) => file,
-        // A plaintext retired-format file is rejected by the job itself and
-        // never imports anything, so it only needs the business tier (it is
-        // still gated as sensitive). Everything else unreadable fails closed.
-        Err(error) if error.starts_with(RETIRED_FORMAT_ERROR) => {
-            return TransferTier::Business;
-        }
-        Err(_) => return TransferTier::System,
-    };
-    if file.format != "hotel-backup"
+        || file.tables.keys().any(|key| table_is_sensitive(key));
+    let tier = if file.format != "hotel-backup"
         || file.version != 1
         || protected_table_keys()
             .iter()
@@ -1550,17 +1532,47 @@ fn staged_file_tier_sync(path: &Path, passphrase: Option<&str>) -> TransferTier 
         TransferTier::System
     } else {
         TransferTier::Business
+    };
+    (sensitive, tier)
+}
+
+fn classify_staged_file_sync(path: &Path, passphrase: Option<&str>) -> (bool, TransferTier) {
+    let file = match parse_staged_file(path, passphrase) {
+        Ok(file) => file,
+        // A plaintext retired-format file is rejected by the job itself and
+        // never imports anything, so it only needs the business tier (it is
+        // still gated as sensitive). Everything else unreadable fails closed.
+        Err(error) if error.starts_with(RETIRED_FORMAT_ERROR) => {
+            return (true, TransferTier::Business);
+        }
+        Err(_) => return (true, TransferTier::System),
+    };
+    classify_backup_file(&file)
+}
+
+async fn classify_staged_file(upload_id: Uuid, passphrase: Option<String>) -> (bool, TransferTier) {
+    let path = staged_upload_path(upload_id);
+    if !path.exists() {
+        // Missing uploads fail closed; execute reports NotFound separately.
+        return (true, TransferTier::System);
     }
+    tokio::task::spawn_blocking(move || classify_staged_file_sync(&path, passphrase.as_deref()))
+        .await
+        .unwrap_or((true, TransferTier::System))
+}
+
+#[cfg(test)]
+fn staged_file_is_sensitive_sync(path: &Path, passphrase: Option<&str>) -> bool {
+    classify_staged_file_sync(path, passphrase).0
+}
+
+#[cfg(test)]
+fn staged_file_tier_sync(path: &Path, passphrase: Option<&str>) -> TransferTier {
+    classify_staged_file_sync(path, passphrase).1
 }
 
 async fn staged_file_tier(upload_id: Uuid, passphrase: Option<String>) -> TransferTier {
-    let path = staged_upload_path(upload_id);
-    if !path.exists() {
-        return TransferTier::System;
-    }
-    tokio::task::spawn_blocking(move || staged_file_tier_sync(&path, passphrase.as_deref()))
-        .await
-        .unwrap_or(TransferTier::System)
+    classify_staged_file(upload_id, passphrase).await.1
 }
 
 /// The permission checks that depend on the file and the requested mode —
@@ -1577,16 +1589,17 @@ pub async fn enforce_import_permissions(
     user_id: i64,
     headers: &axum::http::HeaderMap,
     request: &ImportExecuteRequest,
-) -> Result<(), ApiError> {
-    if staged_file_is_sensitive(request.upload_id, request.passphrase.clone()).await {
+) -> Result<TransferTier, ApiError> {
+    let (is_sensitive, tier) =
+        classify_staged_file(request.upload_id, request.passphrase.clone()).await;
+    if is_sensitive {
         crate::core::middleware::check_permission(pool, user_id, "data_transfer:import_sensitive")
             .await?;
     }
     // A file carrying the protected set can rewrite who can log in and what
     // they may do, so it clears the same bar as producing one: super admin
     // plus step-up re-authentication, on top of the import permissions.
-    if staged_file_tier(request.upload_id, request.passphrase.clone()).await == TransferTier::System
-    {
+    if tier == TransferTier::System {
         crate::core::middleware::ensure_super_admin(pool, user_id).await?;
         let claims = crate::core::middleware::extract_claims(headers).await?;
         super::step_up::require_step_up(headers, &claims)?;
@@ -1599,7 +1612,7 @@ pub async fn enforce_import_permissions(
         let claims = crate::core::middleware::extract_claims(headers).await?;
         super::step_up::require_step_up(headers, &claims)?;
     }
-    Ok(())
+    Ok(tier)
 }
 
 pub async fn start_import_job(
@@ -1608,7 +1621,7 @@ pub async fn start_import_job(
     request: ImportExecuteRequest,
 ) -> Result<ImportExecuteResponse, ApiError> {
     let connection = DataTransferRepository::try_import_connection(pool).await?;
-    start_import_job_with_connection(pool, import_user_id, request, connection).await
+    start_import_job_with_connection(pool, import_user_id, request, connection, None).await
 }
 
 pub(super) async fn start_import_job_with_connection(
@@ -1616,6 +1629,7 @@ pub(super) async fn start_import_job_with_connection(
     import_user_id: i64,
     request: ImportExecuteRequest,
     connection: sqlx::PgConnection,
+    precomputed_tier: Option<TransferTier>,
 ) -> Result<ImportExecuteResponse, ApiError> {
     if !request.confirm {
         return Err(ApiError::BadRequest(
@@ -1625,7 +1639,10 @@ pub(super) async fn start_import_job_with_connection(
     // Resolved from the file's own contents, then reused for the job — the
     // permission gate in `enforce_import_permissions` ran against the same
     // classification, so the two cannot disagree.
-    let tier = staged_file_tier(request.upload_id, request.passphrase.clone()).await;
+    let tier = match precomputed_tier {
+        Some(tier) => tier,
+        None => staged_file_tier(request.upload_id, request.passphrase.clone()).await,
+    };
     for table in &request.tables {
         QualifiedTable::parse(table)?;
         if is_never_imported_key(table) {

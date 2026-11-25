@@ -729,6 +729,19 @@ async fn auto_post_company_ledger(
         }
     };
 
+    let (tourism_tax, extra_bed): (Decimal, Decimal) = sqlx::query_as(
+        "SELECT COALESCE(tourism_tax_amount, 0), COALESCE(extra_bed_charge, 0) \
+         FROM bookings WHERE id = $1",
+    )
+    .bind(booking_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    let ledger_amount = booking.total_amount + tourism_tax + extra_bed;
+    if ledger_amount <= Decimal::ZERO {
+        return Ok(());
+    }
+
     sqlx::query(
         r#"
         INSERT INTO customer_ledgers (
@@ -749,7 +762,7 @@ async fn auto_post_company_ledger(
     )
     .bind(company_name)
     .bind(&description)
-    .bind(booking.total_amount)
+    .bind(ledger_amount)
     .bind(booking_id)
     .bind(due_date)
     .bind(&room_number)
@@ -763,7 +776,7 @@ async fn auto_post_company_ledger(
         "Auto-posted company ledger for booking {} ({}, amount {})",
         booking_id,
         company_name,
-        booking.total_amount
+        ledger_amount
     );
     Ok(())
 }
@@ -907,14 +920,17 @@ pub(crate) async fn completed_booking_payment_total(
 /// forfeited, or waived. Both checks read pre-update state at the call site,
 /// so resolution has to be a prior call: a payment or a waive folded into the
 /// checkout request itself does not satisfy either guard.
-pub(crate) async fn ensure_checkout_balance_resolved(
-    pool: &DbPool,
+pub(crate) async fn ensure_checkout_balance_resolved<'e, E>(
+    executor: E,
     booking_id: i64,
     existing_booking: &Booking,
     input: &BookingUpdateInput,
     new_status: &str,
     billable_total: Decimal,
-) -> Result<(), ApiError> {
+) -> Result<(), ApiError>
+where
+    E: sqlx::Executor<'e, Database = crate::core::db::DbDatabase>,
+{
     let is_checkout_transition = matches!(new_status, "checked_out" | "completed")
         && !matches!(
             existing_booking.status.as_str(),
@@ -925,16 +941,15 @@ pub(crate) async fn ensure_checkout_balance_resolved(
     }
 
     // Money that settles the billable charges — the workflow summary's
-    // `total_paid` excludes deposits (collateral, not charge payment), unlike
-    // `completed_booking_payment_total` which counts every completed payment
-    // and exists for the "has any money been collected" release checks.
+    // `net_room_paid()` excludes deposits and room-charge refunds, unlike
+    // `completed_booking_payment_total` which exists for release checks.
     let summary = crate::modules::payments::repository::PaymentRepository::workflow_summary_row(
-        pool, booking_id,
+        executor, booking_id,
     )
     .await?;
     let total_paid = summary
         .as_ref()
-        .map(|summary| summary.total_paid)
+        .map(|summary| summary.net_room_paid())
         .unwrap_or(Decimal::ZERO);
     let balance_due = checkout_balance_due(billable_total, total_paid);
     let final_company_id = input.company_id.or(existing_booking.company_id);
@@ -1192,7 +1207,7 @@ pub(crate) async fn create_booking_tx(
     let conflict_query = r#"
         SELECT EXISTS(
             SELECT 1 FROM bookings
-            WHERE room_id = $1 AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation') AND status != 'voided'
+            WHERE room_id = $1 AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
             AND ((check_in_date <= $2 AND check_out_date > $2)
                 OR (check_in_date < $3 AND check_out_date >= $3)
                 OR (check_in_date >= $2 AND check_out_date <= $3))
@@ -1228,12 +1243,49 @@ pub(crate) async fn create_booking_tx(
     // For hourly bookings (same-day), charge 1 night at the standard rate
     // If daily_rates provided, sum them for subtotal; otherwise use room_rate * nights
     let mut subtotal = if let Some(ref daily_rates) = input.daily_rates {
-        if let Some(obj) = daily_rates.as_object() {
-            let sum: f64 = obj.values().filter_map(|v| v.as_f64()).sum();
-            Decimal::from_f64_retain(sum).unwrap_or(room_rate * Decimal::from(billable_nights))
-        } else {
-            room_rate * Decimal::from(billable_nights)
+        let obj = daily_rates.as_object().ok_or_else(|| {
+            ApiError::BadRequest(
+                "daily_rates must be a JSON object mapping YYYY-MM-DD to price".to_string(),
+            )
+        })?;
+        let mut expected_dates = std::collections::HashSet::new();
+        let mut d = check_in;
+        while d < check_out {
+            expected_dates.insert(d.format("%Y-%m-%d").to_string());
+            d = d.succ_opt().unwrap_or(check_out);
         }
+        if is_hourly {
+            expected_dates.insert(check_in.format("%Y-%m-%d").to_string());
+        }
+        if obj.len() != expected_dates.len() || !expected_dates.iter().all(|k| obj.contains_key(k))
+        {
+            return Err(ApiError::BadRequest(
+                "daily_rates keys must exactly cover every stay night".to_string(),
+            ));
+        }
+        let mut sum = Decimal::ZERO;
+        for (date_key, value) in obj {
+            let rate = value
+                .as_f64()
+                .and_then(Decimal::from_f64_retain)
+                .or_else(|| {
+                    value
+                        .as_str()
+                        .and_then(|s| s.trim().parse::<Decimal>().ok())
+                })
+                .ok_or_else(|| {
+                    ApiError::BadRequest(format!(
+                        "Invalid nightly rate for {date_key} in daily_rates"
+                    ))
+                })?;
+            if rate < Decimal::ZERO {
+                return Err(ApiError::BadRequest(format!(
+                    "Nightly rate for {date_key} cannot be negative"
+                )));
+            }
+            sum += rate;
+        }
+        sum
     } else {
         room_rate * Decimal::from(billable_nights)
     };
@@ -1365,10 +1417,18 @@ pub(crate) async fn create_booking_tx(
     // payment row before the refund flow may touch them.
     let deposit_paid = input.amount_paid.is_some_and(|a| a > 0.0);
     let deposit_amount_f64 = input.amount_paid.filter(|a| *a > 0.0);
-    let payment_status = input
-        .payment_status
-        .clone()
-        .unwrap_or_else(|| "unpaid".to_string());
+    // Ignore caller-supplied payment_status; derive cleanly from billable total.
+    let initial_billable = subtotal
+        + tourism_tax_amount
+        + input
+            .extra_bed_charge
+            .and_then(Decimal::from_f64_retain)
+            .unwrap_or(Decimal::ZERO);
+    let payment_status = if initial_billable <= Decimal::ZERO {
+        "paid".to_string()
+    } else {
+        "unpaid".to_string()
+    };
 
     // Get the override rate value if provided (to store in rate_override_weekday)
     let rate_override_value = input.room_rate_override;
@@ -1607,6 +1667,29 @@ pub async fn update_booking_handler(
             "Use 'voided' for booking status or 'comp_void' for complimentary voids; 'cancelled' is no longer accepted.".to_string(),
         ));
     }
+    if new_status != existing_booking.status {
+        if matches!(
+            existing_booking.status.as_str(),
+            "voided" | "comp_void" | "no_show"
+        ) {
+            return Err(ApiError::BadRequest(format!(
+                "Bookings in status '{}' cannot be transitioned via update; use reactivate instead.",
+                existing_booking.status
+            )));
+        }
+        if matches!(
+            existing_booking.status.as_str(),
+            "pending" | "pending_payment" | "pending_confirmation"
+        ) && matches!(
+            new_status.as_str(),
+            "checked_in" | "auto_checked_in" | "checked_out" | "completed"
+        ) {
+            return Err(ApiError::BadRequest(format!(
+                "Cannot move booking directly from '{}' to '{}'; confirm payment and check in first.",
+                existing_booking.status, new_status
+            )));
+        }
+    }
     if input.payment_status.as_deref() == Some("cancelled") {
         return Err(ApiError::BadRequest(
             "Use 'void' for payment status; 'cancelled' is no longer accepted.".to_string(),
@@ -1656,14 +1739,14 @@ pub async fn update_booking_handler(
     let dates_changed = input.check_in_date.is_some() || input.check_out_date.is_some();
     let is_inactive_status = matches!(
         new_status.as_str(),
-        "voided" | "checked_out" | "late_checkout"
+        "voided" | "checked_out" | "completed" | "no_show" | "comp_void"
     );
     if (room_changed || dates_changed) && !is_inactive_status {
         let conflict_query = r#"
             SELECT EXISTS(
                 SELECT 1 FROM bookings
                 WHERE room_id = $1 AND id != $4
-                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation') AND status != 'voided'
+                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
                 AND ((check_in_date <= $2 AND check_out_date > $2)
                     OR (check_in_date < $3 AND check_out_date >= $3)
                     OR (check_in_date >= $2 AND check_out_date <= $3))
@@ -1772,20 +1855,31 @@ pub async fn update_booking_handler(
         if let Some(ref dr) = daily_rates_json {
             // Daily rates available (caller-supplied or rebuilt) - sum them for subtotal
             if let Some(obj) = dr.as_object() {
-                let sum: f64 = obj
-                    .values()
-                    .filter_map(|v| {
-                        v.as_f64()
-                            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-                    })
-                    .sum();
-                let subtotal = Decimal::from_f64_retain(sum).unwrap_or(Decimal::ZERO);
+                let mut sum = Decimal::ZERO;
+                for v in obj.values() {
+                    let rate = v
+                        .as_f64()
+                        .and_then(Decimal::from_f64_retain)
+                        .or_else(|| v.as_str().and_then(|s| s.trim().parse::<Decimal>().ok()))
+                        .ok_or_else(|| {
+                            ApiError::BadRequest("Invalid nightly rate in daily_rates".to_string())
+                        })?;
+                    if rate < Decimal::ZERO {
+                        return Err(ApiError::BadRequest(
+                            "Nightly rate in daily_rates cannot be negative".to_string(),
+                        ));
+                    }
+                    sum += rate;
+                }
+                let subtotal = sum;
+                let existing_discount = existing_booking.discount_amount.unwrap_or(Decimal::ZERO);
+                let total_amount = (subtotal - existing_discount).max(Decimal::ZERO);
                 let room_rate = if let Some(rate_override) = input.room_rate_override {
                     Decimal::from_f64_retain(rate_override).unwrap_or(existing_booking.room_rate)
                 } else {
                     existing_booking.room_rate
                 };
-                (Some(room_rate), Some(subtotal), Some(subtotal))
+                (Some(room_rate), Some(subtotal), Some(total_amount))
             } else {
                 (None, None, None)
             }
@@ -1794,14 +1888,16 @@ pub async fn update_booking_handler(
             let room_rate =
                 Decimal::from_f64_retain(rate_override).unwrap_or(existing_booking.room_rate);
             let subtotal = room_rate * Decimal::from(nights);
-            let total_amount = subtotal; // Tax is calculated on frontend using hotel settings rate
+            let existing_discount = existing_booking.discount_amount.unwrap_or(Decimal::ZERO);
+            let total_amount = (subtotal - existing_discount).max(Decimal::ZERO);
             (Some(room_rate), Some(subtotal), Some(total_amount))
         } else if input.check_out_date.is_some() || input.check_in_date.is_some() {
             // Dates changed without explicit rate override - recalculate using existing room rate
             let nights = std::cmp::max((check_out - check_in).num_days() as i32, 1);
             let room_rate = existing_booking.room_rate;
             let subtotal = room_rate * Decimal::from(nights);
-            let total_amount = subtotal;
+            let existing_discount = existing_booking.discount_amount.unwrap_or(Decimal::ZERO);
+            let total_amount = (subtotal - existing_discount).max(Decimal::ZERO);
             (None, Some(subtotal), Some(total_amount))
         } else {
             (None, None, None)
@@ -1974,8 +2070,57 @@ pub async fn update_booking_handler(
     let billable_total = new_total_amount.unwrap_or(existing_booking.total_amount)
         + canonical_tourism_tax_amount
         + effective_extra_bed;
+
+    let default_terms_days =
+        settings_cache::get_positive_i32(&pool, "default_payment_terms_days", 30).await as i64;
+
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+
+    // Acquire row lock inside the transaction before re-running conflict and
+    // checkout-balance guards so concurrent edits/payments/voids serialize cleanly.
+    let locked_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM bookings WHERE id = $1 FOR UPDATE")
+            .bind(booking_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+    let locked_status =
+        locked_status.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+    if locked_status != existing_booking.status {
+        return Err(ApiError::Conflict(
+            "Booking status changed concurrently; please refresh and retry.".to_string(),
+        ));
+    }
+
+    if (room_changed || dates_changed) && !is_inactive_status {
+        let conflict: bool = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM bookings
+                WHERE room_id = $1 AND id != $4
+                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
+                AND ((check_in_date <= $2 AND check_out_date > $2)
+                    OR (check_in_date < $3 AND check_out_date >= $3)
+                    OR (check_in_date >= $2 AND check_out_date <= $3))
+            )
+            "#,
+        )
+        .bind(new_room_id)
+        .bind(check_in)
+        .bind(check_out)
+        .bind(booking_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+        if conflict {
+            return Err(ApiError::BadRequest(
+                "Room is already booked for these dates".to_string(),
+            ));
+        }
+    }
+
     ensure_checkout_balance_resolved(
-        &pool,
+        &mut *tx,
         booking_id,
         &existing_booking,
         &input,
@@ -1983,44 +2128,6 @@ pub async fn update_booking_handler(
         billable_total,
     )
     .await?;
-
-    // PostgreSQL version: UPDATE with RETURNING, transaction-scoped.
-    //
-    // Money-critical steps that must commit or roll back together with the
-    // booking row itself run on `tx` below: the booking UPDATE, voiding
-    // linked payments + resyncing payment_status when voiding, the
-    // customer_ledgers auto-post on checkout, the customer_ledgers delta
-    // sync, and the booking_history/audit/booking_modifications rows that
-    // record the change. Previously each of these was an independent `&pool`
-    // call swallowed behind `log::warn!`, so a partial failure (e.g. payments
-    // voided but the ledger post failing) left booking/payment/ledger state
-    // inconsistent with nothing surfaced to the caller.
-    //
-    // Room-status reconciliation, loyalty point award/reversal, housekeeping
-    // task creation, and night-audit backfill remain best-effort calls AFTER
-    // commit, on the pool: none of them expose a transaction-scoped variant
-    // today (they live in modules/loyalty/service.rs, services/housekeeping.rs,
-    // services/night_audit.rs — out of scope for this fix), so joining them to
-    // `tx` would require changing those files. Checkout invoice numbering
-    // (`ensure_invoice_for_booking`) is deliberately kept on its own
-    // connection, AFTER commit, for the same reason it always was: a checkout
-    // must not fail just because invoice numbering hiccuped. It still ends up
-    // consistent with the company ledger row: when `auto_post_company_ledger`
-    // runs inside `tx` it allocates (or reuses) the invoice number and stores
-    // it on the new customer_ledgers row, and `ensure_invoice_for_booking`
-    // reuses that same number via `ledger_invoice_number` once it runs.
-    //
-    // F7: `default_payment_terms_days` is read here, BEFORE `tx` opens, via
-    // the non-transactional `settings_cache` (which issues real SQL on its
-    // own pool connection on a TTL miss). Reading it once `tx` already holds
-    // a connection risked starving the pool under concurrent checkouts and
-    // silently falling back to a wrong due_date on acquire-timeout; reading
-    // it up front and passing the value into `auto_post_company_ledger`
-    // avoids ever needing a second connection while `tx` is open.
-    let default_terms_days =
-        settings_cache::get_positive_i32(&pool, "default_payment_terms_days", 30).await as i64;
-
-    let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
     let booking: Booking = {
         let rate_override_decimal = input.room_rate_override.and_then(Decimal::from_f64_retain);
@@ -2036,7 +2143,7 @@ pub async fn update_booking_handler(
                 payment_note = COALESCE($12, payment_note),
                 remarks = COALESCE($13, remarks),
                 source = COALESCE($14, source),
-                payment_method = $15,
+                payment_method = COALESCE($15, payment_method),
                 room_rate = COALESCE($16, room_rate),
                 subtotal = COALESCE($17, subtotal),
                 total_amount = COALESCE($18, total_amount),
@@ -2111,7 +2218,15 @@ pub async fn update_booking_handler(
         .bind(&new_channel_snapshot)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| ApiError::Database(e.to_string()))?
+        .map_err(|e| {
+            if let sqlx::Error::Database(db_err) = &e
+                && db_err.code().as_deref() == Some("23P01")
+            {
+                ApiError::BadRequest("Room is already booked for these dates".to_string())
+            } else {
+                ApiError::Database(e.to_string())
+            }
+        })?
     };
 
     // Apply any deposit assertion against the payments ledger (collect mints a
@@ -2142,34 +2257,59 @@ pub async fn update_booking_handler(
 
         match updated_status {
             "voided" => {
-                // Void all linked payments so they don't appear in night audit,
-                // then resync payment_status so the stored chip flips back to
-                // 'voided'/'unpaid'. Both run on `tx`: if either fails the whole
-                // update rolls back instead of leaving a voided booking with
-                // still-active payments.
+                // Void all linked payments, return unused voucher/credits, and
+                // refresh group totals inside the same transaction.
+                let group_id = booking_group_id(&mut *tx, booking_id).await?;
+                if let Some(group_id) = group_id {
+                    crate::modules::booking_groups::repository::BookingGroupRepository::lock_tx(
+                        &mut tx, group_id,
+                    )
+                    .await?;
+                    crate::modules::booking_groups::voucher_resplit::return_voucher_if_final_room_tx(
+                        &mut tx, booking_id,
+                    )
+                    .await?;
+                    crate::modules::booking_groups::voucher_resplit::release_room_share_tx(
+                        &mut tx,
+                        booking_id,
+                        Some(user_id),
+                    )
+                    .await?;
+                } else {
+                    crate::modules::booking_groups::voucher_resplit::return_unpaid_single_room_voucher_tx(
+                        &mut tx,
+                        booking_id,
+                        input.remarks.as_deref().unwrap_or("Booking voided"),
+                    )
+                    .await?;
+                }
                 void_booking_payments_tx(&mut tx, booking_id).await?;
+                void_booking_ledgers_tx(
+                    &mut tx,
+                    booking_id,
+                    Some(user_id),
+                    input.remarks.as_deref().unwrap_or("Booking voided"),
+                )
+                .await?;
+                let _ = restore_complimentary_credits_tx(&mut tx, &booking).await?;
                 crate::modules::payments::service::recompute_payment_status_tx(&mut tx, booking_id)
                     .await?;
+                if let Some(group_id) = group_id {
+                    crate::modules::booking_groups::repository::BookingGroupRepository::refresh_totals_tx(
+                        &mut tx, group_id,
+                    )
+                    .await?;
+                }
             }
             "checked_out" | "completed" => {
                 // Auto-post company room charges to customer_ledgers on checkout.
                 //
-                // Why: when a booking with company billing transitions to
-                // checked_out, the receivable must land on the city ledger so
-                // it shows on the company's account. Doing this server-side
-                // ensures every checkout path (Bookings page, Rooms grid,
-                // future paths) gets the same behavior — prior to this only
-                // the Rooms-grid frontend handler created the row, so checkouts
-                // initiated from the Bookings page silently skipped it.
-                //
                 // Idempotent: skip if a non-reversal room_charge row already
-                // exists for this booking. Skip silently when company info is
-                // missing or total_amount is non-positive. Runs on `tx` (money
-                // path): if the ledger post fails, the checkout rolls back
-                // rather than completing with the receivable silently missing.
+                // exists for this booking. Runs on `tx` (money path): if the
+                // ledger post fails, the checkout rolls back rather than
+                // completing with the receivable silently missing.
                 if let Some(co_name) = booking.company_name.as_deref()
                     && !co_name.trim().is_empty()
-                    && booking.total_amount > rust_decimal::Decimal::ZERO
                 {
                     auto_post_company_ledger(
                         &mut tx,
@@ -2416,30 +2556,41 @@ pub async fn update_booking_handler(
                 };
 
                 // Staff must clean the room before the next guest can check in.
-                log::info!(
-                    "Setting room {} to {} after checkout (booking {})",
-                    new_room_id,
-                    next_room_status,
-                    booking_id
-                );
-                let result = sqlx::query("UPDATE rooms SET status = $1 WHERE id = $2")
-                    .bind(next_room_status)
-                    .bind(new_room_id)
-                    .execute(&pool)
-                    .await;
-                match result {
-                    Ok(r) => log::info!(
-                        "Room {} set to {}, rows affected: {}",
+                let other_occupied: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id = $1 AND id <> $2 \
+                     AND status IN ('checked_in', 'auto_checked_in'))",
+                )
+                .bind(new_room_id)
+                .bind(booking_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(false);
+                if !other_occupied {
+                    log::info!(
+                        "Setting room {} to {} after checkout (booking {})",
                         new_room_id,
                         next_room_status,
-                        r.rows_affected()
-                    ),
-                    Err(e) => log::error!(
-                        "Failed to set room {} to {}: {}",
-                        new_room_id,
-                        next_room_status,
-                        e
-                    ),
+                        booking_id
+                    );
+                    let result = sqlx::query("UPDATE rooms SET status = $1 WHERE id = $2")
+                        .bind(next_room_status)
+                        .bind(new_room_id)
+                        .execute(&pool)
+                        .await;
+                    match result {
+                        Ok(r) => log::info!(
+                            "Room {} set to {}, rows affected: {}",
+                            new_room_id,
+                            next_room_status,
+                            r.rows_affected()
+                        ),
+                        Err(e) => log::error!(
+                            "Failed to set room {} to {}: {}",
+                            new_room_id,
+                            next_room_status,
+                            e
+                        ),
+                    }
                 }
 
                 if let Err(e) =
@@ -2502,10 +2653,14 @@ pub async fn update_booking_handler(
                 }
             }
             "checked_in" | "auto_checked_in" => {
-                let _ = sqlx::query("UPDATE rooms SET status = 'occupied' WHERE id = $1")
-                    .bind(new_room_id)
-                    .execute(&pool)
-                    .await;
+                let _ = sqlx::query(
+                    "UPDATE rooms SET status = 'occupied' WHERE id = $1 \
+                     AND EXISTS(SELECT 1 FROM bookings WHERE id = $2 AND check_in_date <= CURRENT_DATE)",
+                )
+                .bind(new_room_id)
+                .bind(booking_id)
+                .execute(&pool)
+                .await;
             }
             "confirmed" => {
                 // The booking-confirmed trigger for staff edits (e.g. a
@@ -2697,17 +2852,20 @@ pub async fn reactivate_booking_handler(
     Ok(Json(booking))
 }
 
-pub async fn user_owns_booking(
-    pool: &DbPool,
+pub async fn user_owns_booking<'e, E>(
+    executor: E,
     user_id: i64,
     guest_id: i64,
-) -> Result<bool, ApiError> {
+) -> Result<bool, ApiError>
+where
+    E: sqlx::Executor<'e, Database = crate::core::db::DbDatabase>,
+{
     let query = "SELECT EXISTS(SELECT 1 FROM user_guests ug WHERE ug.user_id = $1 AND ug.guest_id = $2 UNION SELECT 1 FROM users u WHERE u.id = $1 AND u.guest_id = $2)";
 
     let owns_booking = sqlx::query_scalar::<_, bool>(query)
         .bind(user_id)
         .bind(guest_id)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -2749,10 +2907,13 @@ pub async fn void_booking_tx(
     Ok(())
 }
 
-pub async fn booking_night_audit_dates(
-    pool: &DbPool,
+pub async fn booking_night_audit_dates<'e, E>(
+    executor: E,
     booking_id: i64,
-) -> Result<Vec<NaiveDate>, ApiError> {
+) -> Result<Vec<NaiveDate>, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let rows = sqlx::query(
         r#"
         SELECT DISTINCT audit_date
@@ -2782,7 +2943,7 @@ pub async fn booking_night_audit_dates(
         "#,
     )
     .bind(booking_id)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -2820,8 +2981,30 @@ pub async fn void_booking_payments_tx(
     tx: &mut DbTransaction<'_>,
     booking_id: i64,
 ) -> Result<(), ApiError> {
-    let void_payments_query =
-        "UPDATE payments SET status = 'void' WHERE booking_id = $1 AND status != 'void'";
+    let void_payments_query = r#"
+        UPDATE payments p
+        SET status = 'void',
+            voided_at = CURRENT_TIMESTAMP,
+            void_reason = COALESCE(NULLIF(p.void_reason, ''), 'Booking voided'),
+            void_reversal_date = CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM night_audit_runs nar
+                    WHERE nar.status = 'completed'
+                      AND nar.audit_date >= p.created_at::date
+                )
+                THEN GREATEST(
+                    CURRENT_DATE,
+                    (
+                        SELECT COALESCE(MAX(nar.audit_date), CURRENT_DATE) + 1
+                        FROM night_audit_runs nar
+                        WHERE nar.status = 'completed'
+                    )
+                )
+                ELSE NULL
+            END
+        WHERE p.booking_id = $1
+          AND p.status NOT IN ('void', 'refunded')
+    "#;
 
     sqlx::query(void_payments_query)
         .bind(booking_id)
@@ -3397,7 +3580,7 @@ pub async fn apply_booking_field_update_tx(
         params.push(v.clone());
     }
     if let Some(v) = booking_update.company_id {
-        updates.push(format!("company_id = ${}", params.len() + 1));
+        updates.push(format!("company_id = ${}::bigint", params.len() + 1));
         params.push(v.to_string());
     }
 
@@ -3443,7 +3626,7 @@ pub async fn checkin_booking_tx(
             actual_check_in = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
-          AND status = 'confirmed'
+          AND status IN ('confirmed', 'partial_complimentary', 'fully_complimentary')
     "#;
 
     let result = sqlx::query(update_query)
@@ -3917,19 +4100,86 @@ pub async fn confirm_reactivated_booking_and_reserve_room(
 ) -> Result<Booking, ApiError> {
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
-    let update_booking_query = r#"
-        UPDATE bookings
-        SET status = 'confirmed',
+    let dates: Option<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
+        "SELECT check_in_date, check_out_date, COALESCE(status, '') FROM bookings WHERE id = $1 FOR UPDATE",
+    )
+    .bind(booking_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    let (check_in, check_out, locked_status) =
+        dates.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+    if locked_status != "voided" {
+        return Err(ApiError::BadRequest(
+            "Booking is no longer voided and cannot be reactivated".to_string(),
+        ));
+    }
+
+    let conflict: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM bookings
+            WHERE room_id = $1
+              AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')
+              AND id != $4
+              AND ((check_in_date <= $2 AND check_out_date > $2)
+                  OR (check_in_date < $3 AND check_out_date >= $3)
+                  OR (check_in_date >= $2 AND check_out_date <= $3))
+        )
+        "#,
+    )
+    .bind(room_id)
+    .bind(check_in)
+    .bind(check_out)
+    .bind(booking_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    if conflict {
+        return Err(ApiError::BadRequest(
+            "Cannot reactivate booking - room is already booked for these dates".to_string(),
+        ));
+    }
+
+    let result = sqlx::query(
+        r#"
+        UPDATE bookings b
+        SET status = CASE
+                WHEN (
+                    SELECT bh.previous_status
+                    FROM booking_history bh
+                    WHERE bh.booking_id = b.id
+                      AND bh.new_status = 'voided'
+                    ORDER BY bh.created_at DESC
+                    LIMIT 1
+                ) IN ('pending_payment', 'pending', 'pending_confirmation')
+                AND NOT EXISTS (
+                    SELECT 1 FROM payments p
+                    WHERE p.booking_id = b.id
+                      AND p.status = 'completed'
+                      AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                ) THEN 'pending_payment'
+                ELSE 'confirmed'
+            END,
             updated_at = CURRENT_TIMESTAMP,
             remarks = COALESCE(remarks, '') || ' | Reactivated from voided status'
-        WHERE id = $1 AND status = 'voided'
-    "#;
-
-    let result = sqlx::query(update_booking_query)
-        .bind(booking_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
+        WHERE b.id = $1 AND b.status = 'voided'
+        "#,
+    )
+    .bind(booking_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        if let sqlx::Error::Database(db_err) = &e
+            && db_err.code().as_deref() == Some("23P01")
+        {
+            ApiError::BadRequest(
+                "Cannot reactivate booking - room is already booked for these dates".to_string(),
+            )
+        } else {
+            ApiError::Database(e.to_string())
+        }
+    })?;
 
     if result.rows_affected() != 1 {
         return Err(ApiError::BadRequest(
@@ -3939,6 +4189,7 @@ pub async fn confirm_reactivated_booking_and_reserve_room(
 
     // The reactivated stay holds its room from its arrival day only.
     crate::modules::rooms::queries::reconcile_room_holds(&mut *tx, Some(room_id)).await?;
+    crate::modules::payments::service::recompute_payment_status_tx(&mut tx, booking_id).await?;
 
     let select_booking_query = "SELECT id, booking_number, guest_id, room_id, check_in_date, check_out_date, \
         room_rate, subtotal, tax_amount, discount_amount, total_amount, status, payment_status, \
@@ -4014,10 +4265,13 @@ pub async fn group_hold_is_engaged(pool: &DbPool, booking_id: i64) -> Result<boo
 }
 
 /// The group a booking belongs to, if any.
-pub async fn booking_group_id(pool: &DbPool, booking_id: i64) -> Result<Option<i64>, ApiError> {
+pub async fn booking_group_id<'e, E>(executor: E, booking_id: i64) -> Result<Option<i64>, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     sqlx::query_scalar::<_, Option<i64>>("SELECT booking_group_id FROM bookings WHERE id = $1")
         .bind(booking_id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .map(Option::flatten)
         .map_err(|e| ApiError::Database(e.to_string()))

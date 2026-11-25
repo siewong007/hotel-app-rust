@@ -16,6 +16,17 @@ fn db_err(e: sqlx::Error) -> ApiError {
     ApiError::Database(e.to_string())
 }
 
+fn room_change_db_err(e: sqlx::Error) -> ApiError {
+    if let sqlx::Error::Database(ref db) = e
+        && db.code().as_deref() == Some("23P01")
+    {
+        return ApiError::Conflict(
+            "Target room already has an overlapping booking for those dates".to_string(),
+        );
+    }
+    db_err(e)
+}
+
 fn opt_bool(row: &DbRow, col: &str) -> Option<bool> {
     row.try_get::<bool, _>(col).ok()
 }
@@ -154,7 +165,7 @@ SELECT
         WHEN r.status = 'reserved_dirty' AND NOT EXISTS (
             SELECT 1 FROM bookings hold
             WHERE hold.room_id = r.id
-              AND hold.status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed')
+              AND hold.status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed', 'partial_complimentary', 'fully_complimentary')
               AND hold.check_in_date <= CURRENT_DATE
               AND hold.check_out_date >= CURRENT_DATE
         ) THEN 'dirty'
@@ -519,13 +530,13 @@ pub async fn room_exists_by_id(pool: &DbPool, room_id: i64) -> Result<bool, ApiE
     Ok(existing.is_some())
 }
 
-/// Only blocks deletion if there's a guest currently checked in.
+/// Only blocks deletion if there's a guest currently checked in (including auto-checked-in and late checkout).
 pub async fn room_has_active_checked_in_booking(
     pool: &DbPool,
     room_id: i64,
 ) -> Result<bool, ApiError> {
     let existing: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM bookings WHERE room_id = $1 AND status = 'checked_in' LIMIT 1",
+        "SELECT id FROM bookings WHERE room_id = $1 AND status IN ('checked_in', 'auto_checked_in', 'late_checkout') LIMIT 1",
     )
     .bind(room_id)
     .fetch_optional(pool)
@@ -534,27 +545,67 @@ pub async fn room_has_active_checked_in_booking(
     Ok(existing.is_some())
 }
 
-/// Deletes a room and everything that FK-references it, in the same order and
-/// on the same (non-transactional) connection as the original handler.
+/// Deletes a room and everything that FK-references it atomically in a transaction.
 pub async fn delete_room_cascade(pool: &DbPool, room_id: i64) -> Result<(), ApiError> {
+    let mut tx = pool.begin().await.map_err(db_err)?;
+
+    let room_exists: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM rooms WHERE id = $1 FOR UPDATE")
+            .bind(room_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    if room_exists.is_none() {
+        return Err(ApiError::NotFound("Room not found".to_string()));
+    }
+
+    let in_house: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM bookings WHERE room_id = $1 AND status IN ('checked_in', 'auto_checked_in', 'late_checkout') LIMIT 1",
+    )
+    .bind(room_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_err)?;
+    if in_house.is_some() {
+        return Err(ApiError::BadRequest(
+            "Cannot delete room with a guest currently checked in. Please complete the checkout first."
+                .to_string(),
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE rooms SET connecting_room_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE connecting_room_id = $1",
+    )
+    .bind(room_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    sqlx::query("DELETE FROM room_changes WHERE from_room_id = $1 OR to_room_id = $1")
+        .bind(room_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+
     sqlx::query("DELETE FROM bookings WHERE room_id = $1")
         .bind(room_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
 
     sqlx::query("DELETE FROM room_status_change_log WHERE room_id = $1")
         .bind(room_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
 
     sqlx::query("DELETE FROM rooms WHERE id = $1")
         .bind(room_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
 
+    tx.commit().await.map_err(db_err)?;
     Ok(())
 }
 
@@ -819,7 +870,7 @@ const CHECK_ARRIVAL_HOLD: &str = r#"
 SELECT id, check_in_date, check_out_date
 FROM bookings
 WHERE room_id = $1
-  AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed')
+  AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed', 'partial_complimentary', 'fully_complimentary')
   AND check_in_date <= CURRENT_DATE
   AND check_out_date >= CURRENT_DATE
 ORDER BY check_in_date ASC, id ASC
@@ -870,7 +921,7 @@ where
     .map_err(db_err)
 }
 
-const CHECK_BOOKING_VALID_FOR_RESERVATION: &str = "SELECT id FROM bookings WHERE id = $1 AND room_id = $2 AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed')";
+const CHECK_BOOKING_VALID_FOR_RESERVATION: &str = "SELECT id FROM bookings WHERE id = $1 AND room_id = $2 AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed', 'partial_complimentary', 'fully_complimentary')";
 
 pub async fn booking_valid_for_reservation(
     pool: &DbPool,
@@ -1198,7 +1249,7 @@ pub async fn clear_maintenance_dates(pool: &DbPool, room_id: i64) -> Result<(), 
 
 const END_MAINTENANCE_SET_AVAILABLE: &str = r#"
 UPDATE rooms
-SET status = 'available',
+SET status = $1,
     maintenance_start_date = NULL,
     maintenance_end_date = NULL,
     cleaning_start_date = NULL,
@@ -1206,11 +1257,16 @@ SET status = 'available',
     reserved_start_date = NULL,
     reserved_end_date = NULL,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+WHERE id = $2
 "#;
 
-pub async fn end_maintenance_set_available(pool: &DbPool, room_id: i64) -> Result<(), ApiError> {
+pub async fn end_maintenance_set_available(
+    pool: &DbPool,
+    next_status: &str,
+    room_id: i64,
+) -> Result<(), ApiError> {
     sqlx::query(END_MAINTENANCE_SET_AVAILABLE)
+        .bind(next_status)
         .bind(room_id)
         .execute(pool)
         .await
@@ -1250,7 +1306,7 @@ SELECT
         WHEN EXISTS (
             SELECT 1 FROM bookings
             WHERE room_id = $1
-            AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed')
+            AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed', 'partial_complimentary', 'fully_complimentary')
             AND check_in_date <= CURRENT_DATE
             AND check_out_date >= CURRENT_DATE
         ) THEN 'reserved'
@@ -1303,11 +1359,11 @@ pub async fn sync_all_room_statuses(
 const GET_ACTIVE_BOOKING_FOR_ROOM: &str = r#"
 SELECT id, guest_id FROM bookings
 WHERE room_id = $1
-  AND status IN ('confirmed', 'checked_in')
+  AND status IN ('confirmed', 'checked_in', 'auto_checked_in', 'late_checkout')
   AND check_in_date <= CURRENT_DATE
   AND check_out_date >= CURRENT_DATE
 ORDER BY
-    CASE WHEN status = 'checked_in' THEN 0 ELSE 1 END,
+    CASE WHEN status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN 0 ELSE 1 END,
     check_in_date
 LIMIT 1
 "#;
@@ -1329,14 +1385,14 @@ SELECT
         WHEN EXISTS (
             SELECT 1 FROM bookings
             WHERE room_id = r.id
-            AND status = 'checked_in'
+            AND status IN ('checked_in', 'auto_checked_in', 'late_checkout')
             AND check_out_date >= CURRENT_DATE
         ) THEN 'occupied'
         WHEN r.status IN ('maintenance', 'out_of_order', 'dirty', 'cleaning', 'reserved_dirty') THEN r.status
         WHEN EXISTS (
             SELECT 1 FROM bookings
             WHERE room_id = r.id
-            AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed')
+            AND status IN ('pending', 'pending_payment', 'pending_confirmation', 'confirmed', 'partial_complimentary', 'fully_complimentary')
             AND check_in_date <= CURRENT_DATE
             AND check_out_date >= CURRENT_DATE
         ) THEN 'reserved'
@@ -1398,40 +1454,122 @@ pub async fn execute_room_change_tx(
     // subtotal/total recomputed across the stay's nights. COALESCE keeps
     // every existing value when the caller moves the guest without
     // re-pricing (e.g. the room-event flow).
-    sqlx::query(
-        "UPDATE bookings SET \
-            room_id = $1, \
-            room_rate = COALESCE($2, room_rate), \
-            rate_override_weekday = COALESCE($2, rate_override_weekday), \
-            rate_override_weekend = COALESCE($2, rate_override_weekend), \
-            subtotal = COALESCE($2 * GREATEST(check_out_date - check_in_date, 1), subtotal), \
-            total_amount = COALESCE($2 * GREATEST(check_out_date - check_in_date, 1), total_amount), \
-            updated_at = CURRENT_TIMESTAMP \
-         WHERE id = $3",
+    let booking_row = sqlx::query(
+        "SELECT status, check_in_date, check_out_date, daily_rates, discount_amount, late_checkout_penalty \
+         FROM bookings WHERE id = $1 FOR UPDATE",
     )
+    .bind(booking_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_err)?;
+
+    let booking_status: String = booking_row.try_get("status").unwrap_or_default();
+    let check_in: NaiveDate = booking_row.get("check_in_date");
+    let check_out: NaiveDate = booking_row.get("check_out_date");
+    let existing_daily_rates: Option<serde_json::Value> =
+        booking_row.try_get("daily_rates").ok().flatten();
+    let discount_amount = get_opt_decimal(&booking_row, "discount_amount").unwrap_or(Decimal::ZERO);
+    let late_checkout_penalty =
+        get_opt_decimal(&booking_row, "late_checkout_penalty").unwrap_or(Decimal::ZERO);
+
+    if let Some(rate) = room_rate_override {
+        let nights = (check_out - check_in).num_days().max(1);
+        let new_subtotal = rate * Decimal::from(nights);
+        let new_total = (new_subtotal - discount_amount).max(Decimal::ZERO) + late_checkout_penalty;
+        let updated_daily_rates = existing_daily_rates.map(|val| match val {
+            serde_json::Value::Object(map) if !map.is_empty() => {
+                let updated = map
+                    .into_iter()
+                    .map(|(k, _)| {
+                        (
+                            k,
+                            serde_json::Value::from(rate.to_string().parse::<f64>().unwrap_or(0.0)),
+                        )
+                    })
+                    .collect();
+                serde_json::Value::Object(updated)
+            }
+            other => other,
+        });
+
+        sqlx::query(
+            "UPDATE bookings SET \
+                room_id = $1, \
+                room_rate = $2, \
+                rate_override_weekday = $2, \
+                rate_override_weekend = $2, \
+                subtotal = $3, \
+                total_amount = $4, \
+                daily_rates = COALESCE($5, daily_rates), \
+                updated_at = CURRENT_TIMESTAMP \
+             WHERE id = $6",
+        )
         .bind(target_id)
-        .bind(room_rate_override)
+        .bind(rate)
+        .bind(new_subtotal)
+        .bind(new_total)
+        .bind(updated_daily_rates)
         .bind(booking_id)
         .execute(&mut **tx)
         .await
-        .map_err(db_err)?;
+        .map_err(room_change_db_err)?;
+    } else {
+        sqlx::query(
+            "UPDATE bookings SET room_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        )
+        .bind(target_id)
+        .bind(booking_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(room_change_db_err)?;
+    }
 
-    sqlx::query("UPDATE rooms SET status = 'dirty', updated_at = CURRENT_TIMESTAMP WHERE id = $1")
+    let is_in_house = matches!(
+        booking_status.as_str(),
+        "checked_in" | "auto_checked_in" | "late_checkout"
+    );
+
+    let (from_old, from_new, to_old, to_new) = if is_in_house {
+        sqlx::query(
+            "UPDATE rooms SET status = 'dirty', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+        )
         .bind(room_id)
         .execute(&mut **tx)
         .await
         .map_err(db_err)?;
-    // A guest arriving today in the vacated room keeps it held while it is
-    // cleaned (dirty -> reserved_dirty).
-    reconcile_room_holds(&mut **tx, Some(room_id)).await?;
+        // A guest arriving today in the vacated room keeps it held while it is
+        // cleaned (dirty -> reserved_dirty).
+        reconcile_room_holds(&mut **tx, Some(room_id)).await?;
 
-    sqlx::query(
-        "UPDATE rooms SET status = 'occupied', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-    )
-    .bind(target_id)
-    .execute(&mut **tx)
-    .await
-    .map_err(db_err)?;
+        sqlx::query(
+            "UPDATE rooms SET status = 'occupied', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+        )
+        .bind(target_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+
+        ("occupied", "dirty", "available", "occupied")
+    } else {
+        let vacated_status: String = sqlx::query_scalar(NEXT_ROOM_STATUS_AFTER_CLEANING)
+            .bind(room_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query(
+            "UPDATE rooms SET status = $1, updated_at = CURRENT_TIMESTAMP \
+             WHERE id = $2 AND status = 'reserved'",
+        )
+        .bind(&vacated_status)
+        .bind(room_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_err)?;
+        reconcile_room_holds(&mut **tx, Some(room_id)).await?;
+        reconcile_room_holds(&mut **tx, Some(target_id)).await?;
+
+        ("reserved", "available", "available", "reserved")
+    };
 
     sqlx::query(
         r#"
@@ -1459,8 +1597,8 @@ pub async fn execute_room_change_tx(
 
     sqlx::query(history_query)
         .bind(room_id)
-        .bind("occupied")
-        .bind("dirty")
+        .bind(from_old)
+        .bind(from_new)
         .bind(user_id)
         .bind(format!(
             "Guest moved to room {} - {}",
@@ -1472,8 +1610,8 @@ pub async fn execute_room_change_tx(
 
     sqlx::query(history_query)
         .bind(target_id)
-        .bind("available")
-        .bind("occupied")
+        .bind(to_old)
+        .bind(to_new)
         .bind(user_id)
         .bind(format!(
             "Guest moved from room {} - {}",
@@ -1858,26 +1996,28 @@ SELECT
     gr.id,
     gr.guest_id,
     g.nick_name as guest_name,
-    gr.room_type_id,
+    r.room_type_id,
     gr.overall_rating,
     gr.cleanliness_rating,
-    gr.staff_rating,
-    gr.facilities_rating,
+    gr.service_rating as staff_rating,
+    gr.comfort_rating as facilities_rating,
     gr.value_rating,
     gr.location_rating,
     gr.title,
-    gr.review_text,
+    gr.content as review_text,
     gr.pros,
     gr.cons,
-    gr.recommend,
-    gr.stay_type,
-    gr.is_verified,
-    gr.helpful_count,
+    NULL::boolean as recommend,
+    NULL::varchar as stay_type,
+    true as is_verified,
+    0::integer as helpful_count,
     gr.created_at
 FROM guest_reviews gr
 INNER JOIN guests g ON gr.guest_id = g.id
-INNER JOIN room_types rt ON gr.room_type_id = rt.id
-WHERE rt.name = $1 AND gr.is_published = true
+INNER JOIN bookings b ON b.id = gr.booking_id
+INNER JOIN rooms r ON r.id = b.room_id
+INNER JOIN room_types rt ON rt.id = r.room_type_id
+WHERE rt.name = $1 AND COALESCE(gr.is_published, false) = true
 ORDER BY gr.created_at DESC
 "#;
 

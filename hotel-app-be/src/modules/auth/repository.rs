@@ -46,6 +46,7 @@ pub struct GuestAccountRow {
     /// False for the login-disabled anchor account front-desk eKYC provisions,
     /// which exists only to satisfy `ekyc_verifications.user_id`.
     pub has_password: bool,
+    pub has_google_account: bool,
     pub is_deleted: bool,
 }
 
@@ -493,6 +494,7 @@ impl AuthRepository {
     ) -> Result<Option<GuestAccountRow>, ApiError> {
         sqlx::query_as::<_, GuestAccountRow>(
             "SELECT id, is_active, (password_hash IS NOT NULL) AS has_password, \
+             (google_subject IS NOT NULL) AS has_google_account, \
              (deleted_at IS NOT NULL) AS is_deleted \
              FROM users WHERE guest_id = $1 AND user_type::text = 'guest' ORDER BY id LIMIT 1",
         )
@@ -538,7 +540,8 @@ impl AuthRepository {
                      full_name = COALESCE($4, full_name), phone = COALESCE($5, phone), \
                      is_active = true, is_verified = $6, \
                      password_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP \
-                     WHERE id = $7 {RETURNING}"
+                     WHERE id = $7 AND password_hash IS NULL AND google_subject IS NULL \
+                       AND is_active = false AND deleted_at IS NULL {RETURNING}"
             )))
             .bind(username)
             .bind(email)
@@ -547,9 +550,14 @@ impl AuthRepository {
             .bind(phone)
             .bind(is_verified)
             .bind(user_id)
-            .fetch_one(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await
-            .map_err(ApiError::from)?,
+            .map_err(ApiError::from)?
+            .ok_or_else(|| {
+                ApiError::Conflict(
+                    "An account already exists for this booking. Please sign in.".to_string(),
+                )
+            })?,
             None => sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
                 "INSERT INTO users (username, email, password_hash, full_name, phone, \
                      user_type, guest_id, is_active, is_verified, created_at) \
@@ -635,21 +643,53 @@ impl AuthRepository {
                 .execute(&mut *tx)
                 .await
                 .map_err(ApiError::from)?;
+            // If an unverified password account previously held this email
+            // (pre-account-takeover setup), strip its password/2FA state and
+            // revoke prior sessions before linking the verified Google subject.
+            let was_verified = user.is_verified;
             let linked = sqlx::query_as::<_, User>(
-                "UPDATE users SET google_subject = $1, is_verified = true, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND google_subject IS NULL RETURNING id, username, email, google_subject, full_name, phone, is_active, is_verified, user_type, two_factor_enabled, two_factor_secret, two_factor_recovery_codes, created_at, updated_at",
+                "UPDATE users \
+                 SET google_subject = $1, \
+                     is_verified = true, \
+                     password_hash = CASE WHEN $3 THEN password_hash ELSE NULL END, \
+                     two_factor_enabled = CASE WHEN $3 THEN two_factor_enabled ELSE false END, \
+                     two_factor_secret = CASE WHEN $3 THEN two_factor_secret ELSE NULL END, \
+                     two_factor_recovery_codes = CASE WHEN $3 THEN two_factor_recovery_codes ELSE NULL END, \
+                     updated_at = CURRENT_TIMESTAMP \
+                 WHERE id = $2 AND google_subject IS NULL \
+                 RETURNING id, username, email, google_subject, full_name, phone, is_active, is_verified, user_type, two_factor_enabled, two_factor_secret, two_factor_recovery_codes, created_at, updated_at",
             )
             .bind(&identity.subject)
             .bind(user.id)
+            .bind(was_verified)
             .fetch_one(&mut *tx)
             .await;
 
             let linked = match linked {
-                Ok(user) => {
+                Ok(linked_user) => {
                     sqlx::query("RELEASE SAVEPOINT google_subject_link")
                         .execute(&mut *tx)
                         .await
                         .map_err(ApiError::from)?;
-                    user
+                    if !was_verified {
+                        sqlx::query(
+                            "UPDATE refresh_tokens SET is_revoked = true, revoked_at = CURRENT_TIMESTAMP \
+                             WHERE user_id = $1 AND revoked_at IS NULL",
+                        )
+                        .bind(linked_user.id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(ApiError::from)?;
+                        sqlx::query(
+                            "DELETE FROM guest_portal_sessions \
+                             WHERE guest_id = (SELECT guest_id FROM users WHERE id = $1)",
+                        )
+                        .bind(linked_user.id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(ApiError::from)?;
+                    }
+                    linked_user
                 }
                 Err(error) if is_google_subject_unique_violation(&error) => {
                     sqlx::query("ROLLBACK TO SAVEPOINT google_subject_link")

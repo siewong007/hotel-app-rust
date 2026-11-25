@@ -34,6 +34,8 @@ use super::pb::hotel::rooms::v1::room_type_service_server::RoomTypeServiceServer
 use super::{housekeeping::HousekeepingGrpc, housekeeping::MaintenanceGrpc};
 use super::{rooms::RoomGrpc, rooms::RoomTypeGrpc};
 use crate::core::db::DbPool;
+use crate::modules::guest_booking::availability::AvailabilityHub;
+use crate::modules::realtime::hub::DataChangeHub;
 
 /// File descriptor set emitted by build.rs — powers server reflection.
 const DESCRIPTORS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/hotel_descriptor.bin"));
@@ -62,8 +64,28 @@ where
     )
 }
 
+fn reflection_enabled() -> bool {
+    if let Ok(flag) = std::env::var("GRPC_REFLECTION_ENABLED") {
+        return matches!(
+            flag.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        );
+    }
+    let env = std::env::var("APP_ENV")
+        .or_else(|_| std::env::var("ENVIRONMENT"))
+        .unwrap_or_else(|_| "development".to_string());
+    !matches!(
+        env.trim().to_ascii_lowercase().as_str(),
+        "production" | "prod"
+    )
+}
+
 /// Builds the gRPC router merged into the top-level Axum router.
-pub fn grpc_router(pool: DbPool) -> Router {
+pub fn grpc_router(
+    pool: DbPool,
+    data_change_hub: DataChangeHub,
+    availability_hub: AvailabilityHub,
+) -> Router {
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
     // Mark every domain service SERVING once the runtime is up (the reporter
@@ -86,32 +108,52 @@ pub fn grpc_router(pool: DbPool) -> Router {
             .await;
     });
 
-    // Reflection v1 (current) + v1alpha (legacy grpcurl/Postman clients).
-    let reflection_v1 = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(DESCRIPTORS)
-        .build_v1()
-        .expect("reflection v1 build failed");
-    let reflection_v1alpha = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(DESCRIPTORS)
-        .build_v1alpha()
-        .expect("reflection v1alpha build failed");
-
     let router = Router::new();
     let router = add_grpc_service(router, health_service);
-    let router = add_grpc_service(router, reflection_v1);
-    let router = add_grpc_service(router, reflection_v1alpha);
-    let router = add_grpc_service(router, RoomServiceServer::new(RoomGrpc::new(pool.clone())));
+    let router = if reflection_enabled() {
+        // Reflection v1 (current) + v1alpha (legacy grpcurl/Postman clients).
+        let reflection_v1 = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(DESCRIPTORS)
+            .build_v1()
+            .expect("reflection v1 build failed");
+        let reflection_v1alpha = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(DESCRIPTORS)
+            .build_v1alpha()
+            .expect("reflection v1alpha build failed");
+        let router = add_grpc_service(router, reflection_v1);
+        add_grpc_service(router, reflection_v1alpha)
+    } else {
+        router
+    };
     let router = add_grpc_service(
         router,
-        RoomTypeServiceServer::new(RoomTypeGrpc::new(pool.clone())),
+        RoomServiceServer::new(RoomGrpc::with_hubs(
+            pool.clone(),
+            data_change_hub.clone(),
+            availability_hub.clone(),
+        )),
     );
     let router = add_grpc_service(
         router,
-        HousekeepingServiceServer::new(HousekeepingGrpc::new(pool.clone())),
+        RoomTypeServiceServer::new(RoomTypeGrpc::with_hubs(
+            pool.clone(),
+            data_change_hub.clone(),
+            availability_hub,
+        )),
+    );
+    let router = add_grpc_service(
+        router,
+        HousekeepingServiceServer::new(HousekeepingGrpc::with_hub(
+            pool.clone(),
+            data_change_hub.clone(),
+        )),
     );
     let router = add_grpc_service(
         router,
         MaintenanceServiceServer::new(MaintenanceGrpc::new(pool.clone())),
     );
-    add_grpc_service(router, GuestServiceServer::new(GuestGrpc::new(pool)))
+    add_grpc_service(
+        router,
+        GuestServiceServer::new(GuestGrpc::with_hub(pool, data_change_hub)),
+    )
 }

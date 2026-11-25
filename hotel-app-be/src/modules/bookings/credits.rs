@@ -162,11 +162,11 @@ pub async fn book_with_credits_handler(
         )));
     }
 
-    // Calculate charges for non-complimentary nights
+    // Calculate charges for non-complimentary nights (room rates are tax-inclusive).
     let paid_nights = total_nights - complimentary_nights;
     let subtotal = room_rate * Decimal::from(paid_nights);
-    let tax_amount = subtotal * Decimal::from_str_exact("0.10").unwrap_or_default();
-    let total_amount = subtotal + tax_amount;
+    let tax_amount = Decimal::ZERO;
+    let total_amount = subtotal;
 
     // Second-granularity timestamps collided under concurrent requests; the
     // uuid suffix keeps booking_number unique (matching the BK-* scheme).

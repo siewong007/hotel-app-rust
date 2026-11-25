@@ -36,13 +36,19 @@ pub async fn table_present(pool: &DbPool) -> bool {
     if let Some(present) = JOB_RUNS_PRESENT.get() {
         return *present;
     }
-    let present =
-        sqlx::query_scalar::<_, bool>("SELECT to_regclass('public.job_runs') IS NOT NULL")
-            .fetch_one(pool)
-            .await
-            .unwrap_or(false);
-    let _ = JOB_RUNS_PRESENT.set(present);
-    present
+    match sqlx::query_scalar::<_, bool>("SELECT to_regclass('public.job_runs') IS NOT NULL")
+        .fetch_one(pool)
+        .await
+    {
+        Ok(present) => {
+            let _ = JOB_RUNS_PRESENT.set(present);
+            present
+        }
+        Err(e) => {
+            log::warn!("Failed to probe public.job_runs table presence: {e}");
+            false
+        }
+    }
 }
 
 /// Persist one loop iteration. `error` set means the tick failed; `detail`

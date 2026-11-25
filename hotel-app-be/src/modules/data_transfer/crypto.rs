@@ -68,6 +68,11 @@ const PBKDF2_ITERATIONS: u32 = 600_000;
 /// forceable. Files are always written at [`PBKDF2_ITERATIONS`].
 const MIN_PBKDF2_ITERATIONS: u32 = 100_000;
 
+/// Largest iteration count the reader will accept from an incoming envelope
+/// header, preventing an attacker from pinning a blocking worker with a huge
+/// `u32` (up to `4_294_967_295`).
+const MAX_PBKDF2_ITERATIONS: u32 = 2_000_000;
+
 const SALT_LEN: usize = 16;
 const NONCE_PREFIX_LEN: usize = 4;
 const KEY_LEN: usize = 32;
@@ -322,6 +327,11 @@ impl<R: Read> DecryptingReader<R> {
         if header.iterations < MIN_PBKDF2_ITERATIONS {
             return Err("the backup header declares too weak a key derivation".to_string());
         }
+        if header.iterations > MAX_PBKDF2_ITERATIONS {
+            return Err(
+                "the backup header declares an implausible key derivation cost".to_string(),
+            );
+        }
         let chunk_size = header.chunk_size as usize;
         if chunk_size == 0 || chunk_size > MAX_CHUNK_PLAINTEXT_BYTES {
             return Err("the backup header declares an implausible chunk size".to_string());
@@ -566,6 +576,28 @@ mod tests {
     fn rejects_a_short_passphrase() {
         let error = BackupEncryptor::new("short").err().unwrap();
         assert!(matches!(error, ApiError::BadRequest(_)));
+    }
+
+    #[test]
+    fn rejects_an_excessive_iteration_count() {
+        let sealed = seal("correct horse battery", b"{}");
+        let header_len = u32::from_be_bytes(
+            sealed[ENVELOPE_MAGIC.len()..ENVELOPE_MAGIC.len() + HEADER_LEN_BYTES]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let start = ENVELOPE_MAGIC.len() + HEADER_LEN_BYTES;
+        let mut header: EnvelopeHeader =
+            serde_json::from_slice(&sealed[start..start + header_len]).unwrap();
+        header.iterations = MAX_PBKDF2_ITERATIONS + 1;
+        let rewritten = serde_json::to_vec(&header).unwrap();
+        let mut forged = Vec::new();
+        forged.extend_from_slice(ENVELOPE_MAGIC);
+        forged.extend_from_slice(&(rewritten.len() as u32).to_be_bytes());
+        forged.extend_from_slice(&rewritten);
+        forged.extend_from_slice(&sealed[start + header_len..]);
+        let error = open("correct horse battery", &forged).err().unwrap();
+        assert!(error.contains("implausible key derivation cost"), "{error}");
     }
 
     #[test]

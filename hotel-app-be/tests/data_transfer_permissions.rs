@@ -1337,6 +1337,39 @@ async fn history_lists_the_just_run_transfer_events() {
         "history must include the denied step-up: {entries:?}"
     );
 
+    // Non-super-admin holding data_transfer:import + import_sensitive cannot
+    // preview a System-tier document carrying protected RBAC tables (e.g., team_roles).
+    let team_role_doc = v1_document(&[V1Entity {
+        name: "public.team_roles",
+        primary_key: &["team_id", "role_id"],
+        rows: vec![json!({ "team_id": 1, "role_id": 1 })],
+    }]);
+    fixture.grant(WORKER_ID, "data_transfer:import").await;
+    fixture
+        .grant(WORKER_ID, "data_transfer:import_sensitive")
+        .await;
+    let staged =
+        hotel_app_be::modules::data_transfer::jobs::stage_backup_upload(Body::from(team_role_doc))
+            .await
+            .expect("team_roles payload must stage");
+    let status = fixture
+        .status(
+            "POST",
+            "/api/data-transfer/import/preview",
+            Some(WORKER_ID),
+            format!("{{\"uploadId\":\"{}\"}}", staged.upload_id).as_bytes(),
+            &[],
+            IP_HISTORY,
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "non-super-admin must receive 403 when previewing System-tier team_roles backup"
+    );
+    let _ =
+        hotel_app_be::modules::data_transfer::jobs::delete_staged_upload(staged.upload_id).await;
+
     fixture.revoke_all(WORKER_ID).await;
     Fixture::cleanup(&fixture.pool).await;
 }

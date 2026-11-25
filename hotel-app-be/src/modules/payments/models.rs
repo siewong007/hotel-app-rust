@@ -345,6 +345,16 @@ impl PaymentWorkflowSummaryRow {
     pub fn billable_total(&self) -> Decimal {
         self.total_amount + self.tourism_tax_amount + self.extra_bed_charge
     }
+
+    /// Room-charge refunds (excludes keycard deposit refunds).
+    pub fn room_refunded(&self) -> Decimal {
+        (self.total_refunded - self.deposit_refunded).max(Decimal::ZERO)
+    }
+
+    /// Net room-charge payments still retained against the booking.
+    pub fn net_room_paid(&self) -> Decimal {
+        (self.total_paid - self.room_refunded()).max(Decimal::ZERO)
+    }
 }
 
 /// Invoice record
@@ -452,4 +462,30 @@ pub struct PaymentVoidPreview {
     /// Where the automatic reversal would post; `None` while the day is open
     /// (the void simply removes the payment from its own day).
     pub reversal_date: Option<NaiveDate>,
+}
+
+#[cfg(test)]
+mod workflow_summary_tests {
+    use super::PaymentWorkflowSummaryRow;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn separates_deposit_refunds_from_room_charge_refunds() {
+        let row = PaymentWorkflowSummaryRow {
+            booking_status: "confirmed".to_string(),
+            payment_status: "paid".to_string(),
+            total_amount: Decimal::new(20000, 2),
+            tourism_tax_amount: Decimal::new(1000, 2),
+            extra_bed_charge: Decimal::new(3000, 2),
+            total_paid: Decimal::new(24000, 2),
+            total_refunded: Decimal::new(15000, 2), // 100 deposit refund + 50 room refund
+            deposit_collected: Decimal::new(10000, 2),
+            deposit_refunded: Decimal::new(10000, 2),
+            deposit_forfeited: Decimal::ZERO,
+            has_failed_payment: false,
+        };
+        assert_eq!(row.billable_total(), Decimal::new(24000, 2));
+        assert_eq!(row.room_refunded(), Decimal::new(5000, 2));
+        assert_eq!(row.net_room_paid(), Decimal::new(19000, 2));
+    }
 }

@@ -144,7 +144,7 @@ describe('EnhancedCheckInModal payment idempotency', () => {
       render(
         <EnhancedCheckInModal
           open
-          booking={booking}
+          booking={{ ...booking, payment_status: 'unpaid', total_paid: 0, balance_due: 100 }}
           guest={guest}
           onClose={mocks.onClose}
           onCheckInSuccess={mocks.onCheckInSuccess}
@@ -154,6 +154,8 @@ describe('EnhancedCheckInModal payment idempotency', () => {
       const dialog = await screen.findByRole('dialog');
       await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Check In' })).toBeDefined());
 
+      fireEvent.click(within(dialog).getByRole('tab', { name: 'Payment' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: /Make Payment Now/i }));
       fireEvent.click(within(dialog).getByRole('button', { name: 'Check In' }));
       await waitFor(() => expect(mocks.recordPayment).toHaveBeenCalledTimes(1));
       fireEvent.click(within(dialog).getByRole('button', { name: 'Check In' }));
@@ -329,20 +331,47 @@ describe('EnhancedCheckInModal legal name collection', () => {
         },
         {
           source: 'walk_in',
+          payment_status: 'unpaid',
+          total_paid: 0,
           is_tourist: true,
           total_amount: 100,
           tourism_tax_amount: 10,
         },
       );
 
-      // Switch to Payment tab
+      // Switch to Payment tab and choose Make Payment Now
       fireEvent.click(within(dialog).getByRole('tab', { name: /Payment/i }));
+      fireEvent.click(within(dialog).getByRole('button', { name: /Make Payment Now/i }));
 
       // Amount paid should default to 110 (100 room + 10 tourism tax)
       await waitFor(() => {
         const amountInput = within(dialog).getByLabelText(/Amount Paid/i) as HTMLInputElement;
         expect(amountInput.value).toBe('110');
       });
+    });
+
+    it('shows paid status and never double-charges when booking is already paid', async () => {
+      const dialog = await renderWith(
+        {
+          first_name: 'Alice',
+          last_name: 'Tan',
+        },
+        {
+          source: 'walk_in',
+          payment_status: 'paid',
+          total_amount: 100,
+          total_paid: 100,
+          balance_due: 0,
+        },
+      );
+
+      fireEvent.click(within(dialog).getByRole('tab', { name: /Payment/i }));
+      expect(within(dialog).getByText(/Paid \(RM100\.00\)/i)).toBeDefined();
+      expect(within(dialog).queryByRole('button', { name: /Make Payment Now/i })).toBeNull();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Check In' }));
+      await waitFor(() => expect(mocks.checkInGuest).toHaveBeenCalledTimes(1));
+      expect(mocks.recordPayment).not.toHaveBeenCalled();
     });
   });
 });

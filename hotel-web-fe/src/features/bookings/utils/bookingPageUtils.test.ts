@@ -100,6 +100,7 @@ describe('action guards', () => {
 
   it('guards checkout, void, release, and reactivate by status', () => {
     expect(canCheckOut(booking({ status: 'checked_in' }))).toBe(true);
+    expect(canCheckOut(booking({ status: 'auto_checked_in' }))).toBe(true);
     expect(canCheckOut(booking({ status: 'confirmed' }))).toBe(false);
 
     expect(canVoid(booking({ status: 'confirmed' }))).toBe(true);
@@ -169,5 +170,15 @@ describe('overdue balance slices', () => {
     ];
     const slices = getBookingViewSlices(list, today);
     expect(slices.upcoming.map((b) => b.id)).toEqual(['unpaid', 'transfer', 'pending']);
+  });
+
+  it('includes auto_checked_in in inHouse/departing slices and excludes it from arriving', () => {
+    const list = [
+      booking({ id: 'auto-in', status: 'auto_checked_in', check_in_date: today, check_out_date: today }),
+    ];
+    const slices = getBookingViewSlices(list, today);
+    expect(slices.arriving).toHaveLength(0);
+    expect(slices.inHouse.map((b) => b.id)).toEqual(['auto-in']);
+    expect(slices.departing.map((b) => b.id)).toEqual(['auto-in']);
   });
 });

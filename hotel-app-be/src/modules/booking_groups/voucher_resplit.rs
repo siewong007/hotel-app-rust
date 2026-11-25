@@ -364,7 +364,7 @@ pub async fn return_unpaid_group_voucher_tx(
             JOIN bookings b ON b.id = p.booking_id
             WHERE b.booking_group_id = $1
               AND p.status = 'completed'
-              AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')
+              AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
         )
         "#,
     )
@@ -412,9 +412,18 @@ pub async fn return_unpaid_group_voucher_tx(
     sqlx::query(
         "UPDATE voucher_redemptions SET status = 'reversed', reversed_at = CURRENT_TIMESTAMP, \
          reversal_reason = 'Unpaid group booking cancelled', updated_at = CURRENT_TIMESTAMP \
-         WHERE voucher_id = $1 AND status = 'applied'",
+         WHERE voucher_id = $1 AND status = 'applied' \
+           AND booking_id IN (SELECT id FROM bookings WHERE booking_group_id = $2)",
     )
     .bind(voucher_id)
+    .bind(group_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(ApiError::from)?;
+    sqlx::query(
+        "UPDATE booking_groups SET voucher_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+    )
+    .bind(group_id)
     .execute(&mut **tx)
     .await
     .map_err(ApiError::from)?;
@@ -428,6 +437,54 @@ pub async fn return_unpaid_group_voucher_tx(
     .map_err(ApiError::from)?
     .rows_affected();
     Ok(restored > 0)
+}
+
+/// Return an applied voucher on a single-room (non-group) booking that has not
+/// settled any room payment, restoring the voucher to `'available'`.
+pub async fn return_unpaid_single_room_voucher_tx(
+    tx: &mut DbTransaction<'_>,
+    booking_id: i64,
+    reason: &str,
+) -> Result<bool, ApiError> {
+    let paid: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM payments p WHERE p.booking_id = $1 AND p.status = 'completed' \
+         AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage'))",
+    )
+    .bind(booking_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ApiError::from)?;
+    if paid {
+        return Ok(false);
+    }
+    let voucher_ids: Vec<i64> = sqlx::query_scalar(
+        "UPDATE voucher_redemptions SET status = 'reversed', reversed_at = CURRENT_TIMESTAMP, \
+         reversal_reason = $2, updated_at = CURRENT_TIMESTAMP \
+         WHERE booking_id = $1 AND status = 'applied' \
+         RETURNING voucher_id",
+    )
+    .bind(booking_id)
+    .bind(reason)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(ApiError::from)?;
+    let mut restored_any = false;
+    for voucher_id in voucher_ids {
+        let restored = sqlx::query(
+            "UPDATE vouchers SET status = 'available', redeemed_at = NULL, updated_at = CURRENT_TIMESTAMP \
+             WHERE id = $1 AND status = 'redeemed' \
+               AND NOT EXISTS (SELECT 1 FROM voucher_redemptions vr WHERE vr.voucher_id = $1 AND vr.status = 'applied')",
+        )
+        .bind(voucher_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(ApiError::from)?
+        .rows_affected();
+        if restored > 0 {
+            restored_any = true;
+        }
+    }
+    Ok(restored_any)
 }
 
 /// Return the voucher when `booking_id` is the last live room of its group.

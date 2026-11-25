@@ -438,19 +438,28 @@ impl PaymentRepository {
             UPDATE bookings AS b
             SET payment_status = CASE
                 WHEN b.status = 'voided' THEN 'void'
-                WHEN COALESCE(b.is_complimentary, false) THEN COALESCE(b.payment_status, 'paid')
                 WHEN (b.total_amount + COALESCE(b.tourism_tax_amount, 0)
                         + COALESCE(b.extra_bed_charge, 0)) <= 0 THEN 'paid'
-                WHEN COALESCE((SELECT SUM(p.amount) FROM payments p
+                WHEN (COALESCE((SELECT SUM(p.amount) FROM payments p
                         WHERE p.booking_id = b.id
                           AND p.status = 'completed'
-                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)
+                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0)
+                      - COALESCE((SELECT SUM(p.amount) FROM payments p
+                        WHERE p.booking_id = b.id
+                          AND p.status <> 'void'
+                          AND COALESCE(p.payment_type, 'booking') = 'refund'
+                          AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0))
                      >= (b.total_amount + COALESCE(b.tourism_tax_amount, 0)
                         + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
-                WHEN COALESCE((SELECT SUM(p.amount) FROM payments p
+                WHEN (COALESCE((SELECT SUM(p.amount) FROM payments p
                         WHERE p.booking_id = b.id
                           AND p.status = 'completed'
-                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) > 0
+                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0)
+                      - COALESCE((SELECT SUM(p.amount) FROM payments p
+                        WHERE p.booking_id = b.id
+                          AND p.status <> 'void'
+                          AND COALESCE(p.payment_type, 'booking') = 'refund'
+                          AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0)) > 0
                     THEN 'partial'
                 ELSE 'unpaid'
             END,
@@ -475,19 +484,28 @@ impl PaymentRepository {
             UPDATE bookings AS b
             SET payment_status = CASE
                 WHEN b.status = 'voided' THEN 'void'
-                WHEN COALESCE(b.is_complimentary, false) THEN COALESCE(b.payment_status, 'paid')
                 WHEN (b.total_amount + COALESCE(b.tourism_tax_amount, 0)
                         + COALESCE(b.extra_bed_charge, 0)) <= 0 THEN 'paid'
-                WHEN COALESCE((SELECT SUM(p.amount) FROM payments p
+                WHEN (COALESCE((SELECT SUM(p.amount) FROM payments p
                         WHERE p.booking_id = b.id
                           AND p.status = 'completed'
-                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0)
+                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0)
+                      - COALESCE((SELECT SUM(p.amount) FROM payments p
+                        WHERE p.booking_id = b.id
+                          AND p.status <> 'void'
+                          AND COALESCE(p.payment_type, 'booking') = 'refund'
+                          AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0))
                      >= (b.total_amount + COALESCE(b.tourism_tax_amount, 0)
                         + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
-                WHEN COALESCE((SELECT SUM(p.amount) FROM payments p
+                WHEN (COALESCE((SELECT SUM(p.amount) FROM payments p
                         WHERE p.booking_id = b.id
                           AND p.status = 'completed'
-                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) > 0
+                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0)
+                      - COALESCE((SELECT SUM(p.amount) FROM payments p
+                        WHERE p.booking_id = b.id
+                          AND p.status <> 'void'
+                          AND COALESCE(p.payment_type, 'booking') = 'refund'
+                          AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0)) > 0
                     THEN 'partial'
                 ELSE 'unpaid'
             END,
@@ -636,7 +654,8 @@ impl PaymentRepository {
         // Reject a second completed payment for the booking. The real column is
         // `status` (there is no `payment_status` column); placeholders are
         // cfg-gated for each engine.
-        let existing_sql = "SELECT id FROM payments WHERE booking_id = $1 AND status = $2 LIMIT 1";
+        let existing_sql = "SELECT id FROM payments WHERE booking_id = $1 AND status = $2 \
+             AND COALESCE(payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage') LIMIT 1";
         let existing_payment: Option<i64> = sqlx::query_scalar(existing_sql)
             .bind(request.booking_id)
             .bind(PaymentStatus::Completed.to_string())
@@ -1392,16 +1411,17 @@ impl PaymentRepository {
                 -- deposit_collected/deposit_refunded.
                 COALESCE((SELECT SUM(p.amount) FROM payments p
                     WHERE p.booking_id = b.id AND p.status = 'completed'
-                      AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited')), 0) AS total_paid,
+                      AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) AS total_paid,
                 COALESCE((SELECT SUM(p.amount) FROM payments p
                     WHERE p.booking_id = b.id AND p.status <> 'void'
-                      AND (p.status = 'refunded' OR COALESCE(p.payment_type, 'booking') = 'refund')), 0) AS total_refunded,
+                      AND COALESCE(p.payment_type, 'booking') = 'refund'), 0) AS total_refunded,
                 COALESCE((SELECT SUM(p.amount) FROM payments p
                     WHERE p.booking_id = b.id AND p.status = 'completed'
                       AND COALESCE(p.payment_type, 'booking') = 'deposit'), 0) AS deposit_collected,
                 COALESCE((SELECT SUM(p.amount) FROM payments p
                     WHERE p.booking_id = b.id AND p.status <> 'void'
-                      AND (p.status = 'refunded' OR COALESCE(p.payment_type, 'booking') = 'refund')), 0) AS deposit_refunded,
+                      AND COALESCE(p.payment_type, 'booking') = 'refund'
+                      AND COALESCE(p.notes, '') NOT LIKE 'Room charge refunded%'), 0) AS deposit_refunded,
                 COALESCE((SELECT SUM(p.amount) FROM payments p
                     WHERE p.booking_id = b.id AND p.status = 'completed'
                       AND COALESCE(p.payment_type, 'booking') = 'deposit_forfeited'), 0) AS deposit_forfeited,
@@ -1454,7 +1474,7 @@ impl PaymentRepository {
         // is on payment_type + status — not the notes text — so a staff note
         // appended to the marker can never defeat the guard.
         let existing_refund: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM payments WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' LIMIT 1"
+            "SELECT id FROM payments WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' AND COALESCE(notes, '') NOT LIKE 'Room charge refunded%' LIMIT 1"
         )
         .bind(booking_id)
         .fetch_optional(&mut *tx)
@@ -1476,7 +1496,7 @@ impl PaymentRepository {
                 COALESCE((SELECT SUM(amount) FROM payments \
                           WHERE booking_id = $1 AND payment_type = 'deposit' AND status = 'completed'), 0) \
                 - COALESCE((SELECT SUM(amount) FROM payments \
-                          WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded'), 0) \
+                          WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' AND COALESCE(notes, '') NOT LIKE 'Room charge refunded%'), 0) \
                 - COALESCE((SELECT SUM(amount) FROM payments \
                           WHERE booking_id = $1 AND payment_type = 'deposit_forfeited' AND status = 'completed'), 0)",
         )
@@ -1606,7 +1626,7 @@ impl PaymentRepository {
                 COALESCE((SELECT SUM(amount) FROM payments \
                           WHERE booking_id = $1 AND payment_type = 'deposit' AND status = 'completed'), 0) \
                 - COALESCE((SELECT SUM(amount) FROM payments \
-                          WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded'), 0) \
+                          WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' AND COALESCE(notes, '') NOT LIKE 'Room charge refunded%'), 0) \
                 - COALESCE((SELECT SUM(amount) FROM payments \
                           WHERE booking_id = $1 AND payment_type = 'deposit_forfeited' AND status = 'completed'), 0)",
         )
@@ -1694,7 +1714,7 @@ impl PaymentRepository {
         // is the sole writer of 'refund' rows and its marker note may now
         // carry appended staff notes, so keying on the literal text would
         // miss them.
-        let select_sql = "SELECT id FROM payments WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' ORDER BY id DESC LIMIT 1 FOR UPDATE";
+        let select_sql = "SELECT id FROM payments WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' AND COALESCE(notes, '') NOT LIKE 'Room charge refunded%' ORDER BY id DESC LIMIT 1 FOR UPDATE";
 
         let refund_id: Option<i64> = sqlx::query_scalar(select_sql)
             .bind(booking_id)
@@ -1863,23 +1883,40 @@ impl PaymentRepository {
         pool: &DbPool,
         user_id: i64,
         booking_id: i64,
-        invoice_number: &str,
+        invoice_number: Option<&str>,
     ) -> Result<Invoice, ApiError> {
         let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
-        // Idempotency: return the existing invoice (enriched with stay/room
-        // detail) if one already exists for this booking.
-        if let Some(existing) = Self::enriched_invoice_by_booking_id(&mut *tx, booking_id).await? {
+        // Lock booking row to serialize concurrent invoice generation/reconciliation.
+        let stub_state: Option<(i64, String, bool)> = sqlx::query_as(
+            "SELECT i.id, i.invoice_number, (i.line_items = '[]'::jsonb) AS is_stub \
+             FROM invoices i WHERE i.booking_id = $1 ORDER BY i.created_at LIMIT 1 FOR UPDATE",
+        )
+        .bind(booking_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+
+        if let Some((_existing_id, ref _existing_number, false)) = stub_state
+            && let Some(existing) =
+                Self::enriched_invoice_by_booking_id(&mut *tx, booking_id).await?
+        {
             return Ok(existing);
         }
 
         let booking_details: GeneratedInvoiceBookingDetailsRow = sqlx::query_as(
             r#"
-            SELECT b.id AS booking_id, b.guest_id, g.nick_name AS customer_name,
+            SELECT b.id AS booking_id, b.guest_id,
+                   CASE
+                       WHEN NULLIF(BTRIM(g.first_name), '') IS NOT NULL
+                        AND NULLIF(BTRIM(g.last_name), '') IS NOT NULL
+                       THEN BTRIM(g.first_name) || ' ' || BTRIM(g.last_name)
+                       ELSE COALESCE(BTRIM(g.nick_name), '')
+                   END AS customer_name,
                    g.email AS customer_email, g.phone AS customer_phone,
                    b.check_in_date AS check_in, b.check_out_date AS check_out,
                    r.id AS room_id, r.room_number, rt.name AS room_type,
-                   COALESCE(b.subtotal, 0) AS subtotal,
+                   COALESCE(b.subtotal, b.total_amount + COALESCE(b.discount_amount, 0)) AS subtotal,
                    COALESCE(b.discount_amount, 0) AS discount_amount,
                    COALESCE(b.room_rate, 0) AS room_rate
             FROM bookings b
@@ -1918,14 +1955,11 @@ impl PaymentRepository {
             .await?
             .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
         let total = summary.billable_total();
+        let net_paid = summary.net_room_paid();
         // Settlement is judged against the billable total: a deposit-only
         // booking is not "paid" just because some completed payment exists.
-        let paid_amount = summary.total_paid.min(total);
-        let status = if summary.total_paid >= total {
-            "paid"
-        } else {
-            "draft"
-        };
+        let paid_amount = net_paid.min(total);
+        let status = if net_paid >= total { "paid" } else { "draft" };
 
         let nights = (check_out - check_in).num_days() as i32;
         let tax_amount = summary.tourism_tax_amount;
@@ -1966,43 +2000,92 @@ impl PaymentRepository {
         }
         let line_items = serde_json::json!(items);
 
-        // Insert against the REAL invoices columns, cfg-gated like
-        // `insert_checkout_invoice`. postgres carries billing_name/email +
-        // those. check_in/check_out/room/nights are NOT stored (no columns) — they
-        // are attached to the returned struct from `booking_details` instead.
-
-        let (id, uuid_val, created_at): (i64, uuid::Uuid, chrono::DateTime<chrono::Utc>) =
-            sqlx::query_as(
-                r#"
-                INSERT INTO invoices (
-                    invoice_number, booking_id, bill_to_guest_id, billing_name, billing_email,
-                    subtotal, tax_amount, discount_amount, total_amount, paid_amount,
-                    currency, line_items, status, invoice_type, room_charges, service_charges,
-                    created_by
+        let (invoice_number_owned, id, uuid_val, created_at): (
+            String,
+            i64,
+            uuid::Uuid,
+            chrono::DateTime<chrono::Utc>,
+        ) = if let Some((existing_id, existing_number, true)) = stub_state {
+            let (uuid_val, created_at): (uuid::Uuid, chrono::DateTime<chrono::Utc>) =
+                sqlx::query_as(
+                    r#"
+                    UPDATE invoices
+                    SET billing_name = $1,
+                        billing_email = $2,
+                        bill_to_guest_id = $3,
+                        subtotal = $4,
+                        tax_amount = $5,
+                        discount_amount = $6,
+                        total_amount = $7,
+                        paid_amount = $8,
+                        currency = $9,
+                        line_items = $10,
+                        status = $11,
+                        room_charges = $12,
+                        service_charges = $13,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $14
+                    RETURNING uuid, created_at
+                    "#,
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'booking', $14, $15, $16)
-                RETURNING id, uuid, created_at
-                "#,
-            )
-            .bind(invoice_number)
-            .bind(booking_id)
-            .bind(guest_id)
-            .bind(&customer_name)
-            .bind(&customer_email)
-            .bind(decimal_to_db(subtotal))
-            .bind(decimal_to_db(tax_amount))
-            .bind(decimal_to_db(discount_amount))
-            .bind(decimal_to_db(total))
-            .bind(decimal_to_db(paid_amount))
-            .bind("MYR")
-            .bind(&line_items)
-            .bind(status)
-            .bind(decimal_to_db(room_subtotal))
-            .bind(decimal_to_db(service_charge))
-            .bind(user_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(ApiError::from)?;
+                .bind(&customer_name)
+                .bind(&customer_email)
+                .bind(guest_id)
+                .bind(decimal_to_db(subtotal))
+                .bind(decimal_to_db(tax_amount))
+                .bind(decimal_to_db(discount_amount))
+                .bind(decimal_to_db(total))
+                .bind(decimal_to_db(paid_amount))
+                .bind("MYR")
+                .bind(&line_items)
+                .bind(status)
+                .bind(decimal_to_db(room_subtotal))
+                .bind(decimal_to_db(service_charge))
+                .bind(existing_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ApiError::from)?;
+            (existing_number, existing_id, uuid_val, created_at)
+        } else {
+            let alloc_number = match invoice_number {
+                Some(n) => n.to_string(),
+                None => crate::services::invoice_numbers::next_invoice_number_tx(&mut tx).await?,
+            };
+            let (id, uuid_val, created_at): (i64, uuid::Uuid, chrono::DateTime<chrono::Utc>) =
+                sqlx::query_as(
+                    r#"
+                    INSERT INTO invoices (
+                        invoice_number, booking_id, bill_to_guest_id, billing_name, billing_email,
+                        subtotal, tax_amount, discount_amount, total_amount, paid_amount,
+                        currency, line_items, status, invoice_type, room_charges, service_charges,
+                        created_by
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'booking', $14, $15, $16)
+                    RETURNING id, uuid, created_at
+                    "#,
+                )
+                .bind(&alloc_number)
+                .bind(booking_id)
+                .bind(guest_id)
+                .bind(&customer_name)
+                .bind(&customer_email)
+                .bind(decimal_to_db(subtotal))
+                .bind(decimal_to_db(tax_amount))
+                .bind(decimal_to_db(discount_amount))
+                .bind(decimal_to_db(total))
+                .bind(decimal_to_db(paid_amount))
+                .bind("MYR")
+                .bind(&line_items)
+                .bind(status)
+                .bind(decimal_to_db(room_subtotal))
+                .bind(decimal_to_db(service_charge))
+                .bind(user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ApiError::from)?;
+            (alloc_number, id, uuid_val, created_at)
+        };
+        let invoice_number = invoice_number_owned.as_str();
 
         // The displayed invoice date must be the hotel-local business date,
         // not the server's UTC date (they differ 16:00–24:00 UTC+8).
@@ -2287,6 +2370,15 @@ impl PaymentRepository {
                         .to_string(),
                 ));
             }
+            if method_changed && deposit_like {
+                let days = Self::payment_business_days_tx(tx, payment_id).await?;
+                if days.is_closed(days.payment_day) {
+                    return Err(ApiError::BadRequest(
+                        "Payment method cannot be modified after its business day has been closed by night audit"
+                            .to_string(),
+                    ));
+                }
+            }
         }
 
         let fingerprint = Self::canonical_payment_fingerprint(
@@ -2325,7 +2417,7 @@ impl PaymentRepository {
             if final_payment_type == "booking"
                 && let Some(summary) = Self::workflow_summary_row(&mut **tx, booking_id).await?
             {
-                let balance = summary.billable_total() - summary.total_paid;
+                let balance = summary.billable_total() - summary.net_room_paid();
                 if final_amount > balance + Decimal::new(5, 3) {
                     return Err(ApiError::BadRequest(format!(
                         "Payment amount cannot exceed the outstanding booking total of {balance}"
@@ -2437,18 +2529,43 @@ impl PaymentRepository {
         // through this path (reversible via revert-deposit-void).
         if existing.payment_type.as_deref() == Some("deposit")
             && existing.payment_status.as_deref() == Some("completed")
-            && matches!(
+        {
+            if matches!(
                 Self::booking_status_for_payment_tx(tx, booking_id)
                     .await?
                     .as_str(),
                 "checked_out" | "completed"
+            ) {
+                return Err(ApiError::BadRequest(
+                    "Deposit payments can't be voided after checkout — \
+                     refund or forfeit the deposit instead"
+                        .to_string(),
+                ));
+            }
+            // Also never allow voiding a deposit if remaining completed deposits
+            // would fall below already-refunded + already-forfeited amounts.
+            let net_remaining_deposit: Decimal = sqlx::query_scalar(
+                "SELECT \
+                    COALESCE((SELECT SUM(amount) FROM payments \
+                              WHERE booking_id = $1 AND id <> $2 AND payment_type = 'deposit' AND status = 'completed'), 0) \
+                    - COALESCE((SELECT SUM(amount) FROM payments \
+                              WHERE booking_id = $1 AND payment_type = 'refund' AND status = 'refunded' \
+                                AND COALESCE(notes, '') NOT LIKE 'Room charge refunded%'), 0) \
+                    - COALESCE((SELECT SUM(amount) FROM payments \
+                              WHERE booking_id = $1 AND payment_type = 'deposit_forfeited' AND status = 'completed'), 0)",
             )
-        {
-            return Err(ApiError::BadRequest(
-                "Deposit payments can't be voided after checkout — \
-                 refund or forfeit the deposit instead"
-                    .to_string(),
-            ));
+            .bind(booking_id)
+            .bind(payment_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+            if net_remaining_deposit < Decimal::ZERO {
+                return Err(ApiError::BadRequest(
+                    "Cannot void a deposit that has already been refunded or forfeited — \
+                     revert the refund or forfeit first"
+                        .to_string(),
+                ));
+            }
         }
         // Un-forfeiting kept deposit income stays a manager correction.
         if existing.payment_status.as_deref() == Some("completed")
@@ -2567,9 +2684,15 @@ impl PaymentRepository {
                     line_items, status, invoice_type, created_by
                 )
                 SELECT $1, b.id,
-                       COALESCE(g.nick_name, ''),
+                       CASE
+                           WHEN NULLIF(BTRIM(g.first_name), '') IS NOT NULL
+                            AND NULLIF(BTRIM(g.last_name), '') IS NOT NULL
+                           THEN BTRIM(g.first_name) || ' ' || BTRIM(g.last_name)
+                           ELSE COALESCE(BTRIM(g.nick_name), '')
+                       END,
                        g.email,
-                       COALESCE(b.subtotal, b.total_amount) + COALESCE(b.extra_bed_charge, 0),
+                       COALESCE(b.subtotal, b.total_amount + COALESCE(b.discount_amount, 0))
+                           + COALESCE(b.extra_bed_charge, 0),
                        COALESCE(b.tourism_tax_amount, 0),
                        COALESCE(b.discount_amount, 0),
                        b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0),

@@ -30,6 +30,7 @@ export function HotelPieChart<D extends DefaultRawDatum = DefaultRawDatum>({
         cornerRadius={3}
         activeOuterRadiusOffset={6}
         enableArcLabels={false}
+        enableArcLinkLabels={false}
         role="img"
         {...props}
       />

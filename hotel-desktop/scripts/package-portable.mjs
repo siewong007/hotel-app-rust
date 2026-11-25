@@ -3,10 +3,10 @@
 // all resolved next to the executable at runtime. No installer required —
 // meant for validation and for machines where running an installer is not an
 // option. Requires a prior `bun run build:no-bundle` (or `bun run build`).
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
-import { arch, platform } from 'node:os';
+import { arch, platform, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -69,25 +69,42 @@ if (missingResources.length > 0) {
 
 mkdirSync(outDir, { recursive: true });
 
-// Interleaved -C lets each entry come from its real source directory while
-// keeping every archive member flat (supported by GNU tar and bsdtar).
-const payload = [
-  [releaseDir, `hotel-desktop${exeSuffix}`],
-  ...sidecars.map((name) => [sidecarDir, name]),
-  [srcTauriRoot, 'pgsql'],
-  [srcTauriRoot, 'database'],
-];
-const tarArgs =
-  archiveExt === 'zip' ? ['-a', '-c', '-f', outPath] : ['-c', '-z', '-f', outPath];
-for (const [dir, entry] of payload) {
-  tarArgs.push('-C', dir, entry);
-}
-const result = spawnSync('tar', tarArgs, { stdio: 'inherit' });
+// `tauri-plugin-shell`'s sidecar("hotel-app-be") resolves the stripped runtime
+// name (`hotel-app-be` / `hotel-app-be.exe`) next to the desktop executable.
+// Stage the selected triple-suffixed binary under that runtime name before
+// archiving so portable builds launch just like bundled installers.
+const runtimeSidecarName = `hotel-app-be${exeSuffix}`;
+const stagingDir = mkdtempSync(join(tmpdir(), 'hotel-desktop-portable-'));
+try {
+  const sourceSidecar = join(sidecarDir, sidecars[0]);
+  const stagedSidecar = join(stagingDir, runtimeSidecarName);
+  copyFileSync(sourceSidecar, stagedSidecar);
+  if (!isWindows) {
+    chmodSync(stagedSidecar, 0o755);
+  }
 
-if (result.status !== 0) {
-  console.error(`tar failed with exit code ${result.status ?? 1}`);
-  process.exit(result.status ?? 1);
-}
+  // Interleaved -C lets each entry come from its real source directory while
+  // keeping every archive member flat (supported by GNU tar and bsdtar).
+  const payload = [
+    [releaseDir, `hotel-desktop${exeSuffix}`],
+    [stagingDir, runtimeSidecarName],
+    [srcTauriRoot, 'pgsql'],
+    [srcTauriRoot, 'database'],
+  ];
+  const tarArgs =
+    archiveExt === 'zip' ? ['-a', '-c', '-f', outPath] : ['-c', '-z', '-f', outPath];
+  for (const [dir, entry] of payload) {
+    tarArgs.push('-C', dir, entry);
+  }
+  const result = spawnSync('tar', tarArgs, { stdio: 'inherit' });
 
-console.log(`Portable package written to ${outPath}`);
-console.log(`Contents: ${payload.map(([, entry]) => entry).join(', ')}`);
+  if (result.status !== 0) {
+    console.error(`tar failed with exit code ${result.status ?? 1}`);
+    process.exit(result.status ?? 1);
+  }
+
+  console.log(`Portable package written to ${outPath}`);
+  console.log(`Contents: ${payload.map(([, entry]) => entry).join(', ')}`);
+} finally {
+  rmSync(stagingDir, { recursive: true, force: true });
+}

@@ -351,10 +351,10 @@ OVERRIDING SYSTEM VALUE VALUES
 
 INSERT INTO public.guest_segments (id, name, slug, description, rules, is_active, created_by)
 OVERRIDING SYSTEM VALUE VALUES
-    (807401, 'VIP & High Spenders', 'vip-high-spenders', 'VIP-flagged guests or total spend over 10k', '{"any":[{"field":"vip_status","op":"is_not_null"},{"field":"total_spend","op":"gte","value":10000}]}'::jsonb, true, 800007),
-    (807402, 'Foreign Tourists', 'foreign-tourists', 'Guests marked as foreign tourism_type', '{"all":[{"field":"tourism_type","op":"eq","value":"foreign"}]}'::jsonb, true, 800007),
-    (807403, 'Corporate Travellers', 'corporate-travellers', 'Guests carrying the corporate tag', '{"all":[{"field":"tags","op":"contains","value":"corporate"}]}'::jsonb, true, 800007),
-    (807404, 'Dormant Members', 'dormant-members', 'Members with no stay in 180+ days', '{"all":[{"field":"guest_type","op":"eq","value":"member"},{"field":"last_stay_days","op":"gte","value":180}]}'::jsonb, false, 800007);
+    (807401, 'VIP & High Spenders', 'vip-high-spenders', 'VIP-flagged guests or total spend over 10k', '{"groups":[{"conditions":[{"field":"vip_status","op":"is_set"}]},{"conditions":[{"field":"total_spend","op":"gte","value":10000}]}]}'::jsonb, true, 800007),
+    (807402, 'Foreign Tourists', 'foreign-tourists', 'Guests whose country is outside Malaysia', '{"groups":[{"conditions":[{"field":"country","op":"is_set"},{"field":"country","op":"ne","value":"Malaysia"}]}]}'::jsonb, true, 800007),
+    (807403, 'Corporate Travellers', 'corporate-travellers', 'Guests carrying the corporate tag', '{"groups":[{"conditions":[{"field":"tags","op":"contains","value":"corporate"}]}]}'::jsonb, true, 800007),
+    (807404, 'Dormant Members', 'dormant-members', 'Members with no stay in 180+ days', '{"groups":[{"conditions":[{"field":"guest_type","op":"eq","value":"member"},{"field":"days_since_last_stay","op":"gte","value":180}]}]}'::jsonb, false, 800007);
 
 -- Portal linkage: the guest-portal login user manages its own guest record.
 INSERT INTO public.user_guests (id, user_id, guest_id, relationship_type, can_book_for, can_view_bookings, can_modify, linked_by)

@@ -106,6 +106,8 @@
     "tourismTaxDay": "旅游税 — {{date}}",
     "saveRates": "保存房价",
     "approvedBy": "由 {{name}} 批准 · {{at}}",
+    "complimentaryDeduction": "免费赠房抵扣",
+    "discountDeduction": "折扣",
     "voidPayment": "作废付款",
     "voided": {
       "heading": "已作废付款",

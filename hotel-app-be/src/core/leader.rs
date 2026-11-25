@@ -38,14 +38,27 @@ pub const LOCK_COMMS_SCHED: i64 = 820_005;
 /// session retention sweep. Shares one lock and one pinned connection.
 pub const LOCK_MAINTENANCE: i64 = 820_006;
 
-/// Release every session-level advisory lock the connection holds, then let
-/// it go back to the pool. sqlx does not clear session state on release, so
-/// a pooled connection returned while still holding `pg_advisory_lock` keeps
-/// it — blocking every other replica until the connection is reaped.
-async fn release_locks(conn: &mut sqlx::postgres::PgConnection) {
-    let _ = sqlx::query("SELECT pg_advisory_unlock_all()")
-        .execute(&mut *conn)
-        .await;
+/// Release every session-level advisory lock the connection holds before
+/// returning it to the pool. Returns `true` when unlocking completed within
+/// `QUERY_TIMEOUT`; callers must `conn.close().await` when `false` so a
+/// half-open or still-locked connection never returns to the pool.
+async fn release_locks(conn: &mut sqlx::postgres::PgConnection) -> bool {
+    matches!(
+        timeout(
+            QUERY_TIMEOUT,
+            sqlx::query("SELECT pg_advisory_unlock_all()").execute(&mut *conn),
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
+async fn finish_lock_conn(mut conn: sqlx::pool::PoolConnection<crate::core::db::DbDatabase>) {
+    if release_locks(&mut conn).await {
+        drop(conn);
+    } else {
+        let _ = conn.close().await;
+    }
 }
 
 /// Spawn `run` so that exactly one process in the replica set drives it at a
@@ -86,9 +99,9 @@ where
             .unwrap_or(false);
             if !won {
                 // The attempt may have acquired the lock server-side before
-                // its response was lost — release before returning the conn.
-                release_locks(&mut conn).await;
-                drop(conn);
+                // its response was lost — release before returning the conn, or
+                // close on timeout so no locked/dead connection returns to pool.
+                finish_lock_conn(conn).await;
                 sleep(RETRY_DELAY).await;
                 continue;
             }
@@ -131,8 +144,8 @@ where
                 }
             }
             run_handle.abort();
-            release_locks(&mut conn).await;
-            drop(conn);
+            finish_lock_conn(conn).await;
+            sleep(RETRY_DELAY).await;
         }
     });
 }

@@ -1,11 +1,13 @@
 use super::models::*;
 use super::repository::{LoyaltyRepository, NewTransaction};
 use super::validation;
-use crate::core::db::{DbPool, hotel_today};
+use crate::core::db::{DbPool, DbTransaction, hotel_today};
 use crate::core::error::ApiError;
 use crate::models::AuditEvent;
 use crate::modules::promotions::repository::PromotionRepository;
 use crate::services::audit::AuditLog;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -210,23 +212,39 @@ pub async fn redeem_reward_for_guest(
     };
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let locked_member = LoyaltyRepository::lock_member_account_tx(&mut tx, member.id).await?;
+    ensure_member_can_redeem(&locked_member)?;
+    if locked_member.available_points < reward.points_cost {
+        return Err(ApiError::BadRequest(format!(
+            "Insufficient points. Required: {}, available: {}.",
+            reward.points_cost, locked_member.available_points
+        )));
+    }
+    let locked_reward = LoyaltyRepository::find_reward_for_update_tx(&mut tx, reward.id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Reward not found.".to_string()))?;
+    validate_reward_redeemable(&locked_reward, today)?;
+    if locked_reward.inventory_count.is_some() {
+        LoyaltyRepository::decrement_reward_inventory(&mut tx, locked_reward.id).await?;
+    }
+
     let transaction = LoyaltyRepository::insert_transaction(
         &mut tx,
         NewTransaction {
-            member_id: member.id,
-            account_id: member.account_id,
+            member_id: locked_member.id,
+            account_id: locked_member.account_id,
             transaction_type: "redeemed",
-            points_delta: -reward.points_cost,
-            available_delta: -reward.points_cost,
+            points_delta: -locked_reward.points_cost,
+            available_delta: -locked_reward.points_cost,
             source_type: Some("reward"),
-            source_id: Some(reward.id),
+            source_id: Some(locked_reward.id),
             booking_id: input.booking_id,
             payment_id: None,
             invoice_id: None,
             related_transaction_id: None,
-            description: Some(&format!("Redeemed reward: {}", reward.name)),
+            description: Some(&format!("Redeemed reward: {}", locked_reward.name)),
             metadata: Some(serde_json::json!({
-                "reward_name": reward.name,
+                "reward_name": locked_reward.name,
                 "requires_approval": requires_approval,
             })),
             actor_user_id,
@@ -236,10 +254,10 @@ pub async fn redeem_reward_for_guest(
 
     let redemption_id = LoyaltyRepository::insert_redemption(
         &mut tx,
-        member.id,
-        reward.id,
+        locked_member.id,
+        locked_reward.id,
         transaction.id,
-        reward.points_cost,
+        locked_reward.points_cost,
         status,
         input.notes.as_deref(),
     )
@@ -266,9 +284,6 @@ pub async fn redeem_reward_for_guest(
                 "The July Deluxe voucher is no longer available.".to_string(),
             ));
         }
-    }
-    if reward.inventory_count.is_some() {
-        LoyaltyRepository::decrement_reward_inventory(&mut tx, reward.id).await?;
     }
     tx.commit().await.map_err(ApiError::from)?;
 
@@ -322,9 +337,8 @@ pub async fn manual_adjustment(
             "Adjustment points cannot be zero.".to_string(),
         ));
     }
-    let member = LoyaltyRepository::member_by_id(pool, member_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("Loyalty member not found.".to_string()))?;
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let member = LoyaltyRepository::lock_member_account_tx(&mut tx, member_id).await?;
     if input.points_delta < 0
         && !input.allow_negative_balance.unwrap_or(false)
         && member.available_points + input.points_delta < 0
@@ -334,7 +348,6 @@ pub async fn manual_adjustment(
         ));
     }
 
-    let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let transaction = LoyaltyRepository::insert_transaction(
         &mut tx,
         NewTransaction {
@@ -464,6 +477,15 @@ pub async fn update_reward(
     let existing = LoyaltyRepository::find_reward(pool, reward_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Reward not found.".to_string()))?;
+    let merged_from = input.valid_from.or(existing.valid_from);
+    let merged_to = input.valid_to.or(existing.valid_to);
+    if let (Some(start), Some(end)) = (merged_from, merged_to)
+        && end < start
+    {
+        return Err(ApiError::BadRequest(
+            "Reward valid-to date cannot be before valid-from date".to_string(),
+        ));
+    }
     LoyaltyRepository::update_reward(pool, reward_id, &input, &existing).await
 }
 
@@ -574,35 +596,123 @@ pub async fn award_eligible_booking_points(
     Ok(results)
 }
 
+fn parse_earned_metadata(metadata: Option<&serde_json::Value>) -> (f64, i32) {
+    let amount = metadata
+        .and_then(|m| m.get("amount"))
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(0.0);
+    let nights = metadata
+        .and_then(|m| m.get("nights_increment"))
+        .and_then(|v| v.as_i64())
+        .and_then(|v| i32::try_from(v).ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(0);
+    (amount, nights)
+}
+
+async fn apply_transaction_reversal_tx(
+    tx: &mut DbTransaction<'_>,
+    transaction: &LoyaltyTransaction,
+    source_type: &str,
+    source_id: i64,
+    actor_user_id: Option<i64>,
+    reason: &str,
+    tier_metric: &str,
+) -> Result<LoyaltyTransaction, ApiError> {
+    LoyaltyRepository::lock_member_account_tx(tx, transaction.member_id).await?;
+    let reversal = LoyaltyRepository::insert_transaction(
+        tx,
+        NewTransaction {
+            member_id: transaction.member_id,
+            account_id: transaction.account_id,
+            transaction_type: "reversed",
+            points_delta: -transaction.points_delta,
+            available_delta: -transaction.available_delta,
+            source_type: Some(source_type),
+            source_id: Some(source_id),
+            booking_id: transaction.booking_id,
+            payment_id: transaction.payment_id,
+            invoice_id: transaction.invoice_id,
+            related_transaction_id: Some(transaction.id),
+            description: Some(reason),
+            metadata: Some(serde_json::json!({ "reason": reason })),
+            actor_user_id,
+        },
+    )
+    .await?;
+
+    let (earned_amount, earned_nights) = parse_earned_metadata(transaction.metadata.as_ref());
+    LoyaltyRepository::revert_account_earning(
+        tx,
+        transaction.account_id,
+        transaction.points_delta,
+        earned_amount,
+        earned_nights,
+        tier_metric,
+    )
+    .await?;
+
+    Ok(reversal)
+}
+
+pub async fn reverse_payment_points_tx(
+    tx: &mut DbTransaction<'_>,
+    payment_id: i64,
+    actor_user_id: Option<i64>,
+    reason: &str,
+) -> Result<Vec<LoyaltyTransaction>, ApiError> {
+    let transactions =
+        LoyaltyRepository::reversible_earned_transactions_for_payment_tx(tx, payment_id).await?;
+    if transactions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tier_metric: String = sqlx::query_scalar(
+        "SELECT tier_qualification_metric FROM loyalty_program_rules WHERE id = 1",
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(ApiError::from)?
+    .unwrap_or_else(|| "points".to_string());
+
+    let mut reversed = Vec::with_capacity(transactions.len());
+    for transaction in &transactions {
+        reversed.push(
+            apply_transaction_reversal_tx(
+                tx,
+                transaction,
+                "payment_reversal",
+                payment_id,
+                actor_user_id,
+                reason,
+                &tier_metric,
+            )
+            .await?,
+        );
+    }
+    Ok(reversed)
+}
+
 pub async fn reverse_booking_points(
     pool: &DbPool,
     booking_id: i64,
     actor_user_id: Option<i64>,
     reason: &str,
 ) -> Result<Vec<LoyaltyTransaction>, ApiError> {
+    let rules = LoyaltyRepository::get_rules(pool).await?;
     let transactions =
         LoyaltyRepository::reversible_earned_transactions_for_booking(pool, booking_id).await?;
     let mut reversed = Vec::with_capacity(transactions.len());
-    for transaction in transactions {
+    for transaction in &transactions {
         let mut tx = pool.begin().await.map_err(ApiError::from)?;
-        let reversal = LoyaltyRepository::insert_transaction(
+        let reversal = apply_transaction_reversal_tx(
             &mut tx,
-            NewTransaction {
-                member_id: transaction.member_id,
-                account_id: transaction.account_id,
-                transaction_type: "reversed",
-                points_delta: -transaction.points_delta,
-                available_delta: -transaction.available_delta,
-                source_type: Some("booking_reversal"),
-                source_id: Some(booking_id),
-                booking_id: Some(booking_id),
-                payment_id: transaction.payment_id,
-                invoice_id: transaction.invoice_id,
-                related_transaction_id: Some(transaction.id),
-                description: Some(reason),
-                metadata: Some(serde_json::json!({ "reason": reason })),
-                actor_user_id,
-            },
+            transaction,
+            "booking_reversal",
+            booking_id,
+            actor_user_id,
+            reason,
+            &rules.tier_qualification_metric,
         )
         .await?;
         tx.commit().await.map_err(ApiError::from)?;
@@ -704,7 +814,13 @@ async fn award_payment_candidate(
         });
     }
 
-    let points = (candidate.amount * rules.points_per_currency_unit).floor() as i32;
+    let points = Decimal::from_f64_retain(candidate.amount)
+        .and_then(|amt| {
+            Decimal::from_f64_retain(rules.points_per_currency_unit)
+                .map(|rate| (amt * rate).floor())
+        })
+        .and_then(|d| d.to_i32())
+        .unwrap_or(0);
     if points <= 0 {
         return Ok(LoyaltyAwardResult {
             payment_id: candidate.payment_id,

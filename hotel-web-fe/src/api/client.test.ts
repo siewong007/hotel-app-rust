@@ -129,4 +129,42 @@ describe('authenticator enrollment reauthentication', () => {
     expect(getAccessToken()).toBe('valid-desktop-session');
     expect(dispatch.mock.calls.some(([event]) => event.type === 'auth:unauthorized')).toBe(false);
   });
+
+  it('discards stale refreshAccessToken response when trackPendingLogout fires mid-flight', async () => {
+    let finishRefresh!: (value: { access_token: string }) => void;
+    vi.spyOn(ky, 'post').mockImplementation(() => ({
+      json: () => new Promise<{ access_token: string }>(resolve => {
+        finishRefresh = resolve;
+      }),
+    }) as unknown as ReturnType<typeof ky.post>);
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+
+    const refreshing = refreshAccessToken();
+    trackPendingLogout(Promise.resolve());
+    finishRefresh({ access_token: 'stale-token' });
+
+    await expect(refreshing).resolves.toBeNull();
+    expect(getAccessToken()).toBeNull();
+    expect(dispatch.mock.calls.some(([event]) => event.type === 'auth:tokens-refreshed')).toBe(false);
+  });
+
+  it.each([
+    'profile/password',
+    'data-transfer/step-up',
+  ])('keeps active session on 401 from auth/step-up endpoint %s', async (endpoint) => {
+    setAccessToken('valid-desktop-session');
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: 'Step-up confirmation required.',
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(api.post(endpoint, {
+      json: { current_password: 'wrong' },
+      fetch: fetchMock,
+      context: { suppressApiNotification: true },
+    })).rejects.toMatchObject({ response: { status: 401 } });
+
+    expect(getAccessToken()).toBe('valid-desktop-session');
+    expect(dispatch.mock.calls.some(([event]) => event.type === 'auth:unauthorized')).toBe(false);
+  });
 });

@@ -37,9 +37,14 @@ export function useUpdateProfileMutation() {
 }
 
 export function useUpdatePasswordMutation() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: { current_password: string; new_password: string }) =>
       UsersService.updatePassword(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.passkeys() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.sessions() });
+    },
   });
 }
 

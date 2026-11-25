@@ -106,6 +106,8 @@
     "tourismTaxDay": "Cukai Pelancongan — {{date}}",
     "saveRates": "Simpan Kadar",
     "approvedBy": "Diluluskan oleh {{name}} · {{at}}",
+    "complimentaryDeduction": "Potongan Percuma",
+    "discountDeduction": "Diskaun",
     "voidPayment": "Batalkan bayaran",
     "voided": {
       "heading": "Bayaran dibatalkan",

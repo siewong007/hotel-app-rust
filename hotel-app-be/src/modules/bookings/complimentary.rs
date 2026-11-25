@@ -36,16 +36,20 @@ pub async fn mark_complimentary_handler(
     .map_err(|e| ApiError::Database(e.to_string()))?
     .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
 
-    let guest_id: i64 = booking_row.get(1);
-    let status: String = booking_row.get(2);
+    let _guest_id: i64 = booking_row.get(1);
+    let status: String = booking_row
+        .try_get::<Option<String>, _>(2)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let is_already_complimentary: Option<bool> = booking_row.get(3);
     let check_in: NaiveDate = booking_row.get(4);
     let check_out: NaiveDate = booking_row.get(5);
     let room_rate: Decimal = booking_row.get_decimal(6);
     let original_total: Decimal = booking_row.get_decimal(7);
     let _subtotal: Decimal = booking_row.get_decimal(8);
-    let tax_amount: Option<Decimal> = booking_row.get_opt_decimal(9);
-    let room_type_id: i64 = booking_row.get(10);
+    let _tax_amount: Option<Decimal> = booking_row.get_opt_decimal(9);
+    let _room_type_id: i64 = booking_row.get(10);
     let room_type_name: String = booking_row.get(11);
 
     // Only allow marking as complimentary if booking is confirmed/pending (not checked in yet)
@@ -98,32 +102,48 @@ pub async fn mark_complimentary_handler(
     let complimentary_nights = (comp_end - comp_start).num_days() as i32;
     let paid_nights = total_nights - complimentary_nights;
 
-    // Determine new status
-    let new_status = if complimentary_nights == total_nights {
+    // Keep operational workflow status as 'confirmed' so DB overlap constraints
+    // (`bookings_no_room_date_overlap`) and check-in workflows remain enforced.
+    let comp_kind = if complimentary_nights == total_nights {
         "fully_complimentary"
     } else {
         "partial_complimentary"
     };
 
-    // Calculate new pricing
+    // Calculate new pricing (configured room rates are tax-inclusive).
     let new_subtotal = room_rate * Decimal::from(paid_nights);
-    // Calculate tax proportionally (if there was tax before)
-    let tax_rate = if original_total > Decimal::ZERO && total_nights > 0 {
-        tax_amount.unwrap_or(Decimal::ZERO) / (room_rate * Decimal::from(total_nights))
-    } else {
-        Decimal::new(10, 2) // Default 10% if we can't calculate
-    };
-    let new_tax = new_subtotal * tax_rate;
-    let new_total = new_subtotal + new_tax;
+    let new_tax = Decimal::ZERO;
+    let new_total = new_subtotal;
 
-    // Determine payment status
-    let payment_status = if complimentary_nights == total_nights {
-        "paid" // Fully complimentary = nothing to pay
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let locked_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM bookings WHERE id = $1 FOR UPDATE")
+            .bind(booking_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+    let locked_status =
+        locked_status.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+    if matches!(
+        locked_status.as_str(),
+        "voided" | "checked_out" | "completed" | "no_show" | "comp_void"
+    ) {
+        return Err(ApiError::BadRequest(format!(
+            "Cannot mark booking as complimentary in status: {locked_status}"
+        )));
+    }
+
+    // Update booking with all new fields (`status` stays `'confirmed'` if
+    // already confirmed/comped, preserving overlap constraint protection).
+    let target_status = if matches!(
+        locked_status.as_str(),
+        "partial_complimentary" | "fully_complimentary"
+    ) {
+        "confirmed"
     } else {
-        "partial" // Partial complimentary = partial payment needed
+        locked_status.as_str()
     };
 
-    // Update booking with all new fields
     sqlx::query(
         r#"
         UPDATE bookings
@@ -132,14 +152,13 @@ pub async fn mark_complimentary_handler(
             complimentary_start_date = $2,
             complimentary_end_date = $3,
             complimentary_nights = $4,
-            original_total_amount = total_amount,
+            original_total_amount = COALESCE(original_total_amount, total_amount),
             subtotal = $5,
             tax_amount = $6,
             total_amount = $7,
             status = $8,
-            payment_status = $9,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $10
+        WHERE id = $9
         "#,
     )
     .bind(&input.reason)
@@ -149,44 +168,22 @@ pub async fn mark_complimentary_handler(
     .bind(crate::core::db::decimal_to_db(new_subtotal))
     .bind(crate::core::db::decimal_to_db(new_tax))
     .bind(crate::core::db::decimal_to_db(new_total))
-    .bind(new_status)
-    .bind(payment_status)
+    .bind(target_status)
     .bind(booking_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    // Add room type specific credits to guest for the complimentary nights
-    let rows_affected = sqlx::query(
-        r#"
-        UPDATE guest_complimentary_credits
-        SET nights_available = nights_available + $1, updated_at = CURRENT_TIMESTAMP
-        WHERE guest_id = $2 AND room_type_id = $3
-        "#,
+    crate::modules::payments::repository::PaymentRepository::recompute_booking_payment_status_tx(
+        &mut tx, booking_id,
     )
-    .bind(complimentary_nights)
-    .bind(guest_id)
-    .bind(room_type_id)
-    .execute(&pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?
-    .rows_affected();
-
-    if rows_affected == 0 {
-        // No existing record, insert new one
-        sqlx::query(
-            r#"
-            INSERT INTO guest_complimentary_credits (guest_id, room_type_id, nights_available, created_at, updated_at)
-            VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            "#
-        )
-        .bind(guest_id)
-        .bind(room_type_id)
-        .bind(complimentary_nights)
-        .execute(&pool)
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
-    }
+    .await?;
+    let payment_status: String =
+        sqlx::query_scalar("SELECT COALESCE(payment_status, 'unpaid') FROM bookings WHERE id = $1")
+            .bind(booking_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
 
     // Record in booking_modifications audit trail
     sqlx::query(
@@ -195,19 +192,20 @@ pub async fn mark_complimentary_handler(
     .bind(booking_id)
     .bind("mark_complimentary")
     .bind(serde_json::json!({"status": &status, "total_amount": original_total.to_string(), "is_complimentary": false}))
-    .bind(serde_json::json!({"status": new_status, "total_amount": new_total.to_string(), "is_complimentary": true, "complimentary_nights": complimentary_nights, "reason": &input.reason}))
+    .bind(serde_json::json!({"status": target_status, "complimentary_kind": comp_kind, "total_amount": new_total.to_string(), "is_complimentary": true, "complimentary_nights": complimentary_nights, "reason": &input.reason}))
     .bind(crate::core::db::decimal_to_db(new_total - original_total))
     .bind(_user_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
-    .ok();
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    tx.commit().await.map_err(ApiError::from)?;
 
-    let status_display = new_status.replace("_", " ");
+    let status_display = comp_kind.replace("_", " ");
     Ok(Json(serde_json::json!({
         "success": true,
         "message": format!("Booking marked as {}.", status_display),
         "booking_id": booking_id,
-        "status": new_status,
+        "status": target_status,
         "total_nights": total_nights,
         "complimentary_nights": complimentary_nights,
         "paid_nights": paid_nights,
@@ -226,19 +224,21 @@ pub async fn convert_complimentary_to_credits_handler(
     Extension(_user_id): Extension<i64>,
     Path(booking_id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Get booking details with room info
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let booking_row = sqlx::query(
         r#"
-        SELECT b.id, b.guest_id, b.room_id, b.status, b.is_complimentary, b.check_in_date, b.check_out_date,
+        SELECT b.id, b.guest_id, b.room_id, b.status, b.is_complimentary,
+               b.complimentary_nights, b.check_in_date, b.check_out_date,
                r.room_type_id, rt.name as room_type_name
         FROM bookings b
         JOIN rooms r ON b.room_id = r.id
         JOIN room_types rt ON r.room_type_id = rt.id
         WHERE b.id = $1
-        "#
+        FOR UPDATE OF b
+        "#,
     )
     .bind(booking_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?
     .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
@@ -246,6 +246,7 @@ pub async fn convert_complimentary_to_credits_handler(
     let guest_id: i64 = booking_row.get("guest_id");
     let status: String = booking_row.get("status");
     let is_complimentary: Option<bool> = booking_row.get("is_complimentary");
+    let complimentary_nights: Option<i32> = booking_row.get("complimentary_nights");
     let check_in: NaiveDate = booking_row.get("check_in_date");
     let check_out: NaiveDate = booking_row.get("check_out_date");
     let room_type_id: i64 = booking_row.get("room_type_id");
@@ -257,6 +258,12 @@ pub async fn convert_complimentary_to_credits_handler(
         ));
     }
 
+    if status == "comp_void" {
+        return Err(ApiError::Conflict(
+            "Complimentary booking has already been converted to credits".to_string(),
+        ));
+    }
+
     // Only allow conversion for voided bookings
     if status != "voided" {
         return Err(ApiError::BadRequest(format!(
@@ -265,8 +272,31 @@ pub async fn convert_complimentary_to_credits_handler(
         )));
     }
 
-    // Calculate number of nights
-    let nights = (check_out - check_in).num_days() as i32;
+    let stay_nights = (check_out - check_in).num_days() as i32;
+    let nights = complimentary_nights
+        .unwrap_or(stay_nights)
+        .clamp(0, stay_nights);
+    if nights <= 0 {
+        return Err(ApiError::BadRequest(
+            "No complimentary nights available to convert to credits".to_string(),
+        ));
+    }
+
+    // Transition atomically to comp_void so a concurrent/repeat call cannot mint again.
+    let updated = sqlx::query(
+        "UPDATE bookings SET status = 'comp_void', updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $1 AND status = 'voided'",
+    )
+    .bind(booking_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?
+    .rows_affected();
+    if updated != 1 {
+        return Err(ApiError::Conflict(
+            "Complimentary booking was already converted".to_string(),
+        ));
+    }
 
     // Add to room-type specific credits
     sqlx::query(
@@ -280,9 +310,11 @@ pub async fn convert_complimentary_to_credits_handler(
     .bind(guest_id)
     .bind(room_type_id)
     .bind(nights)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    tx.commit().await.map_err(ApiError::from)?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -442,21 +474,39 @@ pub async fn update_complimentary_handler(
             ));
         }
 
-        // Recalculate amounts
         let total_nights = (check_out - check_in).num_days() as i32;
         let complimentary_nights = (end - start).num_days() as i32;
         let paid_nights = total_nights - complimentary_nights;
 
-        let new_status = if complimentary_nights == total_nights {
-            "fully_complimentary"
-        } else {
-            "partial_complimentary"
-        };
-
         let new_subtotal = room_rate * Decimal::from(paid_nights);
-        let tax_rate = Decimal::from_str_exact("0.10").unwrap_or_default();
-        let new_tax = new_subtotal * tax_rate;
-        let new_total = new_subtotal + new_tax;
+        let new_tax = Decimal::ZERO;
+        let new_total = new_subtotal;
+
+        let mut tx = pool.begin().await.map_err(ApiError::from)?;
+        let locked_status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM bookings WHERE id = $1 FOR UPDATE")
+                .bind(booking_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| ApiError::Database(e.to_string()))?;
+        let locked_status =
+            locked_status.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+        if matches!(
+            locked_status.as_str(),
+            "voided" | "checked_out" | "completed" | "no_show" | "comp_void"
+        ) {
+            return Err(ApiError::BadRequest(format!(
+                "Cannot update complimentary dates for booking in status: {locked_status}"
+            )));
+        }
+        let target_status = if matches!(
+            locked_status.as_str(),
+            "partial_complimentary" | "fully_complimentary"
+        ) {
+            "confirmed"
+        } else {
+            locked_status.as_str()
+        };
 
         sqlx::query(
             r#"
@@ -480,11 +530,16 @@ pub async fn update_complimentary_handler(
         .bind(crate::core::db::decimal_to_db(new_subtotal))
         .bind(crate::core::db::decimal_to_db(new_tax))
         .bind(crate::core::db::decimal_to_db(new_total))
-        .bind(new_status)
+        .bind(target_status)
         .bind(booking_id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
+        crate::modules::payments::repository::PaymentRepository::recompute_booking_payment_status_tx(
+            &mut tx, booking_id,
+        )
+        .await?;
+        tx.commit().await.map_err(ApiError::from)?;
 
         // Record in booking_modifications audit trail
         sqlx::query(
@@ -493,7 +548,7 @@ pub async fn update_complimentary_handler(
         .bind(booking_id)
         .bind("update_complimentary")
         .bind(serde_json::json!({"total_amount": original_total.to_string()}))
-        .bind(serde_json::json!({"total_amount": new_total.to_string(), "complimentary_nights": complimentary_nights, "status": new_status}))
+        .bind(serde_json::json!({"total_amount": new_total.to_string(), "complimentary_nights": complimentary_nights, "status": target_status}))
         .bind(crate::core::db::decimal_to_db(new_total - original_total))
         .bind(_user_id)
         .execute(&pool)
@@ -545,12 +600,13 @@ pub async fn remove_complimentary_handler(
     Extension(_user_id): Extension<i64>,
     Path(booking_id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Get current booking
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    // Lock booking row and validate current state atomically.
     let booking_row = sqlx::query(
-        "SELECT id, guest_id, is_complimentary, original_total_amount, complimentary_nights, status FROM bookings WHERE id = $1"
+        "SELECT id, guest_id, is_complimentary, original_total_amount, complimentary_nights, status FROM bookings WHERE id = $1 FOR UPDATE"
     )
     .bind(booking_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?
     .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
@@ -567,13 +623,31 @@ pub async fn remove_complimentary_handler(
         ));
     }
 
-    // Only allow removal for non-checked-in bookings
-    if status == "checked_in" || status == "checked_out" {
+    // Only allow removal for live pre-check-in bookings
+    if matches!(
+        status.as_str(),
+        "checked_in"
+            | "auto_checked_in"
+            | "checked_out"
+            | "completed"
+            | "voided"
+            | "no_show"
+            | "comp_void"
+    ) {
         return Err(ApiError::BadRequest(format!(
             "Cannot remove complimentary status from booking with status: {}",
             status
         )));
     }
+
+    let restored_status = if matches!(
+        status.as_str(),
+        "partial_complimentary" | "fully_complimentary"
+    ) {
+        "confirmed".to_string()
+    } else {
+        status.clone()
+    };
 
     // Restore original amount and clear complimentary fields
     sqlx::query(
@@ -584,21 +658,25 @@ pub async fn remove_complimentary_handler(
             complimentary_start_date = NULL,
             complimentary_end_date = NULL,
             complimentary_nights = NULL,
+            subtotal = COALESCE(original_total_amount, total_amount),
+            tax_amount = 0,
             total_amount = COALESCE(original_total_amount, total_amount),
             original_total_amount = NULL,
-            status = 'confirmed',
-            payment_status = 'unpaid',
+            status = $2,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
         "#,
     )
     .bind(booking_id)
-    .execute(&pool)
+    .bind(&restored_status)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    // Remove any credits that were added (if applicable)
-    // Note: This is a simplification - in production you might want more sophisticated tracking
+    crate::modules::payments::repository::PaymentRepository::recompute_booking_payment_status_tx(
+        &mut tx, booking_id,
+    )
+    .await?;
 
     // Record in booking_modifications audit trail
     sqlx::query(
@@ -607,11 +685,12 @@ pub async fn remove_complimentary_handler(
     .bind(booking_id)
     .bind("remove_complimentary")
     .bind(serde_json::json!({"status": &status, "is_complimentary": true, "complimentary_nights": complimentary_nights}))
-    .bind(serde_json::json!({"status": "confirmed", "is_complimentary": false, "total_amount": original_total.map(|d| d.to_string())}))
+    .bind(serde_json::json!({"status": &restored_status, "is_complimentary": false, "total_amount": original_total.map(|d| d.to_string())}))
     .bind(_user_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
-    .ok();
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    tx.commit().await.map_err(ApiError::from)?;
 
     Ok(Json(serde_json::json!({
         "success": true,

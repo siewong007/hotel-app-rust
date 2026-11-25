@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use crate::core::db::{DbPool, DbRow};
+use crate::core::db::{DbPool, DbRow, DbTransaction};
 use crate::core::error::ApiError;
 use crate::models::{MaintenanceTicket, MaintenanceTicketPatch};
 
@@ -101,7 +101,8 @@ where
     let query = "SELECT TO_CHAR(CURRENT_DATE, 'YYYYMM'), \
                  MAX(CAST(SUBSTRING(ticket_number FROM 11) AS BIGINT)) \
                  FROM maintenance_tickets \
-                 WHERE ticket_number LIKE 'MT-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-%'";
+                 WHERE ticket_number LIKE 'MT-' || TO_CHAR(CURRENT_DATE, 'YYYYMM') || '-%' \
+                 AND SUBSTRING(ticket_number FROM 11) ~ '^[0-9]+$'";
 
     let (yyyymm, max_seq): (String, Option<i64>) = sqlx::query_as(query)
         .fetch_one(executor)
@@ -116,11 +117,21 @@ pub async fn find_ticket(
     pool: &DbPool,
     ticket_id: i64,
 ) -> Result<Option<MaintenanceTicket>, ApiError> {
+    find_ticket_with_executor(pool, ticket_id).await
+}
+
+async fn find_ticket_with_executor<'e, E>(
+    executor: E,
+    ticket_id: i64,
+) -> Result<Option<MaintenanceTicket>, ApiError>
+where
+    E: sqlx::Executor<'e, Database = crate::core::db::DbDatabase>,
+{
     let query = format!("{} WHERE t.id = {}", TICKET_SELECT, crate::param!(1));
 
     let row = sqlx::query(sqlx::AssertSqlSafe(&*query))
         .bind(ticket_id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -199,6 +210,29 @@ pub async fn insert_ticket(
     pool: &DbPool,
     ticket: NewMaintenanceTicket<'_>,
 ) -> Result<MaintenanceTicket, ApiError> {
+    let ticket_id = insert_ticket_id(pool, ticket).await?;
+    find_ticket(pool, ticket_id)
+        .await?
+        .ok_or_else(|| ApiError::Database("Created maintenance ticket was not found".to_string()))
+}
+
+pub async fn insert_ticket_tx(
+    tx: &mut DbTransaction<'_>,
+    ticket: NewMaintenanceTicket<'_>,
+) -> Result<MaintenanceTicket, ApiError> {
+    let ticket_id = insert_ticket_id(&mut **tx, ticket).await?;
+    find_ticket_with_executor(&mut **tx, ticket_id)
+        .await?
+        .ok_or_else(|| ApiError::Database("Created maintenance ticket was not found".to_string()))
+}
+
+async fn insert_ticket_id<'e, E>(
+    executor: E,
+    ticket: NewMaintenanceTicket<'_>,
+) -> Result<i64, ApiError>
+where
+    E: sqlx::Executor<'e, Database = crate::core::db::DbDatabase>,
+{
     let query = r#"
 INSERT INTO maintenance_tickets (
     room_id, ticket_number, title, description, category, priority,
@@ -213,7 +247,7 @@ RETURNING id
     let estimated_cost = crate::core::db::opt_decimal_to_db(ticket.estimated_cost);
     let estimated_hours = crate::core::db::opt_decimal_to_db(ticket.estimated_hours);
 
-    let ticket_id = sqlx::query_scalar::<_, i64>(query)
+    sqlx::query_scalar::<_, i64>(query)
         .bind(ticket.room_id)
         .bind(ticket.ticket_number)
         .bind(ticket.title)
@@ -226,13 +260,9 @@ RETURNING id
         .bind(estimated_hours)
         .bind(ticket.scheduled_date)
         .bind(images_bind)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
-
-    find_ticket(pool, ticket_id)
-        .await?
-        .ok_or_else(|| ApiError::Database("Created maintenance ticket was not found".to_string()))
+        .map_err(|e| ApiError::Database(e.to_string()))
 }
 
 pub async fn patch_ticket(

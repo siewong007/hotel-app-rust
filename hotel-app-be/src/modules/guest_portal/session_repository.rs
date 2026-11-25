@@ -97,9 +97,20 @@ impl GuestPortalSessionRepository {
         token_hash: &str,
     ) -> Result<Option<i64>, ApiError> {
         let select_sql = format!(
-            "SELECT guest_id FROM guest_portal_sessions \
-             WHERE token_hash = {} AND expires_at > {} LIMIT 1",
+            "SELECT s.guest_id FROM guest_portal_sessions s \
+             WHERE s.token_hash = {} AND s.expires_at > {} \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM users u \
+                   WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
+                     AND ( \
+                         u.deleted_at IS NOT NULL \
+                         OR u.is_active = false \
+                         OR (COALESCE(u.is_locked, false) = true AND (u.locked_until IS NULL OR u.locked_until > {})) \
+                     ) \
+               ) \
+             LIMIT 1",
             param!(1),
+            current_timestamp(),
             current_timestamp()
         );
         let row = sqlx::query(sqlx::AssertSqlSafe(&*select_sql))

@@ -6,13 +6,15 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Booking access tokens used to travel in the URL (`?token=` and
-	# `/guest-portal/booking/{token}`). New clients send a header instead;
-	# keep logs from retaining leftover path/query tokens.
+	# Booking access tokens used to travel in the URL (`?token=`). New clients
+	# send a header instead; keep logs from retaining leftover query tokens.
 	log {
 		format filter {
-			request>uri query {
-				replace token REDACTED
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
 			}
 		}
 	}
@@ -44,7 +46,7 @@
 	}
 
 	# KEEP IN SYNC with PROXY_PREFIXES in hotel-web-fe/vite.config.ts
-	@backend path /api/* /uploads/* /health /ws /ws/*
+	@backend path /api /api/* /uploads /uploads/* /health /ws /ws/* /hotel.*
 	handle @backend {
 		reverse_proxy backend:3030
 	}

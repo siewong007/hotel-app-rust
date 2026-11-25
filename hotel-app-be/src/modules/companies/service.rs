@@ -55,6 +55,15 @@ pub async fn update_company(
     company_id: i64,
     input: CompanyUpdateRequest,
 ) -> Result<Company, ApiError> {
+    update_company_as(pool, None, company_id, input).await
+}
+
+pub async fn update_company_as(
+    pool: &DbPool,
+    actor_id: Option<i64>,
+    company_id: i64,
+    input: CompanyUpdateRequest,
+) -> Result<Company, ApiError> {
     if !CompanyRepository::exists_by_id(pool, company_id).await? {
         return Err(ApiError::NotFound("Company not found".to_string()));
     }
@@ -74,7 +83,7 @@ pub async fn update_company(
     let _ = AuditLog::log_event(
         pool,
         AuditEvent {
-            user_id: None,
+            user_id: actor_id,
             action: "company_updated",
             resource_type: "company",
             resource_id: Some(company_id),
@@ -88,6 +97,14 @@ pub async fn update_company(
 }
 
 pub async fn delete_company(pool: &DbPool, company_id: i64) -> Result<(), ApiError> {
+    delete_company_as(pool, None, company_id).await
+}
+
+pub async fn delete_company_as(
+    pool: &DbPool,
+    actor_id: Option<i64>,
+    company_id: i64,
+) -> Result<(), ApiError> {
     let rows_affected = CompanyRepository::delete(pool, company_id).await?;
     if rows_affected == 0 {
         return Err(ApiError::NotFound("Company not found".to_string()));
@@ -96,7 +113,7 @@ pub async fn delete_company(pool: &DbPool, company_id: i64) -> Result<(), ApiErr
     let _ = AuditLog::log_event(
         pool,
         AuditEvent {
-            user_id: None,
+            user_id: actor_id,
             action: "company_deleted",
             resource_type: "company",
             resource_id: Some(company_id),

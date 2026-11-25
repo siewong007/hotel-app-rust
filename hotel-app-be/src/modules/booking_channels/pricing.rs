@@ -281,7 +281,11 @@ pub fn resolve_stay(
                     .round_dp(2);
                 (
                     Some(spread),
-                    Some((selling - discount_total - spread).round_dp(2)),
+                    Some(
+                        (selling - discount_total - spread)
+                            .max(Decimal::ZERO)
+                            .round_dp(2),
+                    ),
                 )
             }
             None => (None, net_subtotal),
@@ -601,5 +605,25 @@ mod tests {
         );
         assert_eq!(quote.commission_amount, Some(Decimal::new(7500, 2)));
         assert_eq!(quote.net_revenue, Some(Decimal::new(25500, 2)));
+    }
+
+    #[test]
+    fn net_rate_with_oversized_discount_clamps_net_revenue_at_zero() {
+        let r = rule(1, "net_rate", "255", 0, None, None, "2026-01-01", None);
+        let nights = vec![price_night(
+            date("2026-03-01"),
+            Decimal::new(300, 0),
+            &[r],
+            5,
+            None,
+        )];
+        let quote = resolve_stay(
+            nights,
+            no_commission(),
+            Decimal::new(400, 0),
+            Some(Decimal::new(330, 0)),
+        );
+        assert_eq!(quote.commission_amount, Some(Decimal::ZERO));
+        assert_eq!(quote.net_revenue, Some(Decimal::ZERO));
     }
 }

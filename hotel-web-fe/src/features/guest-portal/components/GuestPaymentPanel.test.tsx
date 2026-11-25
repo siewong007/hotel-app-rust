@@ -71,16 +71,10 @@ vi.mock('@paypal/react-paypal-js', () => ({
               paypalPropsByRender.length - 1
             ].createOrder as () => Promise<string>;
             const orderID = await createOrder();
-            // The real popup takes long enough for React to commit the
-            // pending-payment state that onApprove's closure reads; mimic it by
-            // waiting for that re-render before approving.
-            const onApprove = await vi.waitFor(() => {
-              const latest = paypalPropsByRender[paypalPropsByRender.length - 1];
-              if (paypalPropsByRender.length < 2) {
-                throw new Error('waiting for post-create-order re-render');
-              }
-              return latest.onApprove as (d: { orderID: string }) => Promise<void>;
-            });
+            // `pendingPaypalPaymentIdRef` is updated synchronously inside `createOrder`
+            // without requiring a re-render before PayPal invokes `onApprove`.
+            const latest = paypalPropsByRender[paypalPropsByRender.length - 1];
+            const onApprove = latest.onApprove as (d: { orderID: string }) => Promise<void>;
             await onApprove({ orderID });
           })();
         }}

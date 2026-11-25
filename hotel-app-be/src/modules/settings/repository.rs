@@ -157,14 +157,13 @@ impl SettingsRepository {
             WHERE status = 'confirmed'
               AND check_in_date = CURRENT_DATE
               AND CURRENT_TIME >= $1::TIME
-              AND CURRENT_TIME < $2::TIME
               {ekyc_clause}
             "#
         );
+        let _ = check_out_time;
 
         sqlx::query(sqlx::AssertSqlSafe(&*query))
             .bind(check_in_time)
-            .bind(check_out_time)
             .execute(pool)
             .await
             .map(|result| result.rows_affected())

@@ -123,9 +123,13 @@ export interface LoyaltyReward {
   category: 'room_upgrade' | 'service' | 'discount' | 'gift' | 'dining' | 'spa' | 'experience';
   points_cost: number;
   monetary_value?: number;
-  minimum_tier_level: number;
+  minimum_tier_level?: number;
+  minimum_tier_id?: number | null;
+  minimum_tier_name?: string | null;
+  requires_approval?: boolean;
   is_active: boolean;
-  stock_quantity?: number;
+  stock_quantity?: number | null;
+  inventory_count?: number | null;
   image_url?: string;
   terms_conditions?: string;
   created_at: string;
@@ -144,8 +148,12 @@ export interface RewardInput {
   category: string;
   points_cost: number;
   monetary_value?: number;
-  minimum_tier_level: number;
-  stock_quantity?: number;
+  minimum_tier_level?: number;
+  minimum_tier_id?: number | null;
+  requires_approval?: boolean;
+  is_active?: boolean;
+  stock_quantity?: number | null;
+  inventory_count?: number | null;
   image_url?: string;
   terms_conditions?: string;
 }
@@ -157,8 +165,11 @@ export interface RewardUpdateInput {
   points_cost?: number;
   monetary_value?: number;
   minimum_tier_level?: number;
+  minimum_tier_id?: number | null;
+  requires_approval?: boolean;
   is_active?: boolean;
-  stock_quantity?: number;
+  stock_quantity?: number | null;
+  inventory_count?: number | null;
   image_url?: string;
   terms_conditions?: string;
 }

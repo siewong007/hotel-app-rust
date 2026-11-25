@@ -198,9 +198,18 @@ async fn check_token_payment_rate_limit(
 async fn require_payment_booking_token(
     limiters: &RateLimiters,
     headers: &HeaderMap,
+    peer_addr: SocketAddr,
     path_token: Option<&str>,
 ) -> Result<String, ApiError> {
     let token = resolve_booking_access_token(headers, path_token)?;
+    let ip = extract_client_ip(headers, peer_addr);
+    let (allowed, retry_after) = limiters.guest_portal_token_ip.check_with_retry(ip).await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!("Too many requests. Please try again in {retry_after} seconds."),
+            retry_after,
+        ));
+    }
     check_token_payment_rate_limit(limiters, &token).await?;
     Ok(token)
 }
@@ -212,7 +221,7 @@ async fn token_group_bank_transfer_header(
     headers: HeaderMap,
     body: Json<models::TokenPaymentRequest>,
 ) -> Result<Json<crate::modules::payments::service::GroupPaymentActionResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_group_bank_transfer(
         State(pool),
         ConnectInfo(peer_addr),
@@ -230,7 +239,7 @@ async fn token_bank_transfer_header(
     headers: HeaderMap,
     body: Json<models::TokenPaymentRequest>,
 ) -> Result<Json<models::PaymentActionResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_bank_transfer(
         State(pool),
         ConnectInfo(peer_addr),
@@ -249,7 +258,8 @@ async fn token_bank_transfer(
     path: Path<String>,
     body: Json<models::TokenPaymentRequest>,
 ) -> Result<Json<models::PaymentActionResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, Some(&path.0)).await?;
+    let token =
+        require_payment_booking_token(&limiters, &headers, peer_addr, Some(&path.0)).await?;
     handlers::token_bank_transfer(
         State(pool),
         ConnectInfo(peer_addr),
@@ -263,22 +273,25 @@ async fn token_bank_transfer(
 async fn token_upload_payment_receipt_header(
     State(pool): State<DbPool>,
     Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(payment_id): Path<i64>,
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_upload_payment_receipt(State(pool), Path((token, payment_id)), multipart).await
 }
 
 async fn token_upload_payment_receipt(
     State(pool): State<DbPool>,
     Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path((path_token, payment_id)): Path<(String, i64)>,
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, Some(&path_token)).await?;
+    let token =
+        require_payment_booking_token(&limiters, &headers, peer_addr, Some(&path_token)).await?;
     handlers::token_upload_payment_receipt(State(pool), Path((token, payment_id)), multipart).await
 }
 
@@ -289,7 +302,7 @@ async fn token_paypal_create_order_header(
     headers: HeaderMap,
     body: Json<models::TokenPaymentRequest>,
 ) -> Result<Json<models::PaypalCreateOrderResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_paypal_create_order(
         State(pool),
         ConnectInfo(peer_addr),
@@ -308,7 +321,8 @@ async fn token_paypal_create_order(
     path: Path<String>,
     body: Json<models::TokenPaymentRequest>,
 ) -> Result<Json<models::PaypalCreateOrderResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, Some(&path.0)).await?;
+    let token =
+        require_payment_booking_token(&limiters, &headers, peer_addr, Some(&path.0)).await?;
     handlers::token_paypal_create_order(
         State(pool),
         ConnectInfo(peer_addr),
@@ -322,21 +336,24 @@ async fn token_paypal_create_order(
 async fn token_paypal_capture_header(
     State(pool): State<DbPool>,
     Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Json<models::PaypalCaptureRequest>,
 ) -> Result<Json<models::PaymentActionResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_paypal_capture(State(pool), Path(token), body).await
 }
 
 async fn token_paypal_capture(
     State(pool): State<DbPool>,
     Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     path: Path<String>,
     body: Json<models::PaypalCaptureRequest>,
 ) -> Result<Json<models::PaymentActionResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, Some(&path.0)).await?;
+    let token =
+        require_payment_booking_token(&limiters, &headers, peer_addr, Some(&path.0)).await?;
     handlers::token_paypal_capture(State(pool), Path(token), body).await
 }
 
@@ -804,7 +821,7 @@ async fn token_group_paypal_create_order_header(
     headers: HeaderMap,
     body: Json<models::TokenPaymentRequest>,
 ) -> Result<Json<models::PaypalCreateOrderResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_group_paypal_create_order(
         State(pool),
         ConnectInfo(peer_addr),
@@ -818,9 +835,10 @@ async fn token_group_paypal_create_order_header(
 async fn token_group_paypal_capture_header(
     State(pool): State<DbPool>,
     Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Json<models::PaypalCaptureRequest>,
 ) -> Result<Json<models::PaymentActionResponse>, ApiError> {
-    let token = require_payment_booking_token(&limiters, &headers, None).await?;
+    let token = require_payment_booking_token(&limiters, &headers, peer_addr, None).await?;
     handlers::token_group_paypal_capture(State(pool), Path(token), body).await
 }
