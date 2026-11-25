@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="arrivals"
+        android:enabled="true"
+        android:icon="@drawable/ic_hotel_logo"
+        android:shortcutShortLabel="@string/shortcut_arrivals_short"
+        android:shortcutLongLabel="@string/shortcut_arrivals_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="hotelstaff://bookings?view=arriving"
+            android:targetPackage="com.hotelapp.staff"
+            android:targetClass="com.hotelapp.staff.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="rooms"
+        android:enabled="true"
+        android:icon="@drawable/ic_hotel_logo"
+        android:shortcutShortLabel="@string/shortcut_rooms_short"
+        android:shortcutLongLabel="@string/shortcut_rooms_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="hotelstaff://rooms"
+            android:targetPackage="com.hotelapp.staff"
+            android:targetClass="com.hotelapp.staff.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="search"
+        android:enabled="true"
+        android:icon="@drawable/ic_hotel_logo"
+        android:shortcutShortLabel="@string/shortcut_search_short"
+        android:shortcutLongLabel="@string/shortcut_search_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="hotelstaff://search"
+            android:targetPackage="com.hotelapp.staff"
+            android:targetClass="com.hotelapp.staff.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="maintenance"
+        android:enabled="true"
+        android:icon="@drawable/ic_hotel_logo"
+        android:shortcutShortLabel="@string/shortcut_maintenance_short"
+        android:shortcutLongLabel="@string/shortcut_maintenance_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="hotelstaff://maintenance"
+            android:targetPackage="com.hotelapp.staff"
+            android:targetClass="com.hotelapp.staff.MainActivity" />
+    </shortcut>
+</shortcuts>

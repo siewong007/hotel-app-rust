@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotel Staff</string>
+    <string name="shortcut_arrivals_short">Arrivals</string>
+    <string name="shortcut_arrivals_long">Arriving Today</string>
+    <string name="shortcut_rooms_short">Rooms</string>
+    <string name="shortcut_rooms_long">Room Rack</string>
+    <string name="shortcut_search_short">Search</string>
+    <string name="shortcut_search_long">Global Search</string>
+    <string name="shortcut_maintenance_short">Maintenance</string>
+    <string name="shortcut_maintenance_long">Maintenance Tickets</string>
+    <string name="ops_widget_description">Live occupancy, arriving stays, dirty rooms, and open maintenance count.</string>
+    <string name="asset_statements" translatable="false">[{\"include\": \"https://saliminn.my/.well-known/assetlinks.json\"}]</string>
+</resources>

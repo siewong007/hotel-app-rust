@@ -108,3 +108,12 @@ ds-bundle/
 # Local verification artifacts (screenshots/scripts from staging checks)
 /staging-*.png
 /shots/
+
+# Android (hotel-android)
+hotel-android/.gradle/
+hotel-android/local.properties
+hotel-android/**/build/
+hotel-android/.kotlin/
+hotel-android/captures/
+*.jks
+*.keystore
