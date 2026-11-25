@@ -376,6 +376,27 @@ aspirational settings.
 | `SKIP_EMAIL_VERIFICATION` | Security | (unset) | `false` in production; `true` for desktop |
 | `ENVIRONMENT` | Security | `production` | Set in `.env` for the target environment |
 
+### PayPal Webhook
+
+Guest-portal PayPal checkout captures synchronously, so payments complete
+without a webhook. The webhook is the safety net: it records a capture whose
+browser never returned to the portal. Until `PAYPAL_WEBHOOK_ID` is set,
+`POST /api/webhooks/paypal` answers 503 and no PayPal call is made.
+
+1. In the PayPal developer dashboard, open the app whose credentials the
+   environment uses (the **live** app for production, the sandbox app for
+   staging) and add a webhook for `https://<domain>/api/webhooks/paypal`,
+   subscribed to `PAYMENT.CAPTURE.COMPLETED` and `PAYMENT.CAPTURE.DENIED`.
+2. Copy the webhook's **Webhook ID**.
+3. Production: set it as the `PAYPAL_WEBHOOK_ID` repository variable
+   (`gh variable set PAYPAL_WEBHOOK_ID`). The deploy workflow writes it into the
+   host's `secrets.env` on the next deploy, and `deploy.sh` logs whether
+   verification is enabled. Staging has no CI provisioning path yet, so its
+   value goes in the staging `secrets.env`.
+4. Confirm with a real capture: PayPal's dashboard should show the delivery as
+   succeeded. Simulator events may fail signature verification (403) and prove
+   nothing either way.
+
 ### Performance Tuning
 
 ```bash

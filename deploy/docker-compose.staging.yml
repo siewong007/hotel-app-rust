@@ -90,6 +90,9 @@ services:
       PAYPAL_CLIENT_ID: "${PAYPAL_CLIENT_ID:-}"
       PAYPAL_CLIENT_SECRET: "${PAYPAL_CLIENT_SECRET:-}"
       PAYPAL_API_BASE: "${PAYPAL_API_BASE:-https://api-m.sandbox.paypal.com}"
+      # Webhook id of the PayPal app (dashboard -> app -> Webhooks). Empty keeps
+      # /api/webhooks/paypal answering 503; captures still complete synchronously.
+      PAYPAL_WEBHOOK_ID: "${PAYPAL_WEBHOOK_ID:-}"
       # Staging runs ENVIRONMENT=production but deliberately exercises checkout
       # against the PayPal sandbox; the backend requires this explicit opt-out.
       PAYPAL_ALLOW_SANDBOX: "${PAYPAL_ALLOW_SANDBOX:-false}"
