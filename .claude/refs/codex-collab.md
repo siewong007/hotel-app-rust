@@ -28,7 +28,7 @@ Path warning: this volume name ends in a space — always double-quote paths.
 ```bash
 CODEX="/Applications/Codex.app/Contents/Resources/codex"
 "$CODEX" exec --ephemeral -s read-only --color never \
-  -C "/Volumes/APPLE EXTERNAL SSD /Personal Projects/hotel-app" \
+  -C "/Volumes/APPLE EXTERNAL SSD /Personal Projects/hotel-app-rust" \
   -o "/path/to/output-file.md" \
   "PROMPT HERE"
 ```

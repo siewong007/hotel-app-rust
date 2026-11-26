@@ -6,7 +6,7 @@ Fill-in-the-blank prompts for the Agent tool. Copy the template, replace every
 (goal/motivation, acceptance criteria, report format) — do not strip them.
 
 Path warning for ALL templates: this repo lives at
-"/Volumes/APPLE EXTERNAL SSD /Personal Projects/hotel-app" — the volume name
+"/Volumes/APPLE EXTERNAL SSD /Personal Projects/hotel-app-rust" — the volume name
 contains a trailing space after "SSD". Always double-quote paths in shell commands.
 
 ---

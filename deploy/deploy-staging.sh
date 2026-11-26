@@ -487,6 +487,24 @@ load_release_images() {
 }
 
 compose() {
+  # Same Compose file as production. These exports keep staging on its own
+  # containers, ports, data directory, and smaller memory caps.
+  export SALIMINN_ROOT=/opt/saliminn-staging
+  export POSTGRES_CONTAINER_NAME=saliminn-staging-db
+  export BACKEND_CONTAINER_NAME=saliminn-staging-backend
+  export FRONTEND_CONTAINER_NAME=saliminn-staging-frontend
+  export BACKEND_BIND_PORT=3031
+  export FRONTEND_BIND_PORT=8083
+  export ALLOWED_ORIGINS=https://staging.saliminn.my
+  export PASSKEY_RP_ID=staging.saliminn.my
+  export PUBLIC_BASE_URL=https://staging.saliminn.my
+  export SMTP_FROM_NAME="${SMTP_FROM_NAME:-Salim Inn Staging}"
+  export POSTGRES_MEM_LIMIT=192m
+  export POSTGRES_CPUS=0.20
+  export BACKEND_MEM_LIMIT=128m
+  export BACKEND_CPUS=0.30
+  export FRONTEND_MEM_LIMIT=48m
+  export FRONTEND_CPUS=0.10
   "${COMPOSE_COMMAND[@]}" \
     --project-name saliminn-staging \
     --file "$COMPOSE_FILE" \

@@ -1,6 +1,6 @@
 # Hotel App on OCI Always Free
 
-This Terraform slice creates a development deployment on one Oracle Cloud Infrastructure Ampere A1 Flex VM. Cloud-init installs Docker, checks out this repository, reads runtime secrets through an instance principal, and starts the existing root `docker-compose.yml` stack.
+This Terraform slice creates a development deployment on one Oracle Cloud Infrastructure Ampere A1 Flex VM. Cloud-init installs Docker, checks out this repository, reads runtime secrets through an instance principal, and starts `deploy/docker-compose.prod.yml`.
 
 It is deliberately a development design. It does not use OCI Database because OCI Always Free does not provide a managed PostgreSQL service suitable for this stack. PostgreSQL therefore runs in Docker on the VM alongside the backend and frontend.
 
@@ -15,7 +15,7 @@ It is deliberately a development design. It does not use OCI Database because OC
 
 The development security list permits HTTP on port 80, reserves port 443 for a later TLS proxy, and exposes the backend on port 3030 because the frontend currently embeds its API URL at build time. SSH is closed unless `ssh_ingress_cidrs` is explicitly populated. PostgreSQL port 5432 is not allowed through the OCI security list.
 
-The infrastructure Compose override adds persistent Docker volumes for `/app/private_uploads` and `/app/uploads/public`, supplies the URL-encoded database connection string, and keeps proxy-header trust disabled by default.
+The Compose deployment mounts host paths under `/opt/saliminn`, expects release env/secrets configuration, and keeps proxy-header trust disabled unless explicitly enabled.
 
 ## Layout
 
@@ -27,8 +27,6 @@ infra/terraform/oci/
     network/
   templates/
     bootstrap.sh.tftpl
-    docker-compose.infrastructure.yml
-    docker-compose.pg19-tuning.yml
   environments/
     dev/
 ```
@@ -45,21 +43,9 @@ There is no SLA, horizontal redundancy, managed database failover, or automatic 
 
 ## PostgreSQL 19 Beta boundary
 
-The repository's root Compose stack currently uses `postgres:19beta3`. This infrastructure preserves that choice only for development. Do not promote the VM or its database volume to production, and do not assume an in-place upgrade path from a beta database cluster.
+The Compose stack (`deploy/docker-compose.prod.yml`) currently uses `postgres:19beta3`. This infrastructure preserves that choice only for development. Do not promote the VM or its database volume to production, and do not assume an in-place upgrade path from a beta database cluster.
 
-`enable_pg19_beta_tuning` is false by default. When enabled, cloud-init adds `docker-compose.pg19-tuning.yml` with conservative memory, WAL, checkpoint, and storage-cost settings sized for the default 12 GB VM. They are hypotheses, not universal improvements. Benchmark query latency, throughput, memory pressure, checkpoints, and recovery behavior before retaining them. Adjustments can be made through the non-secret `pre_compose_script` hook or by changing the tracked override in a reviewed change.
-
-The opt-in path also composes the repository's `docker-compose.pg19-tuned.yml`,
-which enables the PostgreSQL 19 AIO/autovacuum profile and runs the reversible
-schema-level tuning script before the backend starts. The OCI override repeats
-the complete server command so Compose's command replacement keeps those PG19
-settings while adding the 12 GB VM sizing assumptions.
-
-PostgreSQL's entrypoint applies the V1 baseline and `seed.sql` once, when it
-initializes a new empty volume. On every boot, the root Compose file's one-shot
-`db-patches` service then runs the checksum-verified patch catalog before the
-backend starts. It skips revisions already applied, so a rerun is a no-op, and the
-backend refuses to start on a database that is missing one.
+PostgreSQL's entrypoint applies the V1 baseline and `seed.sql` once, when it initializes a new empty volume. Note that `deploy/docker-compose.prod.yml` has no `db-patches` service, so apply the checksum-verified patch catalog before starting the backend (the backend refuses to start on a database missing a revision).
 
 ## Prerequisites
 
@@ -116,10 +102,10 @@ Cloud-init performs these steps:
 3. Reads the PostgreSQL password and JWT secret through instance-principal authentication.
 4. Resolves the VM public IP from OCI instance metadata unless explicit origins were supplied.
 5. Writes a mode-0600 Compose environment file with a URL-encoded database password.
-6. Clones the configured repository ref and installs the infrastructure and optional PostgreSQL tuning overrides.
-7. Enables the `hotel-app-compose.service` systemd unit and builds/starts the stack.
+6. Clones the configured repository ref and starts `deploy/docker-compose.prod.yml`.
+7. Enables the `hotel-app-compose.service` systemd unit and starts the stack.
 
-Changing cloud-init inputs in Terraform does not guarantee that cloud-init reruns on an existing VM. Replace the development instance or perform the equivalent reviewed operation manually when changing repository refs, bootstrap hooks, origins, or Compose overrides.
+Changing cloud-init inputs in Terraform does not guarantee that cloud-init reruns on an existing VM. Replace the development instance or perform the equivalent reviewed operation manually when changing repository refs, bootstrap hooks, origins, or Compose configuration.
 
 Inspect bootstrap status with the `cloud_init_log_command` output. Useful on-instance checks are:
 
@@ -127,8 +113,7 @@ Inspect bootstrap status with the `cloud_init_log_command` output. Useful on-ins
 sudo cloud-init status --wait
 sudo journalctl -u hotel-app-compose --no-pager
 sudo docker compose --env-file /etc/hotel-app/runtime.env \
-  -f /opt/hotel-app/docker-compose.yml \
-  -f /opt/hotel-app/docker-compose.infrastructure.yml ps
+  -f /opt/hotel-app/deploy/docker-compose.prod.yml ps
 ```
 
 With no origin overrides, the frontend is `http://PUBLIC_IP` and its API is `http://PUBLIC_IP:3030`. If a domain or TLS reverse proxy is added, set both `frontend_origin` and `api_url`, update exact `allowed_origins` and `passkey_rp_id`, and set `trust_proxy_headers = true` only when that proxy overwrites forwarded-client headers.

@@ -53,7 +53,7 @@ For suspected account or token compromise:
 
 No app toggle exists; Caddy returns HTTP `503` while keeping `/health` open:
 
-- **Docker Compose**: Set `MAINTENANCE_MODE=on` and run `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`.
+- `deploy/docker-compose.prod.yml` does not run Caddy; maintenance mode is controlled in the host Caddy configuration (`/etc/caddy/saliminn.Caddyfile` or `deploy/Caddyfile` via `MAINTENANCE_MODE=on`).
 - **Host Caddy (`/etc/caddy/saliminn.Caddyfile`)**: Insert `@maintenance not path /health` → `respond 503` directly above `@backend` and run `caddy validate && systemctl reload caddy` (`deploy.sh` regenerates the site file automatically on next release).
 
 ### Payment Reconciliation (Weekly or Incident)

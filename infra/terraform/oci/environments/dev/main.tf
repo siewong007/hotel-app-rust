@@ -44,8 +44,6 @@ locals {
     create_data_volume                = tostring(var.create_data_volume)
     data_volume_device_b64            = base64encode(var.data_volume_device)
     data_volume_mount_path_b64        = base64encode(var.data_volume_mount_path)
-    infrastructure_override_b64       = base64encode(file("${path.module}/../../templates/docker-compose.infrastructure.yml"))
-    pg19_tuning_override_b64          = base64encode(file("${path.module}/../../templates/docker-compose.pg19-tuning.yml"))
     pre_compose_script_b64            = base64encode(var.pre_compose_script)
     post_compose_script_b64           = base64encode(var.post_compose_script)
   })

@@ -164,11 +164,12 @@ jobs:
           docker save "saliminn-backend:$DEPLOY_SHA" | gzip -1 > "$bundle_dir/images/backend.tar.gz"
           docker save "saliminn-frontend:$DEPLOY_SHA" | gzip -1 > "$bundle_dir/images/frontend.tar.gz"
 
-          # Staging deploy script + compose (installed on host as docker-compose.prod.yml)
+          # Staging uses the production Compose file. deploy-staging.sh exports
+          # the ports, names, and paths that keep it off the production stack.
           cp deploy/deploy-staging.sh "$bundle_dir/deploy.sh"
           cp deploy/database-backup-staging.sh "$bundle_dir/database-backup.sh"
           cp deploy/check-backup-health.sh "$bundle_dir/check-backup-health.sh"
-          cp deploy/docker-compose.staging.yml "$bundle_dir/docker-compose.prod.yml"
+          cp deploy/docker-compose.prod.yml "$bundle_dir/docker-compose.prod.yml"
 
           cp hotel-app-be/database/postgres/migrations/0001_v1_baseline.sql \
             "$bundle_dir/initdb/01-v1-baseline.sql"

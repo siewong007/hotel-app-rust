@@ -27,7 +27,7 @@ Backend (`cargo`) and Android (`./gradlew`) fetch dependencies automatically on 
 
 Three example files, each scoped to its consumer:
 
-- `.env.example` (root) — Docker Compose (`POSTGRES_*`, ports, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, image tags).
+- `.env.example` (root) — variable names read by [`deploy/docker-compose.prod.yml`](../deploy/docker-compose.prod.yml) (`POSTGRES_*`, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, image tags).
 - `hotel-app-be/.env.example` — full backend-process reference (`DATABASE_URL`, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, `ALLOWED_ORIGINS`, `SMTP_*`, `PASSKEY_RP_ID`, `GOOGLE_CLIENT_ID`, `TURNSTILE_*`, `SESSION_*`, pool tuning).
 - `hotel-web-fe/.env.example` — optional build-time `VITE_*` variables (`VITE_GOOGLE_CLIENT_ID`, `VITE_TURNSTILE_SITE_KEY`, `VITE_API_URL`, `VITE_BACKEND_TARGET`, `VITE_GRPC_CONTEXTS`, `VITE_APP_TARGET`, `VITE_DESKTOP_UPDATER_ENABLED`).
 
@@ -36,7 +36,7 @@ Copy → `.env` and fill in. `docker compose` aborts on blank `:?` secrets. Note
 ## Run
 
 ```bash
-make docker-up                                   # start postgres + (optionally) caddy
+make docker-up                                   # production Compose file only (AIC VPS stack)
 cd hotel-app-be && cargo run --bin hotel-app-be  # API on :3030 (bare `cargo run` errors: multiple bins)
 cd hotel-web-fe && bun run start                 # Vite dev on :3000, proxies /api → 127.0.0.1:3030
 cd hotel-desktop && bun run dev                  # Tauri dev: sidecar backend + embedded PG

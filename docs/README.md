@@ -42,7 +42,6 @@ Canonical documentation map (`2026-11-25`). **One canonical file owns each subje
 | Contribution process & commit conventions | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Vulnerability reporting & security policy | [`../SECURITY.md`](../SECURITY.md) |
 | Community code of conduct | [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) |
-| Release changelog | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | Agent conventions (layers, naming, refactoring safety) | [`../AGENTS.md`](../AGENTS.md) |
 | Agent routing index (commands, CI, env; ≤150 lines) | [`../CLAUDE.md`](../CLAUDE.md) |
 | Booking & ledger internals (agent refs) | [`../.claude/refs/booking-workflow.md`](../.claude/refs/booking-workflow.md) · [`../.claude/refs/ledger-workflow.md`](../.claude/refs/ledger-workflow.md) |

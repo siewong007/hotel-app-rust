@@ -1,12 +1,14 @@
-# Production stack for saliminn.my on the AIC cloud VPS.
+# The only Compose file. Production on saliminn.my runs it with the defaults
+# below. Staging uses the same file; deploy-staging.sh exports the ports,
+# names, paths, and memory caps that keep it off the production containers.
 #
 # The host-level Caddy process owns ports 80/443. Every hotel port is bound to
 # loopback, so only Caddy (or an administrator on the VPS) can reach it.
-# Payroll keeps 127.0.0.1:8080 and the host PostgreSQL server keeps :5432;
-# this stack uses :3030 and :8081 with saliminn-specific names. Its PostgreSQL
-# port is not published at all; maintenance uses `docker exec saliminn-db`.
+# Payroll keeps 127.0.0.1:8080 and the host PostgreSQL server keeps :5432.
+# PostgreSQL is not published; maintenance uses `docker exec` on the database
+# container.
 #
-# deploy/deploy.sh supplies IMAGE_TAG, POSTGRES_PASSWORD, and JWT_SECRET. The
+# deploy.sh supplies IMAGE_TAG, POSTGRES_PASSWORD, and JWT_SECRET. The
 # application images are loaded directly from the GitHub Actions release bundle;
 # no container registry or managed cloud service is involved.
 
@@ -19,7 +21,7 @@ x-logging: &default-logging
 services:
   postgres:
     image: postgres:19beta3
-    container_name: saliminn-db
+    container_name: ${POSTGRES_CONTAINER_NAME:-saliminn-db}
     restart: unless-stopped
     # Settings live here, not in ALTER SYSTEM: a `-c` command-line option outranks
     # postgresql.auto.conf, so anything set here silently wins over ALTER SYSTEM and
@@ -72,7 +74,7 @@ services:
       # PostgreSQL 19 stores versioned data below /var/lib/postgresql.
       - postgres_data:/var/lib/postgresql
       # Applied by the official image only while postgres_data is empty.
-      - /opt/saliminn/initdb:/docker-entrypoint-initdb.d:ro
+      - ${SALIMINN_ROOT:-/opt/saliminn}/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hotel_admin -d hotel_management"]
       interval: 10s
@@ -80,8 +82,8 @@ services:
       retries: 12
       start_period: 20s
     shm_size: 64mb
-    mem_limit: 256m
-    cpus: 0.30
+    mem_limit: ${POSTGRES_MEM_LIMIT:-256m}
+    cpus: ${POSTGRES_CPUS:-0.30}
     pids_limit: 256
     security_opt:
       - no-new-privileges:true
@@ -92,11 +94,11 @@ services:
 
   backend:
     image: "saliminn-backend:${IMAGE_TAG:?IMAGE_TAG is required}"
-    container_name: saliminn-backend
+    container_name: ${BACKEND_CONTAINER_NAME:-saliminn-backend}
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:3030:3030"
+      - "127.0.0.1:${BACKEND_BIND_PORT:-3030}:3030"
     environment:
       DATABASE_URL: "postgres://hotel_app:${HOTEL_APP_PASSWORD:?HOTEL_APP_PASSWORD is required}@postgres:5432/hotel_management"
       # Seven slots are pinned for life by the leader-locked schedulers and the
@@ -107,9 +109,9 @@ services:
       JWT_ISSUER: hotel-app-be
       JWT_AUDIENCE: hotel-web
       BACKEND_PORT: "3030"
-      ALLOWED_ORIGINS: "https://saliminn.my,https://www.saliminn.my"
-      PASSKEY_RP_ID: saliminn.my
-      PUBLIC_BASE_URL: https://saliminn.my
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-https://saliminn.my,https://www.saliminn.my}"
+      PASSKEY_RP_ID: ${PASSKEY_RP_ID:-saliminn.my}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://saliminn.my}
       # Safe because the published port is loopback-only and Caddy is the sole
       # public path to it.
       TRUST_PROXY_HEADERS: "true"
@@ -123,6 +125,9 @@ services:
       # Webhook id of the PayPal app (dashboard -> app -> Webhooks). Empty keeps
       # /api/webhooks/paypal answering 503; captures still complete synchronously.
       PAYPAL_WEBHOOK_ID: "${PAYPAL_WEBHOOK_ID:-}"
+      # Staging sets this so ENVIRONMENT=production can still talk to the
+      # PayPal sandbox. Unset on production.
+      PAYPAL_ALLOW_SANDBOX: "${PAYPAL_ALLOW_SANDBOX:-false}"
       HOTEL_BANK_NAME: "${HOTEL_BANK_NAME:-Maybank}"
       HOTEL_BANK_ACCOUNT_NAME: "${HOTEL_BANK_ACCOUNT_NAME:-Salim Inn}"
       HOTEL_BANK_ACCOUNT_NUMBER: "${HOTEL_BANK_ACCOUNT_NUMBER:-511270052595}"
@@ -164,9 +169,9 @@ services:
     volumes:
       # These bind mounts survive image/container replacement. eKYC documents
       # are private and remain accessible only through authenticated handlers.
-      - /opt/saliminn/data/uploads:/app/uploads
-      - /opt/saliminn/data/private_uploads:/app/private_uploads
-      - /opt/saliminn/logs:/app/logs
+      - ${SALIMINN_ROOT:-/opt/saliminn}/data/uploads:/app/uploads
+      - ${SALIMINN_ROOT:-/opt/saliminn}/data/private_uploads:/app/private_uploads
+      - ${SALIMINN_ROOT:-/opt/saliminn}/logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -179,8 +184,8 @@ services:
     # Backup imports stream rows through a per-row insert transaction (a 256 MB
     # file parses at roughly 1x its byte size plus the in-flight row batch), so
     # the API needs headroom the old buffered-export 192m cap did not.
-    mem_limit: 384m
-    cpus: 0.45
+    mem_limit: ${BACKEND_MEM_LIMIT:-384m}
+    cpus: ${BACKEND_CPUS:-0.45}
     pids_limit: 256
     security_opt:
       - no-new-privileges:true
@@ -192,11 +197,11 @@ services:
 
   frontend:
     image: "saliminn-frontend:${IMAGE_TAG:?IMAGE_TAG is required}"
-    container_name: saliminn-frontend
+    container_name: ${FRONTEND_CONTAINER_NAME:-saliminn-frontend}
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:${FRONTEND_BIND_PORT:-8081}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -206,8 +211,8 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
-    mem_limit: 64m
-    cpus: 0.10
+    mem_limit: ${FRONTEND_MEM_LIMIT:-64m}
+    cpus: ${FRONTEND_CPUS:-0.10}
     pids_limit: 128
     security_opt:
       - no-new-privileges:true

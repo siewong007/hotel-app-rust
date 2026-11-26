@@ -15,7 +15,7 @@ export TARGET_DATABASE_URL
         typecheck check-be check-fe check-desktop check-all \
         lint lint-be lint-fe lint-desktop lint-all \
         test test-be test-be-pg test-be-unit test-fe test-all \
-        docker-up docker-up-pg19-tuned docker-down docker-build \
+        docker-up docker-down docker-logs \
         db-baseline db-seed db-setup db-patch require-database-url db-reset db-pg19-tune db-pg19-tune-rollback db-pg19-benchmark \
         db-schema-drift require-schema-drift-urls \
         db-repack db-repack-full \
@@ -142,20 +142,14 @@ test: test-all ## Alias for test-all
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
 
-docker-up: ## Start all Docker services
-	docker compose up -d
+docker-up: ## Start the production Compose stack
+	docker compose -f deploy/docker-compose.prod.yml up -d
 
-docker-up-pg19-tuned: ## Start the PG19 experimental profile and apply speculative tuning
-	docker compose -f docker-compose.yml -f docker-compose.pg19-tuned.yml up -d
+docker-down: ## Stop the production Compose stack
+	docker compose -f deploy/docker-compose.prod.yml down
 
-docker-down: ## Stop all Docker services
-	docker compose down
-
-docker-build: ## Build all Docker images
-	docker compose build
-
-docker-logs: ## View Docker logs
-	docker compose logs -f
+docker-logs: ## View production Compose logs
+	docker compose -f deploy/docker-compose.prod.yml logs -f
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 

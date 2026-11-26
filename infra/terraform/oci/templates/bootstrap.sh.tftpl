@@ -166,18 +166,12 @@ fi
 git clone "$REPOSITORY_URL" /opt/hotel-app
 git -C /opt/hotel-app checkout "$REPOSITORY_REF"
 
-printf '%s' '${infrastructure_override_b64}' | base64 --decode > /opt/hotel-app/docker-compose.infrastructure.yml
-COMPOSE_FILE_ARGS="-f docker-compose.yml -f docker-compose.infrastructure.yml"
+COMPOSE_FILE_ARGS="-f deploy/docker-compose.prod.yml"
 
 docker volume create hotel-app-private-uploads >/dev/null
 docker volume create hotel-app-public-uploads >/dev/null
 docker run --rm -v hotel-app-private-uploads:/data alpine:3.22 sh -c 'chown 1000:1000 /data && chmod 0750 /data'
 docker run --rm -v hotel-app-public-uploads:/data alpine:3.22 sh -c 'chown 1000:1000 /data && chmod 0755 /data'
-
-if [[ "$ENABLE_PG19_TUNING" == "true" ]]; then
-  printf '%s' '${pg19_tuning_override_b64}' | base64 --decode > /opt/hotel-app/docker-compose.pg19-tuning.yml
-  COMPOSE_FILE_ARGS="$COMPOSE_FILE_ARGS -f docker-compose.pg19-tuned.yml -f docker-compose.pg19-tuning.yml"
-fi
 
 printf '%s' '${pre_compose_script_b64}' | base64 --decode > /usr/local/sbin/hotel-app-pre-compose
 printf '%s' '${post_compose_script_b64}' | base64 --decode > /usr/local/sbin/hotel-app-post-compose

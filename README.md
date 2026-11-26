@@ -71,7 +71,7 @@ hotel-web-fe/               # React frontend (staff SPA, guest.html, salim-inn/)
 hotel-desktop/              # Tauri 2 desktop app (sidecar backend + embedded PostgreSQL)
 hotel-android/              # Native Kotlin + Jetpack Compose Material 3 Android staff app
 proto/                      # gRPC contract of record (buf)
-deploy/                     # prod/staging compose files, Caddyfile, deploy scripts
+deploy/                     # production Compose file, Caddyfile, deploy scripts
 docs/                       # consolidated documentation (index: docs/README.md)
 infra/terraform/oci/        # OCI free-tier dev environment
 Makefile                    # task runner — `make help`
@@ -81,22 +81,13 @@ Makefile                    # task runner — `make help`
 
 Prerequisites: Rust `1.95.0` (`rust-toolchain.toml`), Bun `1.3.14` (`.bun-version`), Docker, `protoc` (backend builds), plus JDK 17 + Android SDK 36 for `hotel-android/`.
 
-**Option A — Docker (full stack):**
+The only Compose file is `deploy/docker-compose.prod.yml`. It is the stack that runs on the AIC VPS and expects the release images and `/opt/saliminn`, so it is not a laptop stack.
 
-```bash
-cp .env.example .env     # set POSTGRES_PASSWORD and JWT_SECRET (required)
-docker compose up -d     # frontend :80, API :3030, Postgres :5432
-curl http://localhost:3030/health
-```
-
-**Option B — local development:**
+**Local development:**
 
 ```bash
 cd hotel-web-fe && bun install
 
-cp .env.example .env                                   # set POSTGRES_PASSWORD
-docker compose up -d postgres                          # 127.0.0.1:5432
-docker compose run --rm db-patches                     # apply patch catalog
 cp hotel-app-be/.env.example hotel-app-be/.env         # set DATABASE_URL and JWT_SECRET
 
 cd hotel-app-be && cargo run --bin hotel-app-be        # API on :3030
@@ -157,7 +148,7 @@ Schema changes go in both `0001_v1_baseline.sql` **and** a registered patch in `
 - [Deployment, VPS & PG19 upgrade](docs/guides/deployment.md) · [Desktop guide](docs/guides/desktop.md) · [Android guide](docs/guides/android.md)
 - [Internationalisation & glossary](docs/guides/internationalization.md) · [Admin guide (zh)](docs/guides/admin-user-guide-zh.md) · [Guest guide (zh)](docs/guides/guest-user-guide-zh.md)
 - [Security, retention & go-live readiness](docs/security.md) · [Security policy](SECURITY.md)
-- [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Full documentation index](docs/README.md)
+- [Contributing](CONTRIBUTING.md) · [Full documentation index](docs/README.md)
 
 ## Status
 

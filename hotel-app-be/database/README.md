@@ -403,29 +403,18 @@ make db-pg19-tune-rollback DATABASE_URL="$DATABASE_URL"
 `ALTER SYSTEM` (the rollback target resets it). Without that cluster GUC, the
 profile's per-table `autovacuum_parallel_workers` settings do nothing.
 
-On the `make docker-up-pg19-tuned` path, `ALTER SYSTEM` loses.
-`docker-compose.pg19-tuned.yml` passes
-`-c autovacuum_max_parallel_workers=${PG19_AUTOVACUUM_PARALLEL_WORKERS:-2}`, and
-a command-line `-c` outranks `postgresql.auto.conf`, so the effective value
-there is 2. On a bare database it is 4. The per-table settings engage either
-way. To get 4 on the compose path, set `PG19_AUTOVACUUM_PARALLEL_WORKERS`.
-
 The profile was re-validated on 19beta3 (2026-09-15) in two scratch
 containers, vanilla versus tuned. It applies cleanly, every setting takes
 effect (the io-concurrency GUCs show in `EXPLAIN` `Settings:` lines), the
 three extended statistics and the per-table reloptions are created, and the
 benchmark queries keep identical plan shapes. This ran on seed-sized data, so
-it is evidence that the profile *engages*, not a latency result. Several
-compose `-c` pins (`io_method=worker`, `io_min_workers=2`, `io_max_workers=8`,
-`jit=off`, `default_toast_compression=lz4`) already match the beta3
-defaults. They are harmless no-ops there.
+it is evidence that the profile *engages*, not a latency result.
 
 For online table rebuilds, use `make db-repack TABLE=public.bookings`
 (PostgreSQL 19 `REPACK CONCURRENTLY`), or `make db-repack-full` in a
 maintenance window.
 
-PostgreSQL 19 is prerelease software (`postgres:19beta3` in every compose
-file). The profiles are for testing, not production.
+PostgreSQL 19 is prerelease software (`postgres:19beta3` in `deploy/docker-compose.prod.yml`). The profiles are for testing, not production.
 
 ## Docker and desktop
 
