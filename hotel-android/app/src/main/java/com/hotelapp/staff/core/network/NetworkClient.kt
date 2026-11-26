@@ -24,6 +24,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Authenticator
+import okhttp3.CookieJar
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -233,6 +234,7 @@ class AuthInterceptor(
     private val accessTokenProvider: () -> String?,
     private val timezoneProvider: () -> String? = { sanitizeTimezone(TimeZone.getDefault().id) },
     private val languageProvider: () -> String = { Locale.getDefault().toLanguageTag() },
+    private val baseUrlProvider: () -> String = { "" },
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
@@ -257,8 +259,18 @@ class AuthInterceptor(
             path.endsWith("/auth/refresh") ||
             path.endsWith("/auth/register") ||
             path.contains("/auth/passkey/login/")
+        val configuredBase = baseUrlProvider().trim()
+        val matchesConfiguredOrigin = if (configuredBase.isEmpty()) {
+            true
+        } else {
+            val allowed = configuredBase.toHttpUrlOrNull()
+            allowed != null &&
+                original.url.scheme == allowed.scheme &&
+                original.url.host.equals(allowed.host, ignoreCase = true) &&
+                original.url.port == allowed.port
+        }
 
-        if (!skipAuthHeader && original.header("Authorization") == null) {
+        if (!skipAuthHeader && matchesConfiguredOrigin && original.header("Authorization") == null) {
             accessTokenProvider()?.let { token ->
                 builder.header("Authorization", "Bearer $token")
             }
@@ -506,6 +518,27 @@ object NetworkFactory {
         }
     }
 
+    private fun createLoggingInterceptor(): HttpLoggingInterceptor =
+        HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BASIC
+            redactHeader("Authorization")
+            redactHeader("Cookie")
+            redactHeader("Set-Cookie")
+        }
+
+    fun createProbeClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .cookieJar(CookieJar.NO_COOKIES)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+        if (BuildConfig.DEBUG) {
+            builder.addInterceptor(createLoggingInterceptor())
+        }
+        return builder.build()
+    }
+
     fun createRefreshClient(
         serverConfigStore: ServerConfigStore,
         cookieJar: EncryptedCookieJar,
@@ -518,9 +551,7 @@ object NetworkFactory {
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
         if (BuildConfig.DEBUG) {
-            builder.addInterceptor(
-                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC },
-            )
+            builder.addInterceptor(createLoggingInterceptor())
         }
         return builder.build()
     }
@@ -548,25 +579,33 @@ object NetworkFactory {
         val builder = OkHttpClient.Builder()
             .cookieJar(cookieJar)
             .addInterceptor(BaseUrlInterceptor { serverConfigStore.currentBaseUrl() })
-            .addInterceptor(AuthInterceptor(accessTokenProvider = { sessionManager.getAccessToken() }))
+            .addInterceptor(
+                AuthInterceptor(
+                    accessTokenProvider = { sessionManager.getAccessToken() },
+                    baseUrlProvider = { serverConfigStore.currentBaseUrl() },
+                ),
+            )
             .authenticator(authenticator)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
         if (BuildConfig.DEBUG) {
-            builder.addInterceptor(
-                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC },
-            )
+            builder.addInterceptor(createLoggingInterceptor())
         }
         return builder.build()
     }
 
     fun createWebSocketClient(
         serverConfigStore: ServerConfigStore,
-    ): OkHttpClient = OkHttpClient.Builder()
-        .addInterceptor(BaseUrlInterceptor { serverConfigStore.currentBaseUrl() })
-        .pingInterval(25, TimeUnit.SECONDS)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
+    ): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .addInterceptor(BaseUrlInterceptor { serverConfigStore.currentBaseUrl() })
+            .pingInterval(25, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+        if (BuildConfig.DEBUG) {
+            builder.addInterceptor(createLoggingInterceptor())
+        }
+        return builder.build()
+    }
 }

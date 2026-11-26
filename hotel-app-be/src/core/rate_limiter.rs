@@ -155,6 +155,17 @@ async fn check_postgres(pool: &DbPool, bucket: &str, config: &RateLimitConfig) -
     }
 }
 
+/// Enforces the per-user gRPC RPC budget against Postgres without requiring
+/// callers to thread `RateLimiters` through every tonic service constructor.
+pub async fn check_grpc_user_limit(pool: &DbPool, user_id: i64) -> (bool, u64) {
+    let config = RateLimitConfig::new(300, 60);
+    let outcome = check_postgres(pool, &format!("grpc_user:{user_id}"), &config).await;
+    if !outcome.0 {
+        crate::core::metrics::incr(&crate::core::metrics::RATE_LIMIT_REJECTIONS);
+    }
+    outcome
+}
+
 /// Thread-safe rate limiter
 #[derive(Clone)]
 pub struct RateLimiter {
@@ -343,6 +354,11 @@ pub struct RateLimiters {
     /// 60 per 5 minutes. The screens send one request per save, so this only
     /// slows a stolen session scripting privilege changes or password hashes.
     pub admin_write: KeyedRateLimiter,
+    /// Per-user step-up / re-authentication budget (password update, step-up,
+    /// passkey registration, 2FA mutations): 10 attempts per 5 minutes.
+    pub reauth_user: KeyedRateLimiter,
+    /// Per-user gRPC RPC budget: 300 calls per minute.
+    pub grpc_user: KeyedRateLimiter,
 }
 
 impl RateLimiters {
@@ -443,8 +459,14 @@ impl RateLimiters {
             admin_write: KeyedRateLimiter::postgres(
                 "admin_write",
                 RateLimitConfig::new(60, 300),
-                pool,
+                pool.clone(),
             ),
+            reauth_user: KeyedRateLimiter::postgres(
+                "reauth_user",
+                RateLimitConfig::new(10, 300),
+                pool.clone(),
+            ),
+            grpc_user: KeyedRateLimiter::postgres("grpc_user", RateLimitConfig::new(300, 60), pool),
         }
     }
 }

@@ -87,6 +87,18 @@ async fn update_password(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     handlers::update_password_handler(State(pool), Extension(user_id), Json(input)).await
 }
 
@@ -168,6 +180,18 @@ async fn setup_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     crate::modules::two_factor::handlers::setup_2fa_handler(State(pool), user_id, Json(input)).await
 }
 
@@ -213,6 +237,18 @@ async fn disable_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     crate::modules::two_factor::handlers::disable_2fa_handler(State(pool), user_id, Json(input))
         .await
 }
@@ -244,6 +280,18 @@ async fn verify_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     crate::modules::two_factor::handlers::verify_2fa_code_handler(State(pool), user_id, Json(input))
         .await
 }

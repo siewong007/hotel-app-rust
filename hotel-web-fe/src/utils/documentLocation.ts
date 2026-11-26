@@ -9,7 +9,8 @@ export function replaceDocumentLocation(href: string): void {
   // Flag first: Safari aborts this page's in-flight module loads the moment the
   // navigation starts, and lazyRoute must not answer that with a reload.
   leavingDocument = true;
-  window.location.replace(href);
+  const safeHref = href.startsWith('/') ? href.replace(/^\/+/, '/') : href;
+  window.location.replace(safeHref);
 }
 
 /** True once replaceDocumentLocation has sent this page elsewhere. */

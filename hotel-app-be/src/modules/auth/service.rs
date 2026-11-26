@@ -29,9 +29,9 @@ use validator::Validate;
 
 /// Login refusal for an account with no password (created via Google sign-in).
 /// The frontend matches this exact text to show a translated message.
-/// Precomputed cost-10 bcrypt hash used for dummy verification when a login
-/// identifier is missing or inactive so timing matches real password checks.
-const DUMMY_PASSWORD_HASH: &str = "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+/// Precomputed cost-12 bcrypt hash used for dummy verification when a login
+/// identifier is missing or passwordless so timing matches real password checks.
+const DUMMY_PASSWORD_HASH: &str = "$2b$12$paebF.90tFowf.mlBSqRMOq7x7BPEsRUcx154TZ9llqwgel52js9K";
 
 pub const GOOGLE_SIGN_IN_ONLY_MESSAGE: &str = "This account uses Google sign-in";
 
@@ -308,8 +308,10 @@ pub async fn login(
     ensure_not_locked(pool, user.id, &req.username, ip_address, user_agent).await?;
 
     let Some(password_hash) = AuthRepository::password_hash(pool, user.id).await? else {
-        // Passwordless account (Google sign-in): no password can ever match,
-        // so say how to sign in instead of failing (or counting an attempt).
+        // Passwordless account (Google sign-in): run a cost-matched dummy
+        // bcrypt check so response timing matches a normal account before
+        // returning the translated Google sign-in hint.
+        let _ = AuthService::verify_password(&req.password, DUMMY_PASSWORD_HASH).await;
         return Err(ApiError::Unauthorized(
             GOOGLE_SIGN_IN_ONLY_MESSAGE.to_string(),
         ));
@@ -673,7 +675,11 @@ pub(crate) async fn issue_authenticated_response(
     let permissions = AuthService::get_user_permissions(pool, user.id)
         .await
         .map_err(|error| ApiError::Database(error.to_string()))?;
-    let route_policies = RbacRepository::find_all_route_access_policies(pool).await?;
+    let route_policies = if crate::core::middleware::is_guest_only_user(pool, user.id).await? {
+        Vec::new()
+    } else {
+        RbacRepository::find_all_route_access_policies(pool).await?
+    };
     let refresh_token = AuthService::generate_refresh_token();
     let is_first_login = AuthRepository::is_first_login(pool, user.id)
         .await
@@ -750,7 +756,11 @@ pub async fn access_snapshot(pool: &DbPool, user_id: i64) -> Result<AccessSnapsh
     let permissions = AuthService::get_user_permissions(pool, user.id)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
-    let route_policies = RbacRepository::find_all_route_access_policies(pool).await?;
+    let route_policies = if crate::core::middleware::is_guest_only_user(pool, user.id).await? {
+        Vec::new()
+    } else {
+        RbacRepository::find_all_route_access_policies(pool).await?
+    };
 
     Ok(AccessSnapshot {
         roles,

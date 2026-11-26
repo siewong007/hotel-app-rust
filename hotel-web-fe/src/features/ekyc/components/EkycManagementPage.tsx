@@ -123,7 +123,10 @@ const ACTION_REASONS_REQUIRED = new Set([
 ]);
 
 function getSavedFilters(): EkycListParams {
-  return storage.getItem<EkycListParams>('ekycAdminFilters') ?? DEFAULT_FILTERS;
+  const saved = storage.getItem<EkycListParams>('ekycAdminFilters');
+  if (!saved) return DEFAULT_FILTERS;
+  const { search: _ignoredSearch, ...rest } = saved;
+  return { ...DEFAULT_FILTERS, ...rest };
 }
 
 function formatDate(value?: string | null): string {
@@ -364,7 +367,8 @@ const EkycManagementPage: React.FC = () => {
   const processing = reviewActionMutation.isPending || revealMutation.isPending;
 
   useEffect(() => {
-    storage.setItem('ekycAdminFilters', filters);
+    const { search: _omittedSearch, ...filtersToPersist } = filters;
+    storage.setItem('ekycAdminFilters', filtersToPersist);
   }, [filters]);
 
   useResetOnChange([listQuery.error, detailQuery.error, reasonCodesQuery.error, t], () => {

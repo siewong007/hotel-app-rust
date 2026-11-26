@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.hotelapp.staff.BuildConfig
@@ -138,6 +139,18 @@ class ServerConfigStore(context: Context) {
         _config.value = _config.value.copy(recentSearches = emptyList())
     }
 
+    suspend fun getLastAuthenticatedUserId(): Long? = dataStore.data.first()[KEY_LAST_USER_ID]
+
+    suspend fun setLastAuthenticatedUserId(userId: Long?) {
+        dataStore.edit { prefs ->
+            if (userId == null) {
+                prefs.remove(KEY_LAST_USER_ID)
+            } else {
+                prefs[KEY_LAST_USER_ID] = userId
+            }
+        }
+    }
+
     suspend fun updateBranding(
         hotelName: String?,
         currency: String?,
@@ -190,5 +203,6 @@ class ServerConfigStore(context: Context) {
         private val KEY_RECENT_SEARCHES = stringPreferencesKey("recent_searches")
         private val KEY_BIOMETRIC_LOCK = booleanPreferencesKey("biometric_lock_enabled")
         private val KEY_OS_NOTIFICATIONS = booleanPreferencesKey("os_notifications_enabled")
+        private val KEY_LAST_USER_ID = longPreferencesKey("last_authenticated_user_id")
     }
 }

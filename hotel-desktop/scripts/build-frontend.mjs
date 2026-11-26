@@ -24,8 +24,13 @@ const requiredOutputs = [
   // landing page redirects to it, so a build missing it ships a dead home page.
   join(frontendRoot, 'dist', 'salim-inn', 'index.html'),
 ];
-const bunExecPath = process.env.npm_execpath && /bun(?:\.exe)?$/i.test(process.env.npm_execpath)
-  ? process.env.npm_execpath
+const rawExecPath = process.env.npm_execpath;
+if (rawExecPath && /["&|<>^%]/.test(rawExecPath)) {
+  console.error('Refusing unsafe npm_execpath value.');
+  process.exit(1);
+}
+const bunExecPath = rawExecPath && /bun(?:\.exe)?$/i.test(rawExecPath)
+  ? rawExecPath
   : 'bun';
 const buildCommand = [bunExecPath, 'run', 'build:tauri'];
 
@@ -60,9 +65,11 @@ if (!force && previous?.digest === cacheKey.digest && requiredOutputs.every((pat
 }
 
 const startedAt = Date.now();
-const useShell = process.platform === 'win32';
-// cmd.exe does not quote spawn arguments; an npm_execpath under a directory
-// with a space (e.g. C:\Users\SALIM INN\...) breaks without explicit quotes.
+const isDirectExe = process.platform === 'win32' && /\.exe$/i.test(buildCommand[0]);
+const useShell = process.platform === 'win32' && !isDirectExe;
+// cmd.exe does not quote spawn arguments; when falling back to bare `bun` via
+// PATH on Windows we use shell: true, whereas an explicit `.exe` path launches
+// directly with shell: false so cmd.exe never interprets metacharacters.
 const shellSafeCommand = useShell && buildCommand[0].includes(' ')
   ? `"${buildCommand[0]}"`
   : buildCommand[0];

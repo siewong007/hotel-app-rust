@@ -10,6 +10,9 @@ import { storage } from '../utils/storage';
 import { replaceDocumentLocation } from '../utils/documentLocation';
 import { disableGoogleAutoSelect } from '../features/auth/components/GoogleSignInButton';
 import { setAccessToken, clearAccessToken } from './tokenStore';
+import { clearPortalToken } from '../features/guest-portal/api/portalTokenStore';
+import { clearBookingAccessToken } from '../features/guest-portal/api/bookingAccessTokenStore';
+import { clearCheckoutResume } from '../features/guest-portal/booking/checkoutResume';
 import type { RouteAccessPolicy, UserProfile } from '../types';
 import { normalizeAuthUser, type AuthUserShape } from './authUser';
 import { holdsPermission, normalizeAccessValue } from '../navigation/routeAccess';
@@ -276,11 +279,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const clearStoredAuth = useCallback(() => {
     clearAccessToken();
+    clearPortalToken();
+    clearBookingAccessToken();
+    clearCheckoutResume();
     storage.removeItem('user');
     storage.removeItem('roles');
     storage.removeItem('permissions');
     storage.removeItem('routePolicies');
     storage.removeItem('cmdRecents');
+    storage.removeItem('ekycAdminFilters');
+    storage.removeItem('helpRecentSearches');
   }, []);
 
   const resetAuthState = useCallback(() => {
@@ -436,6 +444,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Command-palette results can contain internal record details and must
     // never carry over from the previously signed-in account.
     storage.removeItem('cmdRecents');
+    storage.removeItem('ekycAdminFilters');
+    storage.removeItem('helpRecentSearches');
     storage.setItems({
       user,
       roles,

@@ -1,5 +1,6 @@
 import type { Guest } from '../../types';
 import { t as i18nT } from '../../i18n/translate';
+import { csvCell } from '../../utils/csv';
 import { AVATAR_PALETTE } from '../guests/constants';
 
 /** First letters of the first two name parts — the monolith's avatar rule. */
@@ -36,11 +37,6 @@ export const guestDisplayName = (
   const first = guest.first_name?.trim();
   const last = guest.last_name?.trim();
   return first && last ? `${first} ${last}` : guest.nick_name.trim();
-};
-
-const csvCell = (value: unknown) => {
-  const text = value == null ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
 };
 
 /**

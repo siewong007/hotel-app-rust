@@ -53,10 +53,11 @@ fn guest_vars(guest: &AudienceGuest) -> HashMap<String, String> {
 }
 
 pub(crate) fn unsubscribe_footer_html(guest_id: i64, locale: Locale) -> String {
+    let base_url = html_escape(&public_base_url());
     match tokens::sign_unsubscribe_token(guest_id) {
         Ok(token) => format!(
             "<p style=\"font-size:12px;color:#888\"><a href=\"{}/unsubscribe/{}\">{}</a></p>",
-            public_base_url(),
+            base_url,
             token,
             html_escape(locale.message("email.chrome.unsubscribe"))
         ),
@@ -512,7 +513,9 @@ async fn issue_birthday_voucher(
         .map(str::to_string)
         .unwrap_or_else(|| locale.message("email.birthday.fallbackGift").to_string());
     let expiry_text = locale.format_date(expires_at.date_naive());
-    let subject = locale.format("email.birthday.subject", &[("hotel", hotel_name)]);
+    let subject = crate::utils::sanitization::Sanitizer::sanitize_header_line(
+        &locale.format("email.birthday.subject", &[("hotel", hotel_name)]),
+    );
     let portal = email_layout::absolute_url("/portal");
     let details = email_layout::details_table(&[
         (locale.message("email.birthday.giftLabel"), &gift),

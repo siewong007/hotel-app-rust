@@ -284,6 +284,7 @@ pub async fn guest_support_socket_handler(
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
     let token = websocket_token(&headers)
         .ok_or_else(|| ApiError::Unauthorized("Missing guest session token".to_string()))?;
     let guest_id = guest_portal::require_guest_session_token(token, &pool).await?;
@@ -297,9 +298,10 @@ pub async fn guest_support_socket_handler(
             retry_after,
         ));
     }
+    let session_token = token.to_string();
     Ok(websocket
         .protocols(["hotel-guest-support"])
-        .on_upgrade(move |socket| serve_socket(socket, hub, guest_id)))
+        .on_upgrade(move |socket| serve_socket(socket, hub, pool, guest_id, session_token)))
 }
 
 #[cfg(test)]

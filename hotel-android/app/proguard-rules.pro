@@ -18,6 +18,9 @@
 -keep,includedescriptorclasses class com.hotelapp.staff.core.sync.**$$serializer { *; }
 -keepclassmembers class com.hotelapp.staff.core.sync.** { *** Companion; }
 -keepclasseswithmembers class com.hotelapp.staff.core.sync.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class com.hotelapp.staff.core.network.**$$serializer { *; }
+-keepclassmembers class com.hotelapp.staff.core.network.** { *; }
+-keepclasseswithmembers class com.hotelapp.staff.core.network.** { kotlinx.serialization.KSerializer serializer(...); }
 -keep,includedescriptorclasses class com.hotelapp.staff.widget.**$$serializer { *; }
 -keepclassmembers class com.hotelapp.staff.widget.** { *** Companion; }
 -keepclasseswithmembers class com.hotelapp.staff.widget.** { kotlinx.serialization.KSerializer serializer(...); }

@@ -119,8 +119,8 @@ describe('the weather chip', () => {
     const source = root.querySelector('.wx__source')!;
     expect(source.textContent).toBe('Weather data from MET Norway (CC BY 4.0), summarised · Forecast for 12:00–13:00');
     expect([...source.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href'), a.rel])).toEqual([
-      ['MET Norway', 'https://api.met.no/', 'noopener'],
-      ['CC BY 4.0', 'https://creativecommons.org/licenses/by/4.0/', 'noopener'],
+      ['MET Norway', 'https://api.met.no/', 'noopener noreferrer'],
+      ['CC BY 4.0', 'https://creativecommons.org/licenses/by/4.0/', 'noopener noreferrer'],
     ]);
     publish(null);
     expect(root.querySelector('.wx__now')!.textContent).toBe('The weather in Sibu isn’t available just now.');

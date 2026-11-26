@@ -105,6 +105,21 @@ describe('buildGuestsCsv', () => {
     expect(cells[12]).toBe('"0"'); // Bookings
     expect(cells[13]).toBe('""'); // Last Stay
   });
+
+  it('neutralizes CSV formula prefixes in exported guest cells', () => {
+    const csv = buildGuestsCsv([
+      buildGuest({
+        id: 5,
+        nick_name: '=CMD|"/C calc"!A0',
+        email: '+evil@example.com',
+        company_name: '  @SUM(1,2)',
+      }),
+    ]);
+    const row = csv.split('\n')[1];
+    expect(row).toContain(`"'=CMD|""/C calc""!A0"`);
+    expect(row).toContain(`"'+evil@example.com"`);
+    expect(row).toContain(`"'  @SUM(1,2)"`);
+  });
 });
 
 describe('duplicateGuestReference', () => {

@@ -63,7 +63,14 @@ impl UserRepository {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(|value| format!("%{}%", value.to_lowercase()));
+            .map(|value| {
+                format!(
+                    "%{}%",
+                    crate::utils::sanitization::Sanitizer::escape_like_pattern(
+                        &value.to_lowercase()
+                    )
+                )
+            });
         let status = query
             .status
             .as_deref()
@@ -99,9 +106,9 @@ impl UserRepository {
             "SELECT u.id FROM users u \
              WHERE u.deleted_at IS NULL AND u.user_type = 'staff' \
                AND ($1::text IS NULL OR ( \
-                    lower(u.username) LIKE $1 OR lower(u.email) LIKE $1 \
-                    OR lower(COALESCE(u.full_name, '')) LIKE $1 \
-                    OR lower(COALESCE(u.phone, '')) LIKE $1)) \
+                    lower(u.username) LIKE $1 ESCAPE '\\' OR lower(u.email) LIKE $1 ESCAPE '\\' \
+                    OR lower(COALESCE(u.full_name, '')) LIKE $1 ESCAPE '\\' \
+                    OR lower(COALESCE(u.phone, '')) LIKE $1 ESCAPE '\\')) \
                AND ($2::text IS NULL OR ( \
                     ($2 = 'active' AND u.is_active AND NOT u.is_locked) OR \
                     ($2 = 'suspended' AND NOT u.is_active) OR \
@@ -117,9 +124,9 @@ impl UserRepository {
             "SELECT COUNT(*) FROM users u \
              WHERE u.deleted_at IS NULL AND u.user_type = 'staff' \
                AND ($1::text IS NULL OR ( \
-                    lower(u.username) LIKE $1 OR lower(u.email) LIKE $1 \
-                    OR lower(COALESCE(u.full_name, '')) LIKE $1 \
-                    OR lower(COALESCE(u.phone, '')) LIKE $1)) \
+                    lower(u.username) LIKE $1 ESCAPE '\\' OR lower(u.email) LIKE $1 ESCAPE '\\' \
+                    OR lower(COALESCE(u.full_name, '')) LIKE $1 ESCAPE '\\' \
+                    OR lower(COALESCE(u.phone, '')) LIKE $1 ESCAPE '\\')) \
                AND ($2::text IS NULL OR ( \
                     ($2 = 'active' AND u.is_active AND NOT u.is_locked) OR \
                     ($2 = 'suspended' AND NOT u.is_active) OR \

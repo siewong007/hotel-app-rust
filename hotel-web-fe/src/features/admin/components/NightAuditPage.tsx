@@ -62,19 +62,10 @@ import {
 } from '../hooks/useNightAuditQueries';
 
 /** An audit's business day as the run endpoint takes it (`YYYY-MM-DD`). */
+import { csvCell } from '../../../utils/csv';
+export { csvCell };
+
 const auditDay = (date: string) => date.split('T')[0];
-
-const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
-
-/**
- * Neutralizes spreadsheet formula triggers (`=`, `+`, `-`, `@`, `\t`, `\r`)
- * and wraps every CSV cell in RFC 4180 quotes.
- */
-export function csvCell(value: unknown): string {
-  const raw = value === null || value === undefined ? '' : String(value);
-  const safe = FORMULA_PREFIX_RE.test(raw) ? `'${raw}` : raw;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
 
 const NightAuditPage: React.FC = () => {
   const { t } = useTranslation('nightAudit');

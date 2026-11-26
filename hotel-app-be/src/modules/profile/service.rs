@@ -46,7 +46,7 @@ pub async fn update_user_profile(
         input.phone = Some(Sanitizer::sanitize_phone(phone));
     }
     if let Some(avatar_url) = &input.avatar_url {
-        input.avatar_url = Sanitizer::sanitize_url(avatar_url);
+        input.avatar_url = Sanitizer::sanitize_http_url(avatar_url);
     }
 
     input
@@ -91,7 +91,27 @@ pub async fn update_user_profile(
             // the guest out of the account they just completed.
             crate::services::account_emails::try_send_email_verification(pool, user_id).await;
         } else if email_changed {
+            if UserRepository::email_exists_for_other_user(pool, user_id, &email).await? {
+                return Err(ApiError::Conflict(
+                    "An account with this email already exists".to_string(),
+                ));
+            }
             UserRepository::update_email(pool, user_id, &email).await?;
+            let _ = AuditLog::log_event(
+                pool,
+                AuditEvent {
+                    user_id: Some(user_id),
+                    action: "profile_email_updated",
+                    resource_type: "user",
+                    resource_id: Some(user_id),
+                    details: Some(serde_json::json!({
+                        "old_email": account.email,
+                        "new_email": email,
+                    })),
+                    ..Default::default()
+                },
+            )
+            .await;
         }
     }
     if let Some(phone) = input.phone {

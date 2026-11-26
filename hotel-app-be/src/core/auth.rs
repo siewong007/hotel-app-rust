@@ -71,15 +71,11 @@ fn is_desktop_mode() -> bool {
         .unwrap_or_else(|| std::env::var_os("HOTEL_DESKTOP_MODE").is_some())
 }
 
-fn access_token_expiration(now: chrono::DateTime<Utc>, desktop_mode: bool) -> Option<usize> {
-    if desktop_mode {
-        None
-    } else {
-        Some((now + Duration::minutes(ACCESS_TOKEN_TTL_MINUTES)).timestamp() as usize)
-    }
+fn access_token_expiration(now: chrono::DateTime<Utc>, _desktop_mode: bool) -> Option<usize> {
+    Some((now + Duration::minutes(ACCESS_TOKEN_TTL_MINUTES)).timestamp() as usize)
 }
 
-fn jwt_validation(desktop_mode: bool) -> Validation {
+fn jwt_validation(_desktop_mode: bool) -> Validation {
     let mut validation = Validation::default();
     let config = config::try_get();
     let issuer = config
@@ -90,10 +86,6 @@ fn jwt_validation(desktop_mode: bool) -> Validation {
         .unwrap_or("hotel-web");
     validation.set_issuer(&[issuer]);
     validation.set_audience(&[audience]);
-    if desktop_mode {
-        validation.validate_exp = false;
-        validation.required_spec_claims.remove("exp");
-    }
     validation
 }
 
@@ -838,27 +830,9 @@ impl AuthService {
             .with_secret(secret)
             .build()?;
 
-        // Allow for clock skew - check previous, current, and next time windows
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
-
-        // Check current window
-        if totp.check_current(code).is_some() {
-            return Ok(true);
-        }
-
-        // Check previous window (30 seconds ago)
-        if totp.check(code, current_time - 30).is_some() {
-            return Ok(true);
-        }
-
-        // Check next window (30 seconds ahead)
-        if totp.check(code, current_time + 30).is_some() {
-            return Ok(true);
-        }
-
-        Ok(false)
+        // `with_skew(1)` already checks the previous, current, and next
+        // 30-second windows (3 windows total = 90s tolerance).
+        Ok(totp.check_current(code).is_some())
     }
 
     /// Check if a recovery code matches any of the user's backup codes
@@ -1127,21 +1101,20 @@ mod tests {
     }
 
     #[test]
-    fn access_tokens_expire_only_outside_desktop_mode() {
+    fn access_tokens_expire_even_in_desktop_mode() {
         let now = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let expected =
+            Some((now + chrono::Duration::minutes(ACCESS_TOKEN_TTL_MINUTES)).timestamp() as usize);
 
-        assert_eq!(access_token_expiration(now, true), None);
-        assert_eq!(
-            access_token_expiration(now, false),
-            Some((now + chrono::Duration::minutes(ACCESS_TOKEN_TTL_MINUTES)).timestamp() as usize)
-        );
+        assert_eq!(access_token_expiration(now, true), expected);
+        assert_eq!(access_token_expiration(now, false), expected);
     }
 
     #[test]
-    fn jwt_validation_does_not_require_exp_in_desktop_mode() {
+    fn jwt_validation_requires_exp_even_in_desktop_mode() {
         let desktop_validation = jwt_validation(true);
-        assert!(!desktop_validation.validate_exp);
-        assert!(!desktop_validation.required_spec_claims.contains("exp"));
+        assert!(desktop_validation.validate_exp);
+        assert!(desktop_validation.required_spec_claims.contains("exp"));
 
         let server_validation = jwt_validation(false);
         assert!(server_validation.validate_exp);

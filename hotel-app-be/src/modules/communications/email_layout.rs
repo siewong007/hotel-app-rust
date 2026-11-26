@@ -179,6 +179,7 @@ pub fn render(email: GuestEmail<'_>) -> RenderedEmail {
         ),
         None => String::new(),
     };
+    let site_html = html_escape(&site);
     let html = format!(
         "<!DOCTYPE html>\
 <html lang=\"{lang}\">\
@@ -210,7 +211,7 @@ pub fn render(email: GuestEmail<'_>) -> RenderedEmail {
             <td style=\"padding:16px 28px 24px;background:#f4f7f4;font-family:Arial,Helvetica,sans-serif;\
                         font-size:12px;line-height:1.5;color:#5b7268;\">\
               {sent_by}\
-              <br><a href=\"{site}\" style=\"color:#0E8C6A;text-decoration:none;\">{site}</a>\
+              <br><a href=\"{site_html}\" style=\"color:#0E8C6A;text-decoration:none;\">{site_html}</a>\
             </td>\
           </tr>\
         </table>\

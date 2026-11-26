@@ -41,14 +41,24 @@ impl SegmentRepository {
         page_size: i64,
         offset: i64,
     ) -> Result<(Vec<GuestSegment>, i64), ApiError> {
+        let search_pattern = search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                format!(
+                    "%{}%",
+                    crate::utils::sanitization::Sanitizer::escape_like_pattern(s)
+                )
+            });
         let total: i64 = query_scalar(
             r#"
                 SELECT COUNT(*) FROM guest_segments
-                WHERE ($1::text IS NULL OR name ILIKE '%' || $1 || '%' OR slug ILIKE '%' || $1 || '%')
+                WHERE ($1::text IS NULL OR name ILIKE $1 ESCAPE '\' OR slug ILIKE $1 ESCAPE '\')
                   AND ($2::boolean IS NULL OR is_active = $2)
             "#,
         )
-        .bind(&search)
+        .bind(&search_pattern)
         .bind(is_active)
         .fetch_one(pool)
         .await
@@ -59,13 +69,13 @@ impl SegmentRepository {
                 SELECT id, name, slug, description, rules, is_active, created_by, updated_by,
                        created_at, updated_at
                 FROM guest_segments
-                WHERE ($1::text IS NULL OR name ILIKE '%' || $1 || '%' OR slug ILIKE '%' || $1 || '%')
+                WHERE ($1::text IS NULL OR name ILIKE $1 ESCAPE '\' OR slug ILIKE $1 ESCAPE '\')
                   AND ($2::boolean IS NULL OR is_active = $2)
                 ORDER BY name, id
                 LIMIT $3 OFFSET $4
             "#,
         )
-        .bind(&search)
+        .bind(&search_pattern)
         .bind(is_active)
         .bind(page_size)
         .bind(offset)

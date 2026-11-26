@@ -1,11 +1,12 @@
 import React from 'react';
-import { Badge, Box, Button, Typography } from '@mui/material';
+import { Badge, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
 import { keyframes } from '@mui/system';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import { PaymentApprovalsService, PendingPaymentEntry } from '../../../api';
 import { useAuth } from '../../../auth/AuthContext';
 import { useIsPhone } from '../../../hooks/useIsPhone';
 import { useTranslation } from '../../../i18n';
+import { receiptAsPdf } from '../utils/paymentReceiptPdf';
 import {
   useApprovePayment,
   useRejectPayment,
@@ -59,12 +60,18 @@ export const UrgentTransferAlert: React.FC = () => {
   const [rejectTarget, setRejectTarget] = React.useState<PendingPaymentEntry | null>(null);
   const [reason, setReason] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  const [receiptPreview, setReceiptPreview] = React.useState<{ url: string; ref: string } | null>(null);
+  const receiptUrlRef = React.useRef<string | null>(null);
   const [now, setNow] = React.useState(() => Date.now());
   const seenIds = React.useRef<Set<number> | null>(null);
 
   React.useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  React.useEffect(() => () => {
+    if (receiptUrlRef.current) URL.revokeObjectURL(receiptUrlRef.current);
   }, []);
 
   // Pop the modal on first load with claims, and again whenever a claim
@@ -83,17 +90,24 @@ export const UrgentTransferAlert: React.FC = () => {
 
   const refLabel = (entry: PendingPaymentEntry) => entry.booking_number ?? `#${entry.booking_id}`;
 
+  const closeReceiptPreview = () => {
+    if (receiptUrlRef.current) {
+      URL.revokeObjectURL(receiptUrlRef.current);
+      receiptUrlRef.current = null;
+    }
+    setReceiptPreview(null);
+  };
+
   const openReceipt = async (entry: PendingPaymentEntry) => {
     setError(null);
-    const popup = window.open('', '_blank', 'noopener,noreferrer');
     try {
-      const blob = await PaymentApprovalsService.downloadReceipt(entry.id);
-      const url = URL.createObjectURL(blob);
-      if (popup) popup.location.href = url;
-      else window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const rawBlob = await PaymentApprovalsService.downloadReceipt(entry.id);
+      const pdfBlob = await receiptAsPdf(rawBlob);
+      const url = URL.createObjectURL(pdfBlob);
+      if (receiptUrlRef.current) URL.revokeObjectURL(receiptUrlRef.current);
+      receiptUrlRef.current = url;
+      setReceiptPreview({ url, ref: refLabel(entry) });
     } catch (caught) {
-      popup?.close();
       setError(caught instanceof Error ? caught.message : t('paymentApprovals.errors.openReceipt'));
     }
   };
@@ -197,6 +211,25 @@ export const UrgentTransferAlert: React.FC = () => {
         onReasonChange={setReason}
         onConfirmReject={() => { void confirmReject(); }}
       />
+
+      <Dialog open={Boolean(receiptPreview)} onClose={closeReceiptPreview} maxWidth="md" fullWidth>
+        <DialogTitle>{t('paymentApprovals.receiptPreview.title', { ref: receiptPreview?.ref ?? '' })}</DialogTitle>
+        <DialogContent dividers sx={{ p: 0, height: '75vh' }}>
+          {receiptPreview ? (
+            <Box
+              component="iframe"
+              sandbox="allow-same-origin"
+              referrerPolicy="no-referrer"
+              title={t('paymentApprovals.receiptPreview.iframeTitle', { ref: receiptPreview.ref })}
+              src={receiptPreview.url}
+              sx={{ border: 0, display: 'block', width: '100%', height: '100%' }}
+            />
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeReceiptPreview}>{t('common:actions.close')}</Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 };

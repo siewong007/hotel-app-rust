@@ -434,8 +434,15 @@ async fn main() {
     let preferred_port: u16 = config.backend_port;
 
     let (bind_address, port) = if desktop_mode {
-        // In desktop mode, bind to localhost only and find available port
-        let port = find_available_port(preferred_port);
+        // When launched by the desktop shell with DESKTOP_INSTANCE_NONCE, bind
+        // strictly to the port the desktop parent verified — drifting to
+        // another port breaks nonce-checked readiness and lets another local
+        // listener masquerade on the original port.
+        let port = if std::env::var_os("DESKTOP_INSTANCE_NONCE").is_some() {
+            preferred_port
+        } else {
+            find_available_port(preferred_port)
+        };
         ("127.0.0.1", port)
     } else {
         // In server mode, bind to all interfaces

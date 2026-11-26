@@ -152,6 +152,75 @@ pub async fn require_any_permission_helper(
 ///
 /// Callers already hold the actor id from `require_permission_helper`, so a
 /// separate headers-taking wrapper would only re-parse the token.
+pub async fn is_guest_only_user(pool: &DbPool, user_id: i64) -> Result<bool, ApiError> {
+    if is_super_admin_account(pool, user_id).await? {
+        return Ok(false);
+    }
+    let has_guest_role = AuthService::check_role(pool, user_id, "guest")
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let is_guest_user_type = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL AND user_type::text = 'guest')",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    if !has_guest_role && !is_guest_user_type {
+        return Ok(false);
+    }
+    let has_non_guest_role = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 AND r.name <> 'guest')",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    Ok(!has_non_guest_role)
+}
+
+pub async fn reject_guest_only(pool: &DbPool, user_id: i64) -> Result<(), ApiError> {
+    if is_guest_only_user(pool, user_id).await? {
+        crate::core::metrics::incr(&crate::core::metrics::PERMISSION_DENIED);
+        return Err(ApiError::Forbidden("Staff access required".to_string()));
+    }
+    Ok(())
+}
+
+/// Validates a browser `Origin` header (when present) against `ALLOWED_ORIGINS`
+/// for cookie-authenticated endpoints and WebSocket upgrades. Requests without
+/// an `Origin` header (native mobile apps, CLI clients, in-process tests) pass.
+pub fn validate_request_origin(headers: &HeaderMap) -> Result<(), ApiError> {
+    let Some(origin_header) = headers.get(axum::http::header::ORIGIN) else {
+        return Ok(());
+    };
+    let Some(cfg) = crate::core::config::try_get() else {
+        return Ok(());
+    };
+    match &cfg.allowed_origins {
+        crate::core::config::AllowedOrigins::Any => Ok(()),
+        crate::core::config::AllowedOrigins::List(origins) => {
+            let Ok(origin) = origin_header.to_str() else {
+                return Err(ApiError::Forbidden(
+                    "Cross-origin request denied".to_string(),
+                ));
+            };
+            let trimmed = origin.trim();
+            if origins.iter().any(|allowed| {
+                allowed
+                    .to_str()
+                    .is_ok_and(|a| a.eq_ignore_ascii_case(trimmed))
+            }) {
+                Ok(())
+            } else {
+                Err(ApiError::Forbidden(
+                    "Cross-origin request denied".to_string(),
+                ))
+            }
+        }
+    }
+}
+
 pub async fn ensure_super_admin(pool: &DbPool, user_id: i64) -> Result<(), ApiError> {
     if is_super_admin(pool, user_id).await? {
         Ok(())

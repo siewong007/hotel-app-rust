@@ -150,10 +150,18 @@ async fn loyalty_socket(
 async fn guest_loyalty_socket(
     State(pool): State<DbPool>,
     Extension(hub): Extension<crate::modules::loyalty::hub::LoyaltyHub>,
+    limiters: Option<Extension<crate::core::rate_limiter::RateLimiters>>,
     headers: HeaderMap,
     websocket: axum::extract::WebSocketUpgrade,
 ) -> Result<axum::response::Response, ApiError> {
-    handlers::guest_loyalty_socket_handler(State(pool), Extension(hub), headers, websocket).await
+    handlers::guest_loyalty_socket_handler(
+        State(pool),
+        Extension(hub),
+        limiters,
+        headers,
+        websocket,
+    )
+    .await
 }
 
 async fn rules(

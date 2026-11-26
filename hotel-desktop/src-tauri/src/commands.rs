@@ -3,6 +3,8 @@
 //! These commands can be invoked from the frontend via `invoke()`
 
 use rand::RngExt;
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -10,9 +12,12 @@ use std::sync::{Arc, LazyLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::get_data_directory;
+
+const DESKTOP_INSTANCE_HEADER: &str = "x-desktop-instance";
+const MAX_LOG_LINES: usize = 2000;
 
 /// Global state for the backend process
 static BACKEND_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -23,6 +28,8 @@ static BACKEND_GENERATION: AtomicU64 = AtomicU64::new(0);
 type ManagedBackendProcess = Arc<Mutex<Option<(u64, CommandChild)>>>;
 static BACKEND_PROCESS: LazyLock<ManagedBackendProcess> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+static DESKTOP_INSTANCE_NONCE: LazyLock<RwLock<Option<String>>> =
+    LazyLock::new(|| RwLock::new(None));
 
 const PROD_ALLOWED_ORIGINS: &str = "tauri://localhost,http://tauri.localhost";
 #[allow(dead_code)]
@@ -119,6 +126,102 @@ fn generate_desktop_jwt_secret() -> String {
     hex::encode(secret)
 }
 
+fn generate_desktop_instance_nonce() -> String {
+    let nonce: [u8; 32] = rand::rng().random();
+    hex::encode(nonce)
+}
+
+fn build_local_backend_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("Failed to construct local HTTP client: {}", e))
+}
+
+#[derive(serde::Deserialize)]
+struct DesktopAccessSnapshot {
+    roles: Vec<String>,
+    permissions: Vec<String>,
+}
+
+fn snapshot_has_any_permission(snapshot: &DesktopAccessSnapshot, required_any: &[&str]) -> bool {
+    if snapshot
+        .roles
+        .iter()
+        .any(|role| matches!(role.as_str(), "super_admin" | "admin"))
+    {
+        return true;
+    }
+
+    required_any.iter().any(|required| {
+        if snapshot.permissions.iter().any(|perm| perm == required) {
+            return true;
+        }
+        if let Some((resource, _action)) = required.split_once(':') {
+            let manage_perm = format!("{}:manage", resource);
+            snapshot.permissions.iter().any(|perm| perm == &manage_perm)
+        } else {
+            false
+        }
+    })
+}
+
+async fn require_desktop_permission(
+    access_token: Option<&str>,
+    required_any: &[&str],
+) -> Result<(), String> {
+    if !BACKEND_RUNNING.load(Ordering::SeqCst) {
+        return Err("Backend service is not running".to_string());
+    }
+
+    let token = access_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Authentication required for desktop operation".to_string())?;
+
+    let expected_nonce = DESKTOP_INSTANCE_NONCE
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "Desktop instance nonce is unavailable".to_string())?;
+
+    let client = build_local_backend_client()?;
+    let url = format!("{}/api/auth/access", get_backend_url());
+    let response = client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| "Failed to verify desktop caller session".to_string())?;
+
+    let header_nonce = response
+        .headers()
+        .get(DESKTOP_INSTANCE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+
+    if header_nonce != expected_nonce {
+        return Err("Unexpected backend instance responded to authorization check".to_string());
+    }
+
+    if !response.status().is_success() {
+        return Err("Unauthorized desktop operation".to_string());
+    }
+
+    let snapshot: DesktopAccessSnapshot = response
+        .json()
+        .await
+        .map_err(|_| "Invalid authorization response from backend".to_string())?;
+
+    if !snapshot_has_any_permission(&snapshot, required_any) {
+        return Err("Insufficient permissions for desktop operation".to_string());
+    }
+
+    Ok(())
+}
+
 /// Start the backend sidecar process
 pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String> {
     if BACKEND_RUNNING.load(Ordering::SeqCst) {
@@ -143,7 +246,15 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
         .unwrap_or(3030);
     let backend_port = find_available_backend_port(preferred_port);
     BACKEND_PORT.store(backend_port, Ordering::SeqCst);
+    #[cfg(not(debug_assertions))]
+    let jwt_secret = generate_desktop_jwt_secret();
+    #[cfg(debug_assertions)]
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| generate_desktop_jwt_secret());
+
+    let totp_encryption_key =
+        crate::postgres::read_or_create_totp_encryption_key().map_err(|e| e.to_string())?;
+    let instance_nonce = generate_desktop_instance_nonce();
+    *DESKTOP_INSTANCE_NONCE.write().await = Some(instance_nonce.clone());
 
     let shell = app_handle.shell();
     let sidecar_command = shell
@@ -157,6 +268,8 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
         .env("DATABASE_URL", &database_url)
         .env("BACKEND_PORT", backend_port.to_string())
         .env("JWT_SECRET", jwt_secret)
+        .env("TOTP_ENCRYPTION_KEY", totp_encryption_key)
+        .env("DESKTOP_INSTANCE_NONCE", &instance_nonce)
         .env("HOTEL_DESKTOP_MODE", "1")
         // KEEP IN SYNC: dev proxy prefixes in hotel-web-fe/vite.config.ts;
         // router merge in hotel-app-be/src/routes/mod.rs; dev http origins in
@@ -239,8 +352,11 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
     });
 
     // Wait for backend to be ready; short-circuit immediately if this generation exits or is replaced.
-    if let Err(e) = wait_for_backend_ready(backend_port, generation, &mut exit_rx).await {
+    if let Err(e) =
+        wait_for_backend_ready(backend_port, generation, &instance_nonce, &mut exit_rx).await
+    {
         if BACKEND_GENERATION.load(Ordering::SeqCst) == generation {
+            *DESKTOP_INSTANCE_NONCE.write().await = None;
             BACKEND_RUNNING.store(false, Ordering::SeqCst);
             let mut process = BACKEND_PROCESS.lock().await;
             if matches!(process.as_ref(), Some((proc_gen, _)) if *proc_gen == generation)
@@ -323,9 +439,10 @@ async fn restart_backend_with_backoff(app_handle: AppHandle) {
 async fn wait_for_backend_ready(
     port: u16,
     generation: u64,
+    expected_nonce: &str,
     exit_rx: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = build_local_backend_client()?;
     let health_url = format!("http://127.0.0.1:{}/health", port);
 
     for i in 0..30 {
@@ -337,7 +454,14 @@ async fn wait_for_backend_ready(
         }
 
         match client.get(&health_url).send().await {
-            Ok(response) if response.status().is_success() => {
+            Ok(response)
+                if response.status().is_success()
+                    && response
+                        .headers()
+                        .get(DESKTOP_INSTANCE_HEADER)
+                        .and_then(|value| value.to_str().ok())
+                        == Some(expected_nonce) =>
+            {
                 log::info!("Backend is ready after {} seconds", i);
                 return Ok(());
             }
@@ -371,6 +495,7 @@ pub async fn stop_backend_sidecar() -> Result<(), String> {
             .map_err(|e| format!("Failed to kill backend process: {}", e))?;
         log::info!("Backend sidecar stopped");
     }
+    *DESKTOP_INSTANCE_NONCE.write().await = None;
     BACKEND_RUNNING.store(false, Ordering::SeqCst);
     BACKEND_STARTING.store(false, Ordering::SeqCst);
 
@@ -379,7 +504,13 @@ pub async fn stop_backend_sidecar() -> Result<(), String> {
 
 /// Restart the backend process
 #[tauri::command]
-pub async fn restart_backend(app_handle: AppHandle) -> Result<(), String> {
+pub async fn restart_backend(
+    app_handle: AppHandle,
+    access_token: Option<String>,
+) -> Result<(), String> {
+    if BACKEND_RUNNING.load(Ordering::SeqCst) {
+        require_desktop_permission(access_token.as_deref(), &["settings:manage"]).await?;
+    }
     log::info!("Restarting backend...");
 
     // Stop the current backend
@@ -398,10 +529,21 @@ pub async fn restart_backend(app_handle: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn backup_database(
     app_handle: AppHandle,
-    destination: Option<String>,
+    _destination: Option<String>,
+    access_token: Option<String>,
 ) -> Result<String, String> {
+    require_desktop_permission(
+        access_token.as_deref(),
+        &[
+            "data_transfer:import",
+            "data_transfer:export",
+            "data_transfer:manage",
+            "settings:manage",
+        ],
+    )
+    .await?;
     log::info!("Database backup requested");
-    crate::postgres::backup_database(&app_handle, destination)
+    crate::postgres::backup_database(&app_handle, None)
         .await
         .map(|path| path.to_string_lossy().to_string())
         .map_err(|err| err.to_string())
@@ -416,7 +558,16 @@ pub async fn backup_database(
 #[tauri::command]
 pub async fn upgrade_database_from_backup(
     app_handle: AppHandle,
+    access_token: Option<String>,
 ) -> Result<crate::postgres::UpgradeSummary, String> {
+    let status = crate::postgres::get_postgres_status(&app_handle).await;
+    let needs_upgrade = status
+        .get("needs_upgrade")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if !needs_upgrade {
+        require_desktop_permission(access_token.as_deref(), &["settings:manage"]).await?;
+    }
     log::info!("Guided database upgrade from backup requested");
     let summary = crate::postgres::upgrade_database_from_backup(&app_handle)
         .await
@@ -446,7 +597,18 @@ pub async fn upgrade_database_from_backup(
 pub async fn restore_database(
     app_handle: AppHandle,
     filename: String,
+    access_token: Option<String>,
 ) -> Result<crate::postgres::RestoreSummary, String> {
+    require_desktop_permission(
+        access_token.as_deref(),
+        &[
+            "data_transfer:import",
+            "data_transfer:restore",
+            "data_transfer:manage",
+            "settings:manage",
+        ],
+    )
+    .await?;
     log::info!("Database restore requested from {}", filename);
     // Resolve + verify BEFORE stopping the backend: an invalid filename or
     // unreadable dump must not bounce the app for nothing.
@@ -479,15 +641,38 @@ pub async fn restore_database(
 
 /// List managed database backups (newest first) for the backup/restore UI.
 #[tauri::command]
-pub async fn list_backups() -> Result<Vec<crate::postgres::BackupInfo>, String> {
+pub async fn list_backups(
+    access_token: Option<String>,
+) -> Result<Vec<crate::postgres::BackupInfo>, String> {
+    require_desktop_permission(
+        access_token.as_deref(),
+        &[
+            "data_transfer:import",
+            "data_transfer:restore",
+            "data_transfer:export",
+            "data_transfer:view",
+            "data_transfer:manage",
+            "settings:manage",
+        ],
+    )
+    .await?;
     Ok(crate::postgres::managed_backup_infos())
 }
 
 /// Get recent log entries
 #[tauri::command]
-pub async fn get_logs(lines: Option<usize>) -> Result<Vec<String>, String> {
+pub async fn get_logs(
+    lines: Option<usize>,
+    access_token: Option<String>,
+) -> Result<Vec<String>, String> {
+    require_desktop_permission(
+        access_token.as_deref(),
+        &["settings:manage", "audit:read", "data_transfer:manage"],
+    )
+    .await?;
+
     let log_dir = get_data_directory().join("logs");
-    let lines = lines.unwrap_or(100);
+    let lines = lines.unwrap_or(100).clamp(1, MAX_LOG_LINES);
 
     // Find the most recent log file
     let mut log_files: Vec<_> = std::fs::read_dir(&log_dir)
@@ -510,16 +695,18 @@ pub async fn get_logs(lines: Option<usize>) -> Result<Vec<String>, String> {
     });
 
     if let Some(latest_log) = log_files.first() {
-        let content = std::fs::read_to_string(latest_log.path()).map_err(|e| e.to_string())?;
+        let file = std::fs::File::open(latest_log.path()).map_err(|e| e.to_string())?;
+        let reader = BufReader::new(file);
+        let mut recent = VecDeque::with_capacity(lines);
+        for line in reader.lines() {
+            let line = line.map_err(|e| e.to_string())?;
+            if recent.len() == lines {
+                recent.pop_front();
+            }
+            recent.push_back(line);
+        }
 
-        let log_lines: Vec<String> = content
-            .lines()
-            .rev()
-            .take(lines)
-            .map(|s| s.to_string())
-            .collect();
-
-        Ok(log_lines.into_iter().rev().collect())
+        Ok(recent.into_iter().collect())
     } else {
         Ok(vec!["No log files found".to_string()])
     }
@@ -558,7 +745,18 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
 
 /// Open the data folder in the file explorer
 #[tauri::command]
-pub async fn open_data_folder() -> Result<(), String> {
+pub async fn open_data_folder(access_token: Option<String>) -> Result<(), String> {
+    if BACKEND_RUNNING.load(Ordering::SeqCst) {
+        require_desktop_permission(
+            access_token.as_deref(),
+            &[
+                "settings:manage",
+                "data_transfer:import",
+                "data_transfer:manage",
+            ],
+        )
+        .await?;
+    }
     open_in_file_manager(&get_data_directory())
 }
 
@@ -566,7 +764,18 @@ pub async fn open_data_folder() -> Result<(), String> {
 /// copy dumps off-app. Deliberately folder-only: arbitrary destination paths
 /// stay refused (see ensure_within_backups_dir).
 #[tauri::command]
-pub async fn open_backups_folder() -> Result<(), String> {
+pub async fn open_backups_folder(access_token: Option<String>) -> Result<(), String> {
+    require_desktop_permission(
+        access_token.as_deref(),
+        &[
+            "data_transfer:import",
+            "data_transfer:restore",
+            "data_transfer:export",
+            "data_transfer:manage",
+            "settings:manage",
+        ],
+    )
+    .await?;
     let dir = crate::postgres::backups_directory();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     open_in_file_manager(&dir)
@@ -751,5 +960,43 @@ mod tests {
             assert!(BackendStartingGuard::acquire().is_none());
         }
         assert!(!BACKEND_STARTING.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn snapshot_has_any_permission_checks_roles_and_manage_wildcard() {
+        let admin = DesktopAccessSnapshot {
+            roles: vec!["admin".to_string()],
+            permissions: vec![],
+        };
+        assert!(snapshot_has_any_permission(&admin, &["settings:manage"]));
+
+        let manager = DesktopAccessSnapshot {
+            roles: vec!["staff".to_string()],
+            permissions: vec!["data_transfer:manage".to_string()],
+        };
+        assert!(snapshot_has_any_permission(
+            &manager,
+            &["data_transfer:restore"]
+        ));
+        assert!(!snapshot_has_any_permission(&manager, &["settings:manage"]));
+
+        let guest = DesktopAccessSnapshot {
+            roles: vec!["guest".to_string()],
+            permissions: vec!["reviews:create".to_string()],
+        };
+        assert!(!snapshot_has_any_permission(
+            &guest,
+            &["data_transfer:import", "settings:manage"]
+        ));
+    }
+
+    #[test]
+    fn generated_desktop_secrets_have_full_hex_entropy() {
+        let jwt_secret = generate_desktop_jwt_secret();
+        let nonce_a = generate_desktop_instance_nonce();
+        let nonce_b = generate_desktop_instance_nonce();
+        assert_eq!(jwt_secret.len(), 128);
+        assert_eq!(nonce_a.len(), 64);
+        assert_ne!(nonce_a, nonce_b);
     }
 }

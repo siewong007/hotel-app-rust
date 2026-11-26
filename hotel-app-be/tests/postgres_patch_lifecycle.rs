@@ -1441,11 +1441,21 @@ async fn postgres_v1_catalog_guards_every_audit_partition() {
             .any(|(name, _)| name == "trigger audit_logs_default.trg_audit_logs_no_truncate"),
         "the baseline must guard its DEFAULT partition: {baseline:#?}"
     );
-    assert_runner_succeeded(&run_patches(&fresh, None).await);
+    let through_22 = TemporaryCatalog::truncated_at(22);
+    assert_runner_succeeded(&run_patches(&fresh, Some(&through_22.path)).await);
     assert_eq!(
         audit_guard_snapshot(&fresh_pool).await,
         baseline,
         "patch 0022 must be a no-op on a fresh install"
+    );
+    // Patch 0033 tightens prevent_audit_log_mutation() to bind
+    // app.allow_audit_mutation to the audit_logs owner role, so full catalog
+    // convergence reaches `catalog_head` rather than baseline.
+    assert_runner_succeeded(&run_patches(&fresh, None).await);
+    let catalog_head = audit_guard_snapshot(&fresh_pool).await;
+    assert_ne!(
+        catalog_head, baseline,
+        "patch 0033 must upgrade prevent_audit_log_mutation() beyond patch 0022's baseline"
     );
     let fresh_inventory = schema_inventory(&fresh).await;
 
@@ -1491,11 +1501,23 @@ async fn postgres_v1_catalog_guards_every_audit_partition() {
         );
         assert!(!audit_guard_revision_recorded(&pool).await);
 
-        assert_runner_succeeded(&run_patches(&database, None).await);
+        assert_runner_succeeded(&run_patches(&database, Some(&through_22.path)).await);
         assert_eq!(
             audit_guard_snapshot(&pool).await,
             baseline,
             "patch 0022 must converge onto the baseline guards ({label})"
+        );
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0022)))
+            .execute(&pool)
+            .await
+            .expect("re-running patch 0022's body at revision 22 must be a no-op");
+        assert_eq!(audit_guard_snapshot(&pool).await, baseline);
+
+        assert_runner_succeeded(&run_patches(&database, None).await);
+        assert_eq!(
+            audit_guard_snapshot(&pool).await,
+            catalog_head,
+            "full patch catalog must converge onto catalog_head ({label})"
         );
         assert_eq!(
             schema_inventory(&database).await,
@@ -1534,18 +1556,15 @@ async fn postgres_v1_catalog_guards_every_audit_partition() {
             );
         }
 
-        // Re-running is a no-op, through the runner and the patch body alike.
+        // Re-running the full catalog is a no-op.
         assert_runner_succeeded(&run_patches(&database, None).await);
         assert_eq!(revision_snapshot(&pool).await, revisions);
-        sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0022)))
-            .execute(&pool)
-            .await
-            .expect("re-running patch 0022's body must be a no-op");
-        assert_eq!(audit_guard_snapshot(&pool).await, baseline);
+        assert_eq!(audit_guard_snapshot(&pool).await, catalog_head);
 
         pool.close().await;
         drop(through_21);
     }
+    drop(through_22);
     fresh_pool.close().await;
     databases.cleanup().await;
 }
@@ -3041,6 +3060,69 @@ async fn postgres_v1_patch_0032_applies_and_skips_idempotently() {
             "IN ('confirmed', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')",
         ),
         "patch 0032 must upgrade sync_room_status_with_booking to cover complimentary holds"
+    );
+
+    pool.close().await;
+    databases.cleanup().await;
+}
+
+const PATCH_0033: &str =
+    include_str!("../database/postgres/patches/0033_security_audit_hardening.sql");
+
+#[tokio::test]
+async fn postgres_v1_patch_0033_applies_and_skips_idempotently() {
+    let Some(database_url) = database_url_or_skip() else {
+        return;
+    };
+    let mut databases = DisposableDatabases::connect(&database_url).await;
+    let database = databases.create("patch_0033").await;
+    let pool = install_v1(&database).await;
+
+    let first_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&first_run);
+    let revisions = revision_snapshot(&pool).await;
+    assert!(
+        revisions
+            .iter()
+            .any(|(version, name, _, _)| *version == 33 && name == "security-audit-hardening"),
+        "patch 0033 must record its revision: {revisions:?}"
+    );
+
+    // Runner and direct SQL body re-runs must both be idempotent no-ops.
+    let second_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&second_run);
+    assert_eq!(revision_snapshot(&pool).await, revisions);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0033)))
+        .execute(&pool)
+        .await
+        .expect("re-running patch 0033 body directly must be a no-op");
+
+    let guard_def: String = sqlx::query_scalar(
+        "SELECT pg_get_functiondef(to_regprocedure('public.prevent_audit_log_mutation()'))",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read prevent_audit_log_mutation definition");
+    assert!(
+        guard_def.contains("pg_has_role"),
+        "patch 0033 must bind app.allow_audit_mutation to audit_logs owner membership: {guard_def}"
+    );
+
+    let guest_permissions: Vec<String> = sqlx::query_scalar(
+        "SELECT p.name
+         FROM role_permissions rp
+         JOIN roles r ON r.id = rp.role_id
+         JOIN permissions p ON p.id = rp.permission_id
+         WHERE r.name = 'guest'
+         ORDER BY p.name",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read guest role permissions");
+    assert_eq!(
+        guest_permissions,
+        vec!["reviews:create".to_string()],
+        "patch 0033 must revoke staff read/update permissions from the guest role"
     );
 
     pool.close().await;

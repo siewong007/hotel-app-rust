@@ -90,7 +90,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navDeepLink
 import androidx.navigation.toRoute
 import com.hotelapp.staff.AppContainer
 import com.hotelapp.staff.core.auth.AuthState
@@ -575,9 +574,7 @@ private fun AuthenticatedNavHost(
                 popExitTransition = { fadeOut(tween(140)) },
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             ) {
-                composable<DashboardRoute>(
-                    deepLinks = listOf(navDeepLink<DashboardRoute>(basePath = "hotelstaff://dashboard")),
-                ) {
+                composable<DashboardRoute> {
                     val vm = rememberViewModel(key = "dash_${session.user.id}") {
                         DashboardViewModel(
                             session = session,
@@ -619,9 +616,7 @@ private fun AuthenticatedNavHost(
                     )
                 }
 
-                composable<BookingsRoute>(
-                    deepLinks = listOf(navDeepLink<BookingsRoute>(basePath = "hotelstaff://bookings")),
-                ) { entry ->
+                composable<BookingsRoute> { entry ->
                     val route = entry.toRoute<BookingsRoute>()
                     val vm = rememberViewModel(key = "bookings_${session.user.id}_${route.view}") {
                         BookingsViewModel(
@@ -699,7 +694,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<BookingDetailRoute>(
-                    deepLinks = listOf(navDeepLink<BookingDetailRoute>(basePath = "hotelstaff://booking")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },
@@ -723,9 +717,7 @@ private fun AuthenticatedNavHost(
                     )
                 }
 
-                composable<RoomsRoute>(
-                    deepLinks = listOf(navDeepLink<RoomsRoute>(basePath = "hotelstaff://rooms")),
-                ) {
+                composable<RoomsRoute> {
                     val vm = rememberViewModel(key = "rooms_${session.user.id}") {
                         RoomsViewModel(
                             repository = container.roomsRepository,
@@ -742,9 +734,7 @@ private fun AuthenticatedNavHost(
                     )
                 }
 
-                composable<HousekeepingRoute>(
-                    deepLinks = listOf(navDeepLink<HousekeepingRoute>(basePath = "hotelstaff://housekeeping")),
-                ) {
+                composable<HousekeepingRoute> {
                     val vm = rememberViewModel(key = "hk_${session.user.id}") {
                         HousekeepingViewModel(
                             session = session,
@@ -760,9 +750,7 @@ private fun AuthenticatedNavHost(
                     )
                 }
 
-                composable<MoreRoute>(
-                    deepLinks = listOf(navDeepLink<MoreRoute>(basePath = "hotelstaff://more")),
-                ) {
+                composable<MoreRoute> {
                     val vm = rememberViewModel(key = "more_${session.user.id}") {
                         MoreViewModel(container.authRepository, container.serverConfigStore)
                     }
@@ -783,7 +771,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<SearchRoute>(
-                    deepLinks = listOf(navDeepLink<SearchRoute>(basePath = "hotelstaff://search")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },
@@ -817,7 +804,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<PendingPaymentsRoute>(
-                    deepLinks = listOf(navDeepLink<PendingPaymentsRoute>(basePath = "hotelstaff://payments/pending")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },
@@ -836,7 +822,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<EkycQueueRoute>(
-                    deepLinks = listOf(navDeepLink<EkycQueueRoute>(basePath = "hotelstaff://ekyc")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },
@@ -853,7 +838,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<MaintenanceRoute>(
-                    deepLinks = listOf(navDeepLink<MaintenanceRoute>(basePath = "hotelstaff://maintenance")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },
@@ -878,7 +862,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<GuestsRoute>(
-                    deepLinks = listOf(navDeepLink<GuestsRoute>(basePath = "hotelstaff://guests")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },
@@ -929,7 +912,6 @@ private fun AuthenticatedNavHost(
                 }
 
                 composable<GuestDetailRoute>(
-                    deepLinks = listOf(navDeepLink<GuestDetailRoute>(basePath = "hotelstaff://guest")),
                     enterTransition = { detailEnter },
                     exitTransition = { detailExit },
                     popEnterTransition = { detailPopEnter },

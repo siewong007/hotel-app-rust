@@ -14,6 +14,18 @@ impl CompanyRepository {
         let limit = query.limit.unwrap_or(100).clamp(1, 500) as i64;
         let offset = query.offset.unwrap_or(0).max(0) as i64;
 
+        let search_pattern = query
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                format!(
+                    "%{}%",
+                    crate::utils::sanitization::Sanitizer::escape_like_pattern(s)
+                )
+            });
+
         let rows = {
             sqlx::query(
                 r#"
@@ -22,13 +34,13 @@ impl CompanyRepository {
                        billing_state, billing_postal_code, billing_country, is_active,
                        credit_limit, payment_terms_days, notes, created_by, created_at, updated_at
                 FROM companies
-                WHERE ($1::text IS NULL OR company_name ILIKE '%' || $1 || '%')
+                WHERE ($1::text IS NULL OR company_name ILIKE $1 ESCAPE '\')
                   AND ($2::bool IS NULL OR is_active = $2)
                 ORDER BY company_name ASC
                 LIMIT $3 OFFSET $4
                 "#,
             )
-            .bind(query.search.as_deref())
+            .bind(search_pattern.as_deref())
             .bind(query.is_active)
             .bind(limit)
             .bind(offset)

@@ -525,9 +525,19 @@ function CampaignsTab() {
                 })}
               </Alert>
               <Box
-                sx={{ border: '1px solid', borderColor: 'divider', p: 2, borderRadius: 1 }}
-                // Rendered preview of staff-authored campaign HTML.
-                dangerouslySetInnerHTML={{ __html: preview.body_html }}
+                component="iframe"
+                sandbox=""
+                referrerPolicy="no-referrer"
+                srcDoc={preview.body_html}
+                title={t('campaigns.previewTitle', { subject: preview.subject })}
+                sx={{
+                  width: '100%',
+                  minHeight: 360,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  bgcolor: '#fff',
+                }}
               />
             </Stack>
           )}

@@ -38,12 +38,36 @@ pub async fn book_with_credits_handler(
     let check_out = NaiveDate::parse_from_str(&input.check_out_date, "%Y-%m-%d")
         .map_err(|_| ApiError::BadRequest("Invalid check-out date. Use YYYY-MM-DD".to_string()))?;
 
-    let total_nights = (check_out - check_in).num_days() as i32;
-    if total_nights <= 0 {
+    let total_nights_i64 = (check_out - check_in).num_days();
+    if total_nights_i64 <= 0 {
         return Err(ApiError::BadRequest(
             "Check-out date must be after check-in date".to_string(),
         ));
     }
+    if total_nights_i64 > 365 {
+        return Err(ApiError::BadRequest(
+            "Complimentary bookings cannot exceed 365 nights".to_string(),
+        ));
+    }
+    let total_nights = total_nights_i64 as i32;
+
+    let adults = input.adults.unwrap_or(1);
+    if adults < 1 {
+        return Err(ApiError::BadRequest(
+            "At least 1 adult is required".to_string(),
+        ));
+    }
+    let children = input.children.unwrap_or(0);
+    if children < 0 {
+        return Err(ApiError::BadRequest(
+            "Children count cannot be negative".to_string(),
+        ));
+    }
+    let sanitized_special_requests = input
+        .special_requests
+        .as_deref()
+        .map(Sanitizer::sanitize_notes)
+        .filter(|s| !s.trim().is_empty());
 
     // Validate complimentary dates
     if input.complimentary_dates.is_empty() {
@@ -72,6 +96,15 @@ pub async fn book_with_credits_handler(
     }
 
     let complimentary_nights = complimentary_dates.len() as i32;
+    let caller_can_create_bookings =
+        crate::core::auth::AuthService::check_permission(&pool, user_id, "bookings:create")
+            .await
+            .unwrap_or(false);
+    if !caller_can_create_bookings && complimentary_nights < total_nights {
+        return Err(ApiError::BadRequest(
+            "Partial complimentary bookings require online checkout payment.".to_string(),
+        ));
+    }
 
     // Everything below runs in one transaction. The FOR UPDATE lock on the
     // room row serializes concurrent bookings for that room, so the overlap
@@ -80,13 +113,40 @@ pub async fn book_with_credits_handler(
     // or be silently dropped after the booking is committed.
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
+    let today = crate::core::db::hotel_today(&mut *tx).await?;
+    if check_in < today {
+        return Err(ApiError::BadRequest(
+            "Check-in date cannot be in the past".to_string(),
+        ));
+    }
+
+    let guest_blacklisted: Option<bool> = sqlx::query_scalar(
+        "SELECT is_blacklisted FROM guests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(input.guest_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+    match guest_blacklisted {
+        None => return Err(ApiError::NotFound("Guest profile not found".to_string())),
+        Some(true) => {
+            return Err(ApiError::Forbidden(
+                "This guest account is restricted from making complimentary bookings".to_string(),
+            ));
+        }
+        Some(false) => {}
+    }
+
     // Get room info including room type, locking the room row for the tx.
-    let room_info: Option<(i64, Decimal, String)> = sqlx::query(
+    let room_info: Option<(i64, Decimal, String, i32)> = sqlx::query(
         r#"
-        SELECT rt.id, COALESCE(r.custom_price, rt.base_price), rt.name
+        SELECT rt.id, COALESCE(r.custom_price, rt.base_price), rt.name, rt.max_occupancy
         FROM rooms r
         INNER JOIN room_types rt ON r.room_type_id = rt.id
         WHERE r.id = $1
+          AND r.is_active = true
+          AND rt.is_active = true
+          AND COALESCE(r.status, 'available') NOT IN ('maintenance', 'out_of_order')
         FOR UPDATE OF r
         "#,
     )
@@ -97,11 +157,23 @@ pub async fn book_with_credits_handler(
     .map(|r| {
         use crate::core::db::DbRowExt;
         use sqlx::Row;
-        (r.get(0), r.get_decimal(1), r.get(2))
+        (r.get(0), r.get_decimal(1), r.get(2), r.get(3))
     });
 
-    let (room_type_id, room_rate, room_type_name) =
-        room_info.ok_or_else(|| ApiError::NotFound("Room not found".to_string()))?;
+    let (room_type_id, room_rate, room_type_name, max_occupancy) = room_info.ok_or_else(|| {
+        ApiError::NotFound("Room not found or unavailable for booking".to_string())
+    })?;
+
+    if adults
+        .checked_add(children)
+        .is_none_or(|total| total > max_occupancy)
+    {
+        return Err(ApiError::BadRequest(format!(
+            "Total guests ({}) exceed room maximum occupancy ({})",
+            adults.saturating_add(children),
+            max_occupancy
+        )));
+    }
 
     // Check room availability under the room lock.
     let room_available: bool = sqlx::query_scalar(
@@ -229,9 +301,9 @@ pub async fn book_with_credits_handler(
     } else {
         "unpaid"
     })
-    .bind(input.adults.unwrap_or(1))
-    .bind(input.children.unwrap_or(0))
-    .bind(&input.special_requests)
+    .bind(adults)
+    .bind(children)
+    .bind(&sanitized_special_requests)
     .bind(&complimentary_reason)
     .bind(user_id)
     .fetch_one(&mut *tx)

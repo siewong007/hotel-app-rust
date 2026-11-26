@@ -91,10 +91,23 @@ fn init_data_directories() -> Result<(), std::io::Error> {
     std::fs::create_dir_all(&data_dir)?;
 
     // Create subdirectories
-    std::fs::create_dir_all(data_dir.join("logs"))?;
-    std::fs::create_dir_all(data_dir.join("backups"))?;
-    std::fs::create_dir_all(data_dir.join("uploads"))?;
-    std::fs::create_dir_all(data_dir.join("private_uploads"))?;
+    let logs_dir = data_dir.join("logs");
+    let backups_dir = data_dir.join("backups");
+    let public_uploads_dir = data_dir.join("uploads");
+    let private_uploads_dir = data_dir.join("private_uploads");
+    std::fs::create_dir_all(&logs_dir)?;
+    std::fs::create_dir_all(&backups_dir)?;
+    std::fs::create_dir_all(&public_uploads_dir)?;
+    std::fs::create_dir_all(&private_uploads_dir)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let owner_only = std::fs::Permissions::from_mode(0o700);
+        for dir in [&data_dir, &logs_dir, &backups_dir, &private_uploads_dir] {
+            std::fs::set_permissions(dir, owner_only.clone())?;
+        }
+    }
 
     log::info!("Data directories initialized at: {:?}", data_dir);
     Ok(())
@@ -103,7 +116,10 @@ fn init_data_directories() -> Result<(), std::io::Error> {
 /// Get the application data directory
 pub fn get_data_directory() -> std::path::PathBuf {
     dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/share"))
+        })
+        .expect("Unable to determine user local data directory")
         .join("HotelApp")
 }
 

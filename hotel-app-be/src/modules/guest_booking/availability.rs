@@ -50,10 +50,29 @@ impl AvailabilityHub {
     }
 }
 
-pub async fn serve_socket(mut socket: WebSocket, hub: AvailabilityHub) {
+pub async fn serve_socket(
+    mut socket: WebSocket,
+    hub: AvailabilityHub,
+    pool: crate::core::db::DbPool,
+    token: String,
+) {
     let mut events = hub.subscribe();
+    let mut session_check = tokio::time::interval(std::time::Duration::from_secs(30));
+    session_check.tick().await;
     loop {
         tokio::select! {
+            _ = session_check.tick() => {
+                match crate::modules::guest_portal::service::is_guest_session_token_active(&token, &pool).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = socket.send(Message::Close(None)).await;
+                        break;
+                    }
+                    Err(error) => {
+                        log::warn!("guest availability websocket session check failed: {error}");
+                    }
+                }
+            }
             event = events.recv() => {
                 match event {
                     Ok(event) => {

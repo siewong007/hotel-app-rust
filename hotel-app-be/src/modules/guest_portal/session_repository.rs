@@ -138,6 +138,34 @@ impl GuestPortalSessionRepository {
         Ok(Some(guest_id))
     }
 
+    /// Lightweight read-only check that a guest portal session is still
+    /// active and unexpired (used by WebSocket keepalive checks).
+    pub async fn is_session_active(pool: &DbPool, token_hash: &str) -> Result<bool, ApiError> {
+        let select_sql = format!(
+            "SELECT EXISTS( \
+                SELECT 1 FROM guest_portal_sessions s \
+                WHERE s.token_hash = {} AND s.expires_at > {} \
+                  AND NOT EXISTS ( \
+                      SELECT 1 FROM users u \
+                      WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
+                        AND ( \
+                            u.deleted_at IS NOT NULL \
+                            OR u.is_active = false \
+                            OR (COALESCE(u.is_locked, false) = true AND (u.locked_until IS NULL OR u.locked_until > {})) \
+                        ) \
+                  ) \
+             )",
+            param!(1),
+            current_timestamp(),
+            current_timestamp()
+        );
+        sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(&*select_sql))
+            .bind(token_hash)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| ApiError::Database(format!("Session check failed: {}", e)))
+    }
+
     /// Bookings owned by the guest, newest first, paginated. Returns (items, total).
     ///
     /// `search` matches booking number, status, or stay dates. The pages are

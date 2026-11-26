@@ -272,12 +272,14 @@ impl AppConfig {
     }
 
     fn validate_security(&self) -> Result<(), String> {
-        if self.desktop_mode || self.environment != Environment::Production {
+        if self.desktop_mode || self.environment == Environment::Development {
             return Ok(());
         }
 
         if matches!(self.allowed_origins, AllowedOrigins::Any) {
-            return Err("ALLOWED_ORIGINS must not be '*' in production".to_string());
+            return Err(
+                "ALLOWED_ORIGINS must not be '*' in non-development environments".to_string(),
+            );
         }
         if let AllowedOrigins::List(origins) = &self.allowed_origins {
             for origin in origins {
@@ -286,17 +288,22 @@ impl AppConfig {
                     .map_err(|_| "ALLOWED_ORIGINS contains a non-text origin")?;
                 if !origin.starts_with("https://") || origin.contains("localhost") {
                     return Err(
-                        "ALLOWED_ORIGINS must contain only non-localhost HTTPS origins in production"
+                        "ALLOWED_ORIGINS must contain only non-localhost HTTPS origins in non-development environments"
                             .to_string(),
                     );
                 }
             }
         }
         if self.skip_email_verification {
-            return Err("SKIP_EMAIL_VERIFICATION must be false in production".to_string());
+            return Err(
+                "SKIP_EMAIL_VERIFICATION must be false in non-development environments".to_string(),
+            );
         }
         if self.passkey_rp_id == "localhost" {
-            return Err("PASSKEY_RP_ID must be a production domain in production".to_string());
+            return Err(
+                "PASSKEY_RP_ID must be a non-localhost domain in non-development environments"
+                    .to_string(),
+            );
         }
         // Turnstile is the only bot control in front of login and registration;
         // IP rate limiting alone does not survive a distributed credential stuffing
@@ -306,6 +313,12 @@ impl AppConfig {
             return Err(
                 "TURNSTILE_ENABLED is true but TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY are \
                  missing or identical"
+                    .to_string(),
+            );
+        }
+        if self.turnstile.is_configured() && !self.turnstile.verify_url.starts_with("https://") {
+            return Err(
+                "TURNSTILE_VERIFY_URL must use https:// in non-development environments"
                     .to_string(),
             );
         }
@@ -319,15 +332,21 @@ impl AppConfig {
         {
             return Err(
                 "TOTP_ENCRYPTION_KEY must be set to base64/hex of 32 bytes, or an ASCII \
-                 string of at least 32 characters, in production"
+                 string of at least 32 characters, in non-development environments"
                     .to_string(),
+            );
+        }
+        if self.paypal.is_configured() && !self.paypal.api_base.starts_with("https://") {
+            return Err(
+                "PAYPAL_API_BASE must use https:// in non-development environments".to_string(),
             );
         }
         // PAYPAL_API_BASE defaults to the sandbox host. Enabling a credentialed
         // gateway in production without overriding it would silently charge
         // nothing and record live bookings against a fake gateway — refuse
         // unless the deployment explicitly opted into sandbox (staging does).
-        if self.paypal.is_configured()
+        if self.environment == Environment::Production
+            && self.paypal.is_configured()
             && self.paypal.api_base.contains("sandbox.paypal.com")
             && !self.paypal.allow_sandbox
         {

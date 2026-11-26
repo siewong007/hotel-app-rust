@@ -18,6 +18,9 @@ import { Code, ConnectError, createClient, type Interceptor, type Transport } fr
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
 
 import { getAccessToken, clearAccessToken } from '../auth/tokenStore';
+import { clearPortalToken } from '../features/guest-portal/api/portalTokenStore';
+import { clearBookingAccessToken } from '../features/guest-portal/api/bookingAccessTokenStore';
+import { clearCheckoutResume } from '../features/guest-portal/booking/checkoutResume';
 import { getActiveLocale } from '../i18n/localeStore';
 import { getApiBaseUrl } from '../desktop/runtimeApi';
 import { refreshAccessToken } from './client';
@@ -41,10 +44,16 @@ function resolveClientTimezone(): string | undefined {
 
 function clearStoredAuth(): void {
   clearAccessToken();
+  clearPortalToken();
+  clearBookingAccessToken();
+  clearCheckoutResume();
   storage.removeItem('user');
   storage.removeItem('roles');
   storage.removeItem('permissions');
   storage.removeItem('routePolicies');
+  storage.removeItem('cmdRecents');
+  storage.removeItem('ekycAdminFilters');
+  storage.removeItem('helpRecentSearches');
 }
 
 /**

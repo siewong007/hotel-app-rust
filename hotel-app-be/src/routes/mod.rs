@@ -297,6 +297,16 @@ async fn record_request_metrics(request: Request, next: Next) -> Response {
     let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     crate::core::metrics::record_response(status.as_u16(), elapsed_ms);
 
+    if let Ok(nonce) = std::env::var("DESKTOP_INSTANCE_NONCE")
+        && !nonce.trim().is_empty()
+        && let Ok(header_value) = axum::http::HeaderValue::from_str(nonce.trim())
+    {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("x-desktop-instance"),
+            header_value,
+        );
+    }
+
     if status.is_server_error() {
         log::warn!(
             "{method} {path} -> {} in {elapsed_ms}ms request_id={request_id}",
@@ -388,6 +398,7 @@ pub fn create_router(pool: DbPool) -> Router {
                         crate::modules::data_transfer::routes::BACKUP_PASSPHRASE_HEADER,
                     ),
                     axum::http::HeaderName::from_static("x-booking-access-token"),
+                    axum::http::HeaderName::from_static("x-requested-with"),
                     // Connect/gRPC-Web request headers — needed for cross-origin
                     // browser calls to the tonic services (dev mode's Any
                     // branch already permits them).

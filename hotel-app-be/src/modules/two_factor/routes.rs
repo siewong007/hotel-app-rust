@@ -48,6 +48,18 @@ async fn setup_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     handlers::setup_2fa_handler(State(pool), user_id, Json(req)).await
 }
 
@@ -92,6 +104,18 @@ async fn disable_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     handlers::disable_2fa_handler(State(pool), user_id, Json(req)).await
 }
 
@@ -122,6 +146,18 @@ async fn verify_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     handlers::verify_2fa_code_handler(State(pool), user_id, Json(req)).await
 }
 
@@ -144,5 +180,17 @@ async fn regenerate_backup_codes(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     handlers::regenerate_backup_codes_handler(State(pool), user_id, Json(req)).await
 }

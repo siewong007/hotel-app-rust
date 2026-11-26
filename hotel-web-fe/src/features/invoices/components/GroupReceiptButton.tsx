@@ -28,7 +28,7 @@ function printGroupReceipt(html: string, title: string) {
     return;
   }
   doc.open();
-  doc.write(`<!DOCTYPE html><html><head><title>${esc(title)}</title><style>
+  doc.write(`<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" /><title>${esc(title)}</title><style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; padding: 20px; color: ${paperTokens.text}; }
     .invoice-header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid ${paperTokens.accent}; padding-bottom: 20px; }

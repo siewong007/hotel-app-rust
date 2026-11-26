@@ -304,13 +304,15 @@ pub async fn availability_socket_handler(
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
     let token = websocket_token(&headers)
         .ok_or_else(|| ApiError::Unauthorized("Missing guest session token".to_string()))?;
     let guest_id = guest_portal::require_guest_session_token(token, &pool).await?;
     require_read_capacity(&limiters, guest_id).await?;
+    let session_token = token.to_string();
     Ok(websocket
         .protocols(["hotel-guest-availability"])
-        .on_upgrade(move |socket| serve_socket(socket, hub)))
+        .on_upgrade(move |socket| serve_socket(socket, hub, pool, session_token)))
 }
 
 #[cfg(test)]

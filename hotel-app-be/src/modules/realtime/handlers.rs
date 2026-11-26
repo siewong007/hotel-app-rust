@@ -19,6 +19,7 @@ pub async fn updates_socket_handler(
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
     let token = headers
         .get(axum::http::header::SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())

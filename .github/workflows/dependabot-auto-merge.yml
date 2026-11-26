@@ -50,6 +50,8 @@ jobs:
         if: |
           steps.meta.outputs.update-type != 'version-update:semver-patch' &&
           steps.meta.outputs.update-type != 'version-update:semver-minor'
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
         run: |
-          echo "update-type='${{ steps.meta.outputs.update-type }}' is not patch or minor." >> "$GITHUB_STEP_SUMMARY"
+          echo "update-type='${UPDATE_TYPE}' is not patch or minor." >> "$GITHUB_STEP_SUMMARY"
           echo "Left open for manual review." >> "$GITHUB_STEP_SUMMARY"

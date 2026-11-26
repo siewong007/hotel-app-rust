@@ -392,6 +392,9 @@ COMMENT ON FUNCTION public.ensure_audit_logs_truncate_guards() IS 'Adds the stat
 --
 -- Name: prevent_audit_log_mutation(); Type: FUNCTION; Schema: public; Owner: -
 --
+-- Note: patch 0022 pins this baseline body by exact definition, and patch
+-- 0033_security_audit_hardening.sql updates it to bind app.allow_audit_mutation
+-- to membership in the audit_logs owner role. Keep this body aligned with 0022.
 
 CREATE FUNCTION public.prevent_audit_log_mutation() RETURNS trigger
     LANGUAGE plpgsql

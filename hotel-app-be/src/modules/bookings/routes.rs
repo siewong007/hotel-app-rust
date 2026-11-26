@@ -6,14 +6,16 @@ use super::handlers;
 use crate::core::db::DbPool;
 use crate::core::error::ApiError;
 use crate::core::middleware::require_permission_helper;
+use crate::core::rate_limiter::RateLimiters;
 use crate::models;
 use axum::{
     Router,
-    extract::{Extension, Path, Query, State},
+    extract::{ConnectInfo, Extension, Path, Query, State},
     http::HeaderMap,
     response::Json,
     routing::{delete, get, patch, post, put},
 };
+use std::net::SocketAddr;
 
 /// Create booking routes
 pub fn routes() -> Router<DbPool> {
@@ -367,15 +369,29 @@ async fn guest_checkin_advisory(
 
 async fn get_rate_codes(
     State(pool): State<DbPool>,
+    headers: HeaderMap,
 ) -> Result<Json<crate::modules::settings::models::RateCodesResponse>, ApiError> {
-    // Public endpoint - no authentication required
+    let user_id = crate::core::middleware::require_any_permission_helper(
+        &pool,
+        &headers,
+        &["bookings:read", "rooms:read"],
+    )
+    .await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     crate::modules::settings::handlers::get_rate_codes_handler(State(pool)).await
 }
 
 async fn get_market_codes(
     State(pool): State<DbPool>,
+    headers: HeaderMap,
 ) -> Result<Json<crate::modules::settings::models::MarketCodesResponse>, ApiError> {
-    // Public endpoint - no authentication required
+    let user_id = crate::core::middleware::require_any_permission_helper(
+        &pool,
+        &headers,
+        &["bookings:read", "rooms:read"],
+    )
+    .await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     crate::modules::settings::handlers::get_market_codes_handler(State(pool)).await
 }
 
@@ -400,9 +416,23 @@ async fn convert_complimentary_to_credits(
 
 async fn book_with_credits(
     State(pool): State<DbPool>,
+    limiters: Option<Extension<RateLimiters>>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(input): Json<models::BookWithCreditsRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    if let (Some(Extension(limiters)), Some(Extension(ConnectInfo(peer_addr)))) =
+        (limiters, connect_info)
+    {
+        let ip = crate::routes::extract_client_ip(&headers, peer_addr);
+        let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
+        if !allowed {
+            return Err(ApiError::TooManyRequestsRetryAfter(
+                format!("Too many requests. Please try again in {retry_after} seconds."),
+                retry_after,
+            ));
+        }
+    }
     // Only requires authentication - user can book for their linked guests
     handlers::book_with_credits_handler(State(pool), headers, Json(input)).await
 }

@@ -4,6 +4,9 @@ import { Code, ConnectError } from '@connectrpc/connect';
 import { storage } from '../utils/storage';
 import { getActiveLocale } from '../i18n/localeStore';
 import { getAccessToken, setAccessToken, clearAccessToken } from '../auth/tokenStore';
+import { clearPortalToken } from '../features/guest-portal/api/portalTokenStore';
+import { clearBookingAccessToken } from '../features/guest-portal/api/bookingAccessTokenStore';
+import { clearCheckoutResume } from '../features/guest-portal/booking/checkoutResume';
 import { apiUrl, getApiBaseUrl, resolveApiRequestUrl } from '../desktop/runtimeApi';
 import {
   emitApiNotification,
@@ -204,10 +207,16 @@ function isGuestPortalRequest(url: string): boolean {
 function clearStoredAuth(): void {
   authGeneration += 1;
   clearAccessToken();
+  clearPortalToken();
+  clearBookingAccessToken();
+  clearCheckoutResume();
   storage.removeItem('user');
   storage.removeItem('roles');
   storage.removeItem('permissions');
   storage.removeItem('routePolicies');
+  storage.removeItem('cmdRecents');
+  storage.removeItem('ekycAdminFilters');
+  storage.removeItem('helpRecentSearches');
 }
 
 /**
@@ -221,6 +230,7 @@ export async function refreshAccessToken(): Promise<RefreshTokenResponse | null>
     const startGeneration = authGeneration;
     const requestRefresh = () => ky.post(apiUrl('auth/refresh'), {
       credentials: 'include',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
       timeout: REFRESH_TIMEOUT_MS,
     })
       .json<RefreshTokenResponse>();
@@ -365,6 +375,13 @@ export const api = ky.create({
           if (timeZone) {
             apiRequest.headers.set('X-Client-Timezone', timeZone);
           }
+        }
+        const requestPathname = new URL(
+          apiRequest.url,
+          typeof window === 'undefined' ? 'http://localhost' : window.location.origin,
+        ).pathname;
+        if (requestPathname.endsWith('/auth/logout') || requestPathname.endsWith('/auth/refresh')) {
+          apiRequest.headers.set('X-Requested-With', 'XMLHttpRequest');
         }
         // Requests that set their own Authorization header (e.g. the guest
         // portal's session token) must not be overwritten with the staff token.

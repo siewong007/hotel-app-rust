@@ -678,7 +678,7 @@ fn verify_client_data(
         .ok_or_else(|| ApiError::BadRequest("Missing WebAuthn challenge".to_string()))?;
     let challenge_bytes = decode_base64url(challenge)
         .map_err(|_| ApiError::BadRequest("Invalid WebAuthn challenge".to_string()))?;
-    if challenge_bytes != expected_challenge {
+    if !constant_time_eq::constant_time_eq(&challenge_bytes, expected_challenge) {
         return Err(ApiError::Unauthorized(
             "WebAuthn challenge mismatch".to_string(),
         ));

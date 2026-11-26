@@ -100,7 +100,8 @@ pub async fn list_reviews_handler(
     headers: HeaderMap,
     Path(guest_id): Path<i64>,
 ) -> Result<Json<Vec<GuestReviewRow>>, ApiError> {
-    require_permission_helper(&pool, &headers, "reviews:read").await?;
+    let actor_id = require_permission_helper(&pool, &headers, "reviews:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, actor_id).await?;
     Ok(Json(service::list_reviews(&pool, guest_id).await?))
 }
 
@@ -111,6 +112,7 @@ pub async fn respond_to_review_handler(
     Json(input): Json<GuestReviewResponseInput>,
 ) -> Result<Json<GuestReviewRow>, ApiError> {
     let actor_id = require_permission_helper(&pool, &headers, "reviews:update").await?;
+    crate::core::middleware::reject_guest_only(&pool, actor_id).await?;
     Ok(Json(
         service::respond_to_review(&pool, actor_id, guest_id, review_id, input).await?,
     ))

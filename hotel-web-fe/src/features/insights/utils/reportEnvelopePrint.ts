@@ -16,7 +16,8 @@ const escapeHtml = (value: unknown): string =>
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const formatValue = (value: unknown, format: KpiFormat): string => {
   if (value == null) return '—';
@@ -89,6 +90,7 @@ export const envelopeToPrintHtml = (envelope: ReportEnvelope): string => {
   return `<!DOCTYPE html>
 <html>
   <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" />
     <title>${escapeHtml(t('insights:report.printTitle', { title }))}</title>
     <style>
       ${printStyles}

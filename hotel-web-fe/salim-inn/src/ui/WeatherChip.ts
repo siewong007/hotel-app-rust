@@ -56,8 +56,8 @@ function icon(sky: Sky | null, night: boolean): string {
 }
 
 // MET Norway asks for a link to where its data can be downloaded
-const MET_LINK = '<a href="https://api.met.no/" target="_blank" rel="noopener">MET Norway</a>';
-const LICENCE_LINK = '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>';
+const MET_LINK = '<a href="https://api.met.no/" target="_blank" rel="noopener noreferrer">MET Norway</a>';
+const LICENCE_LINK = '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>';
 
 const skyLabel = (sky: Sky): string | null => (sky === 'other' ? null : copy.weather.sky[sky]);
 const temp = (c: number) => `${Math.round(c)}°C`;

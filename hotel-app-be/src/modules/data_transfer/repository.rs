@@ -228,6 +228,8 @@ pub fn transfer_order(
 pub(crate) const NEVER_TRANSFERRED_COLUMNS: &[(&str, &str)] = &[
     ("bookings", "pre_checkin_token"),
     ("bookings", "pre_checkin_token_expires_at"),
+    ("payment_receipt_requests", "receipt_path"),
+    ("payment_receipt_requests", "receipt_content_type"),
 ];
 
 impl DataTransferRepository {

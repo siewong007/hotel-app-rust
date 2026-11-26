@@ -84,7 +84,10 @@ async fn get_route_policies(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<models::RouteAccessPolicy>>, ApiError> {
-    require_any_permission_helper(&pool, &headers, RBAC_SNAPSHOT_PERMISSIONS).await?;
+    let user_id = require_any_permission_helper(&pool, &headers, RBAC_SNAPSHOT_PERMISSIONS).await?;
+    if crate::core::middleware::is_guest_only_user(&pool, user_id).await? {
+        return Ok(Json(Vec::new()));
+    }
     handlers::get_route_policies_handler(State(pool)).await
 }
 

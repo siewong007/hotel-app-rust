@@ -40,6 +40,31 @@ die() {
   exit 1
 }
 
+load_env_file() {
+  local env_file="$1"
+  [[ -r "$env_file" ]] || die "Environment file is unreadable: $env_file"
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]] && continue
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[2]}"
+      val="${BASH_REMATCH[3]}"
+      if [[ ${#val} -ge 2 && "${val:0:1}" == '"' && "${val: -1}" == '"' ]]; then
+        val="${val:1:${#val}-2}"
+      elif [[ ${#val} -ge 2 && "${val:0:1}" == "'" && "${val: -1}" == "'" ]]; then
+        val="${val:1:${#val}-2}"
+      fi
+      if [[ "$val" == *$'\n'* || "$val" == *$'\r'* ]]; then
+        die "Invalid control character in $env_file for key $key"
+      fi
+      export "${key}=${val}"
+    else
+      die "Malformed line in $env_file"
+    fi
+  done < "$env_file"
+}
+
 [[ $EUID -eq 0 ]] || die "run this script as root (sudo)"
 [[ "$TAG" =~ ^[0-9a-f]{40}$ ]] || die "image tag must be a 40-character lowercase Git commit SHA"
 [[ -n "$RELEASE_DIR" && -d "$RELEASE_DIR" ]] || die "release directory does not exist: $RELEASE_DIR"
@@ -93,6 +118,7 @@ required_payload=(
   database/patches/0030_hotel_currency_defaults.sql
   database/patches/0031_manager_owns_user_management.sql
   database/patches/0032_full_audit_schema_fixes.sql
+  database/patches/0033_security_audit_hardening.sql
   database/db-least-privilege.sql
 )
 for payload in "${required_payload[@]}"; do
@@ -208,11 +234,7 @@ ensure_secrets() {
   fi
 
   chmod 0600 "$SECRETS_FILE"
-  set -a
-  # This root-owned file is generated immediately above.
-  # shellcheck disable=SC1090
-  source "$SECRETS_FILE"
-  set +a
+  load_env_file "$SECRETS_FILE"
 
   [[ "${POSTGRES_PASSWORD:-}" =~ ^[A-Za-z0-9._~-]{32,}$ ]] \
     || die "POSTGRES_PASSWORD in $SECRETS_FILE must be at least 32 URL-safe characters"
@@ -276,10 +298,7 @@ ensure_secrets() {
   # fragment is consumed and deleted so a rotated value cannot linger on disk.
   local ci_env="$APP_DIR/ci-provisioned.env"
   if [[ -f "$ci_env" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ci_env"
-    set +a
+    load_env_file "$ci_env"
     local ci_key ci_value
     for ci_key in TURNSTILE_ENABLED TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY PAYPAL_WEBHOOK_ID; do
       ci_value="${!ci_key:-}"
@@ -291,10 +310,7 @@ ensure_secrets() {
     rm -f "$ci_env"
   fi
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$SECRETS_FILE"
-  set +a
+  load_env_file "$SECRETS_FILE"
 
   [[ -n "${HOTEL_BANK_NAME:-}" && -n "${HOTEL_BANK_ACCOUNT_NAME:-}" && -n "${HOTEL_BANK_ACCOUNT_NUMBER:-}" ]] \
     || die "HOTEL_BANK_NAME / HOTEL_BANK_ACCOUNT_NAME / HOTEL_BANK_ACCOUNT_NUMBER must be set in $SECRETS_FILE"
@@ -416,6 +432,7 @@ install_release_files() {
   install -m 0644 "$RELEASE_DIR/database/patches/0030_hotel_currency_defaults.sql" "$APP_DIR/database/patches/0030_hotel_currency_defaults.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0031_manager_owns_user_management.sql" "$APP_DIR/database/patches/0031_manager_owns_user_management.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0032_full_audit_schema_fixes.sql" "$APP_DIR/database/patches/0032_full_audit_schema_fixes.sql"
+  install -m 0644 "$RELEASE_DIR/database/patches/0033_security_audit_hardening.sql" "$APP_DIR/database/patches/0033_security_audit_hardening.sql"
   install -m 0644 "$RELEASE_DIR/database/db-least-privilege.sql" "$APP_DIR/database/db-least-privilege.sql"
   # The backend image runs as uid/gid 1000. Bind-mounted application state must
   # stay writable by that non-root user across container replacements.

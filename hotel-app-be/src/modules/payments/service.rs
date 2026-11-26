@@ -3553,16 +3553,34 @@ pub async fn save_payment_receipt(
     Ok(())
 }
 
-/// Load a receipt that was saved by `save_payment_receipt`; never serve files outside its private directory.
+/// Load a receipt that was saved by `save_payment_receipt`; never serve files
+/// outside its private directory and always re-sniff magic bytes rather than
+/// trusting database-stored `Content-Type` metadata.
 pub async fn load_payment_receipt(
     pool: &DbPool,
     payment_id: i64,
-) -> Result<(Vec<u8>, String), ApiError> {
+) -> Result<(Vec<u8>, &'static str, &'static str), ApiError> {
     let receipt = PaymentRepository::receipt_file(pool, payment_id)
         .await?
         .ok_or_else(|| {
             ApiError::NotFound("No receipt has been uploaded for this payment.".to_string())
         })?;
+    let prefix = format!("{PAYMENT_RECEIPT_UPLOAD_DIR}/");
+    let Some(filename) = receipt.path.strip_prefix(&prefix) else {
+        return Err(ApiError::NotFound(
+            "Receipt file is unavailable.".to_string(),
+        ));
+    };
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
+        return Err(ApiError::NotFound(
+            "Receipt file is unavailable.".to_string(),
+        ));
+    }
     let root = Path::new(PAYMENT_RECEIPT_UPLOAD_DIR)
         .canonicalize()
         .map_err(|_| ApiError::NotFound("Receipt file is unavailable.".to_string()))?;
@@ -3576,7 +3594,10 @@ pub async fn load_payment_receipt(
     }
     let bytes = fs::read(path)
         .map_err(|_| ApiError::NotFound("Receipt file is unavailable.".to_string()))?;
-    Ok((bytes, receipt.content_type))
+    let (extension, content_type) = receipt_extension(&bytes).ok_or_else(|| {
+        ApiError::Internal("Stored receipt failed file signature validation.".to_string())
+    })?;
+    Ok((bytes, content_type, extension))
 }
 
 #[cfg(test)]

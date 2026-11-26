@@ -93,7 +93,8 @@ async fn get_rooms(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<models::RoomWithRating>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_rooms_handler(State(pool)).await
 }
 
@@ -102,7 +103,8 @@ async fn search_rooms(
     headers: HeaderMap,
     query: Query<models::SearchQuery>,
 ) -> Result<Json<Vec<models::RoomWithRating>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::search_rooms_handler(State(pool), query).await
 }
 
@@ -138,7 +140,8 @@ async fn get_room_types(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<models::RoomType>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_room_types_handler(State(pool)).await
 }
 

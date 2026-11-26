@@ -148,6 +148,20 @@ async fn step_up(
         ));
     }
     let claims = extract_claims(&headers).await?;
+    if let Ok(user_id) = crate::core::middleware::extract_user_id(&claims) {
+        let (user_allowed, user_retry_after) = limiters
+            .reauth_user
+            .check_with_retry(user_id.to_string())
+            .await;
+        if !user_allowed {
+            return Err(ApiError::TooManyRequestsRetryAfter(
+                format!(
+                    "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+                ),
+                user_retry_after,
+            ));
+        }
+    }
     handlers::step_up_handler(State(pool), claims, request).await
 }
 

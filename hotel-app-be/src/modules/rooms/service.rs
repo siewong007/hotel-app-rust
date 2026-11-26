@@ -503,7 +503,8 @@ pub async fn get_all_room_types_handler(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RoomType>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let room_types = rq::fetch_all_room_types(&pool).await?;
     Ok(Json(room_types))
@@ -514,7 +515,8 @@ pub async fn get_room_type_handler(
     Path(id): Path<i64>,
     headers: HeaderMap,
 ) -> Result<Json<RoomType>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let room_type = rq::fetch_room_type_by_id(&pool, id).await?;
     Ok(Json(room_type))
@@ -582,6 +584,56 @@ pub async fn create_room_type_handler(
     Ok(Json(room_type))
 }
 
+fn is_safe_bare_room_image_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && name != "."
+        && name != ".."
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn is_safe_salim_inn_asset_path(rel: &str) -> bool {
+    !rel.is_empty()
+        && rel.len() <= 255
+        && !rel.contains("..")
+        && !rel.contains('\\')
+        && !rel
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '<' | '>' | '"' | '\''))
+        && rel.split('/').all(|seg| !seg.is_empty() && seg != ".")
+}
+
+/// Validates room-type photo references before persisting to `room_types.images`.
+/// Accepts `/uploads/room-types/<filename>`, bundled `/salim-inn/<path>`, or `https://` URLs.
+pub(crate) fn validate_room_type_images(images: &[String]) -> Result<Vec<String>, ApiError> {
+    let mut validated = Vec::with_capacity(images.len());
+    for raw in images {
+        let trimmed = raw.trim();
+        if let Some(rest) = trimmed.strip_prefix("/uploads/room-types/")
+            && is_safe_bare_room_image_name(rest)
+        {
+            validated.push(trimmed.to_string());
+        } else if let Some(rest) = trimmed.strip_prefix("/salim-inn/")
+            && is_safe_salim_inn_asset_path(rest)
+        {
+            validated.push(trimmed.to_string());
+        } else if trimmed.to_ascii_lowercase().starts_with("https://")
+            && let Some(clean_url) =
+                crate::utils::sanitization::Sanitizer::sanitize_http_url(trimmed)
+        {
+            validated.push(clean_url);
+        } else {
+            return Err(ApiError::BadRequest(
+                "Room type image entries must be /uploads/room-types/<file>, /salim-inn/<path>, or https:// URLs"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(validated)
+}
+
 pub async fn update_room_type_handler(
     State(pool): State<DbPool>,
     Path(id): Path<i64>,
@@ -589,6 +641,11 @@ pub async fn update_room_type_handler(
     Json(input): Json<RoomTypeUpdateInput>,
 ) -> Result<Json<RoomType>, ApiError> {
     let user_id = require_permission_helper(&pool, &headers, "rooms:update").await?;
+    let validated_images = input
+        .images
+        .as_deref()
+        .map(validate_room_type_images)
+        .transpose()?;
 
     // Convert f64 prices to Decimal for proper binding to DECIMAL columns
     let base_price_decimal = input
@@ -606,7 +663,7 @@ pub async fn update_room_type_handler(
 
     // Snapshot the current list so files dropped by this update can be
     // removed from disk afterwards.
-    let before_images = if input.images.is_some() {
+    let before_images = if validated_images.is_some() {
         rq::fetch_room_type_by_id(&pool, id).await?.images
     } else {
         Vec::new()
@@ -630,7 +687,7 @@ pub async fn update_room_type_handler(
             extra_bed_charge: extra_bed_charge_decimal,
             is_active: input.is_active,
             sort_order: input.sort_order,
-            images: &input.images,
+            images: &validated_images,
         },
     )
     .await?;
@@ -638,9 +695,11 @@ pub async fn update_room_type_handler(
     // Fetch the updated room type
     let room_type = rq::fetch_room_type_by_id(&pool, id).await?;
 
-    if let Some(new_images) = &input.images {
+    if let Some(new_images) = &validated_images {
         for removed in before_images.iter().filter(|p| !new_images.contains(p)) {
-            delete_public_room_image(removed);
+            if !rq::is_room_type_image_referenced_elsewhere(&pool, id, removed).await? {
+                delete_public_room_image(removed);
+            }
         }
     }
 
@@ -1274,7 +1333,8 @@ pub async fn get_room_change_history_handler(
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
-    require_permission_helper(&pool, &headers, "bookings:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "bookings:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let booking_id = params.get("booking_id").and_then(|v| v.parse::<i64>().ok());
     let guest_id = params.get("guest_id").and_then(|v| v.parse::<i64>().ok());
@@ -1427,6 +1487,7 @@ pub async fn get_room_detailed_status_handler(
     headers: HeaderMap,
 ) -> Result<Json<RoomDetailedStatus>, ApiError> {
     let user_id = require_any_permission_helper(&pool, &headers, ROOM_OPERATIONS_READ).await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     // `current_booking`/`next_booking` are full `BookingWithDetails`: guest
     // name, email and the whole financial state — the same data `bookings:read`
@@ -1495,6 +1556,10 @@ pub async fn get_room_history_handler(
     // and no financial data reach this response, so `bookings:read` was the
     // wrong guard and shut housekeeping out of its own audit trail.
     require_any_permission_helper(&pool, &headers, ROOM_OPERATIONS_READ).await?;
+    // Call `reject_guest_only` explicitly too so misconfigured guest roles stay blocked.
+    if let Ok(actor_id) = crate::core::middleware::require_auth(&headers).await {
+        crate::core::middleware::reject_guest_only(&pool, actor_id).await?;
+    }
 
     let history = match rq::fetch_room_history(&pool, room_id).await {
         Ok(rows) => rows,
@@ -1545,7 +1610,8 @@ pub async fn get_all_room_occupancy_handler(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RoomCurrentOccupancy>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let occupancy = rq::fetch_all_room_occupancy(&pool).await?;
     Ok(Json(occupancy))
@@ -1557,7 +1623,8 @@ pub async fn get_room_occupancy_handler(
     Path(room_id): Path<i64>,
     headers: HeaderMap,
 ) -> Result<Json<RoomCurrentOccupancy>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let occupancy = rq::fetch_room_occupancy(&pool, room_id)
         .await?
@@ -1571,7 +1638,8 @@ pub async fn get_hotel_occupancy_summary_handler(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<HotelOccupancySummary>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let summary = rq::fetch_hotel_occupancy_summary(&pool).await?;
     Ok(Json(summary))
@@ -1582,7 +1650,8 @@ pub async fn get_occupancy_by_room_type_handler(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<OccupancyByRoomType>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let occupancy = rq::fetch_occupancy_by_room_type(&pool).await?;
     Ok(Json(occupancy))
@@ -1593,7 +1662,8 @@ pub async fn get_rooms_with_occupancy_handler(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RoomWithOccupancy>>, ApiError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
 
     let rooms_with_occupancy = rq::fetch_rooms_with_occupancy(&pool).await?;
     Ok(Json(rooms_with_occupancy))

@@ -87,8 +87,9 @@ pub async fn store_document_upload(
 
     let mut file_path = String::new();
     let mut document_type = "document".to_string();
+    let mut seen_file = false;
 
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::BadRequest(format!("Failed to read multipart field: {}", e)))?
@@ -96,11 +97,31 @@ pub async fn store_document_upload(
         let field_name = field.name().unwrap_or("").to_string();
 
         if field_name == "documentType" || field_name == "document_type" {
-            let raw_document_type = field.text().await.map_err(|e| {
-                ApiError::BadRequest(format!("Failed to read document type: {}", e))
+            let mut raw_bytes = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| ApiError::BadRequest(format!("Failed to read document type: {}", e)))?
+            {
+                if raw_bytes.len().saturating_add(chunk.len()) > 256 {
+                    return Err(ApiError::BadRequest(
+                        "documentType exceeds maximum length".to_string(),
+                    ));
+                }
+                raw_bytes.extend_from_slice(&chunk);
+            }
+            let raw_document_type = String::from_utf8(raw_bytes).map_err(|_| {
+                ApiError::BadRequest("documentType must be valid UTF-8".to_string())
             })?;
             document_type = validation::sanitize_document_type(&raw_document_type)?;
         } else if field_name == "file" {
+            if seen_file {
+                return Err(ApiError::BadRequest(
+                    "Multiple file fields are not allowed".to_string(),
+                ));
+            }
+            seen_file = true;
+
             let content_type = field.content_type().unwrap_or("").to_string();
             if !matches!(
                 content_type.as_str(),
@@ -111,10 +132,20 @@ pub async fn store_document_upload(
                 ));
             }
 
-            let data = field
-                .bytes()
+            let mut data = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
                 .await
-                .map_err(|e| ApiError::BadRequest(format!("Failed to read file data: {}", e)))?;
+                .map_err(|e| ApiError::BadRequest(format!("Failed to read file data: {}", e)))?
+            {
+                if data.len().saturating_add(chunk.len()) > validation::MAX_EKYC_IMAGE_BYTES {
+                    return Err(ApiError::BadRequest(format!(
+                        "Image exceeds maximum size of {} bytes",
+                        validation::MAX_EKYC_IMAGE_BYTES
+                    )));
+                }
+                data.extend_from_slice(&chunk);
+            }
             let extension = validation::validate_image_bytes(&data)?;
             let filename = validation::build_ekyc_filename(user_id, &document_type, extension)?;
             let full_path = upload_dir.join(&filename);
@@ -342,10 +373,33 @@ pub async fn admin_create_verification(
         .map(|img| validation::prepare_ekyc_image_reference(img, actor_id, "proof"))
         .transpose()?;
 
+    validation::validate_common_text_fields(validation::CommonEkycTextFields {
+        full_name: &req.full_name,
+        id_type: &req.id_type,
+        id_number: &req.id_number,
+        nationality: req.nationality.as_deref(),
+        phone: req.phone.as_deref(),
+        email: req.email.as_deref(),
+        id_issuing_country: req.id_issuing_country.as_deref(),
+        current_address: req.current_address.as_deref(),
+    })?;
+
+    let full_name = Sanitizer::sanitize_guest_name(&req.full_name);
+    let nationality = req.nationality.as_deref().map(Sanitizer::sanitize_text);
+    let phone = req.phone.as_deref().map(Sanitizer::sanitize_phone);
+    let email = req.email.as_deref().map(Sanitizer::sanitize_email);
+    let current_address = req.current_address.as_deref().map(Sanitizer::sanitize_text);
+    let id_issuing_country = req
+        .id_issuing_country
+        .as_deref()
+        .map(Sanitizer::sanitize_text);
+    let id_type = Sanitizer::sanitize_text(&req.id_type);
+    let id_number = req.id_number.trim().to_string();
+
     // Resolve (or provision) the guest's portal account to satisfy the FK.
     let user_id = match EkycRepository::find_guest_user(pool, req.guest_id).await? {
         Some(id) => id,
-        None => EkycRepository::provision_guest_user(pool, req.guest_id, &req.full_name).await?,
+        None => EkycRepository::provision_guest_user(pool, req.guest_id, &full_name).await?,
     };
 
     let self_checkin_enabled = req.self_checkin_enabled.unwrap_or(true);
@@ -355,15 +409,15 @@ pub async fn admin_create_verification(
         NewEkycVerification {
             user_id,
             guest_id: req.guest_id,
-            full_name: &req.full_name,
+            full_name: &full_name,
             date_of_birth,
-            nationality: &req.nationality,
-            phone: &req.phone,
-            email: &req.email,
-            current_address: &req.current_address,
-            id_type: &req.id_type,
-            id_number: &req.id_number,
-            id_issuing_country: &req.id_issuing_country,
+            nationality: &nationality,
+            phone: &phone,
+            email: &email,
+            current_address: &current_address,
+            id_type: &id_type,
+            id_number: &id_number,
+            id_issuing_country: &id_issuing_country,
             id_issue_date,
             id_expiry_date,
             id_front_path: &id_front_path,
@@ -630,7 +684,11 @@ pub async fn apply_review_action(
     validation::enforce_assignment_rules(action, actor_id, &current, &input)?;
 
     let reason_code = input.reason_code.clone();
-    let reason = input.reason.clone();
+    let reason = input
+        .reason
+        .as_deref()
+        .map(|r| validation::sanitize_text(r, 1000))
+        .filter(|r| !r.is_empty());
     let note_body = input
         .note
         .as_ref()

@@ -70,7 +70,7 @@ impl SearchRepository {
              LEFT JOIN guests g ON b.guest_id = g.id \
              LEFT JOIN rooms r ON b.room_id = r.id \
              WHERE b.status != 'voided' AND ( \
-                 b.booking_number {lk} {p} OR g.nick_name {lk} {p} OR r.room_number {lk} {p}) \
+                 b.booking_number {lk} {p} ESCAPE '\\' OR g.nick_name {lk} {p} ESCAPE '\\' OR r.room_number {lk} {p} ESCAPE '\\') \
              ORDER BY b.check_in_date DESC LIMIT {plim}"
         );
 
@@ -139,20 +139,20 @@ impl SearchRepository {
                     COALESCE(g.company_name, '') AS company_name \
              FROM guests g \
              WHERE g.deleted_at IS NULL AND ( \
-                 CAST(g.id AS TEXT) {lk} {p} \
-                 OR COALESCE(g.nick_name, '') {lk} {p} \
-                 OR COALESCE(g.first_name, '') {lk} {p} \
-                 OR COALESCE(g.last_name, '') {lk} {p} \
-                 OR TRIM(COALESCE(g.first_name, '') || ' ' || COALESCE(g.last_name, '')) {lk} {p} \
-                 OR COALESCE(g.email, '') {lk} {p} \
-                 OR COALESCE(g.phone, '') {lk} {p} \
-                 OR COALESCE(g.ic_number, '') {lk} {p} \
-                 OR COALESCE(g.company_name, '') {lk} {p} \
+                 CAST(g.id AS TEXT) {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.nick_name, '') {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.first_name, '') {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.last_name, '') {lk} {p} ESCAPE '\\' \
+                 OR TRIM(COALESCE(g.first_name, '') || ' ' || COALESCE(g.last_name, '')) {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.email, '') {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.phone, '') {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.ic_number, '') {lk} {p} ESCAPE '\\' \
+                 OR COALESCE(g.company_name, '') {lk} {p} ESCAPE '\\' \
                  OR EXISTS (SELECT 1 FROM users u \
                             WHERE u.guest_id = g.id \
                               AND u.deleted_at IS NULL \
                               AND u.is_active = true \
-                              AND u.username {lk} {p})) \
+                              AND u.username {lk} {p} ESCAPE '\\')) \
              ORDER BY full_name LIMIT {plim}"
         );
 
@@ -217,15 +217,15 @@ impl SearchRepository {
              FROM customer_ledgers cl \
              LEFT JOIN companies c ON LOWER(c.company_name) = LOWER(cl.company_name) \
              LEFT JOIN bookings b ON b.id = cl.booking_id \
-             WHERE CAST(cl.id AS TEXT) {lk} {p} \
-                OR cl.company_name {lk} {p} \
-                OR COALESCE(cl.description, '') {lk} {p} \
-                OR COALESCE(cl.invoice_number, '') {lk} {p} \
-                OR COALESCE(cl.folio_number, '') {lk} {p} \
-                OR COALESCE(b.booking_number, '') {lk} {p} \
-                OR COALESCE(cl.reference_number, '') {lk} {p} \
-                OR COALESCE(cl.payment_reference, '') {lk} {p} \
-                OR COALESCE(cl.room_number, '') {lk} {p} \
+             WHERE CAST(cl.id AS TEXT) {lk} {p} ESCAPE '\\' \
+                OR cl.company_name {lk} {p} ESCAPE '\\' \
+                OR COALESCE(cl.description, '') {lk} {p} ESCAPE '\\' \
+                OR COALESCE(cl.invoice_number, '') {lk} {p} ESCAPE '\\' \
+                OR COALESCE(cl.folio_number, '') {lk} {p} ESCAPE '\\' \
+                OR COALESCE(b.booking_number, '') {lk} {p} ESCAPE '\\' \
+                OR COALESCE(cl.reference_number, '') {lk} {p} ESCAPE '\\' \
+                OR COALESCE(cl.payment_reference, '') {lk} {p} ESCAPE '\\' \
+                OR COALESCE(cl.room_number, '') {lk} {p} ESCAPE '\\' \
              ORDER BY cl.created_at DESC LIMIT {plim}"
         );
 
@@ -252,7 +252,7 @@ impl SearchRepository {
         Ok(rows
             .into_iter()
             .map(|row| {
-                let query = pattern.trim_matches('%').to_lowercase();
+                let query = unescape_like_pattern(pattern).to_lowercase();
                 let (title, route_search_value) = select_ledger_reference_title(
                     &query,
                     row.id,
@@ -314,7 +314,7 @@ impl SearchRepository {
                     COALESCE(r.status, '') AS status \
              FROM rooms r \
              LEFT JOIN room_types rt ON r.room_type_id = rt.id \
-             WHERE r.room_number {lk} {p} OR rt.name {lk} {p} OR rt.code {lk} {p} \
+             WHERE r.room_number {lk} {p} ESCAPE '\\' OR rt.name {lk} {p} ESCAPE '\\' OR rt.code {lk} {p} ESCAPE '\\' \
              ORDER BY r.room_number LIMIT {plim}"
         );
 
@@ -350,6 +350,23 @@ impl SearchRepository {
             })
             .collect())
     }
+}
+
+fn unescape_like_pattern(pattern: &str) -> String {
+    let inner = pattern.strip_prefix('%').unwrap_or(pattern);
+    let inner = inner.strip_suffix('%').unwrap_or(inner);
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\'
+            && let Some(next) = chars.next()
+        {
+            out.push(next);
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[cfg(test)]

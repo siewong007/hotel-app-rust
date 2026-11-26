@@ -664,11 +664,12 @@ SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE r.name = 'staff' A
     'support:read', 'support:write', 'navigation_support:read'
 ) ON CONFLICT (role_id, permission_id) DO NOTHING;
 
--- Guest permissions. Deliberately no bookings:create/bookings:read: guests use
--- the scoped /api/guest-portal/* surface (see tests/guest_booking_isolation.rs).
+-- Guest permissions. Deliberately no bookings:create/bookings:read/rooms:read/
+-- reviews:read/reviews:update: guests use the scoped /api/guest-portal/* surface
+-- (see tests/guest_booking_isolation.rs).
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE r.name = 'guest' AND p.name IN (
-    'rooms:read', 'reviews:create', 'reviews:read', 'reviews:update'
+    'reviews:create'
 ) ON CONFLICT (role_id, permission_id) DO NOTHING;
 
 -- eKYC compliance roles

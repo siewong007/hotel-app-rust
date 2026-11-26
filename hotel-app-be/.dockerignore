@@ -22,10 +22,22 @@ Thumbs.db
 *.log
 logs/
 
+# Database dumps, uploads & secrets
+*.dump
+uploads/
+private_uploads/
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# CodeGraph
+.codegraph/
 
 # Documentation
 *.md

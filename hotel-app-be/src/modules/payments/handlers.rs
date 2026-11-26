@@ -5,7 +5,7 @@
 use axum::{
     body::Body,
     extract::{Extension, Path, Query, State},
-    http::{HeaderValue, header},
+    http::header,
     response::{Json, Response},
 };
 
@@ -250,15 +250,20 @@ pub async fn download_payment_receipt_handler(
     State(pool): State<DbPool>,
     Path(payment_id): Path<i64>,
 ) -> Result<Response, ApiError> {
-    let (bytes, content_type) = service::load_payment_receipt(&pool, payment_id).await?;
-    let content_type = HeaderValue::from_str(&content_type).map_err(|_| {
-        ApiError::Internal("Stored receipt has an invalid content type.".to_string())
-    })?;
+    let (bytes, content_type, extension) = service::load_payment_receipt(&pool, payment_id).await?;
+    let disposition = if extension == "pdf" {
+        format!("attachment; filename=\"payment-receipt-{payment_id}.pdf\"")
+    } else {
+        format!("inline; filename=\"payment-receipt-{payment_id}.{extension}\"")
+    };
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::CACHE_CONTROL, "private, no-store")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .header(
-            header::CONTENT_DISPOSITION,
-            format!("inline; filename=payment-receipt-{payment_id}"),
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; sandbox",
         )
         .body(Body::from(bytes))
         .map_err(|_| ApiError::Internal("Unable to return the receipt.".to_string()))

@@ -1068,7 +1068,10 @@ fn duplicate_name_pattern(normalized_name: &str) -> String {
         .find(|part| part.len() >= 3)
         .unwrap_or(normalized_name);
 
-    format!("%{}%", seed)
+    format!(
+        "%{}%",
+        crate::utils::sanitization::Sanitizer::escape_like_pattern(seed)
+    )
 }
 
 fn matches_nonempty(left: Option<&str>, right: Option<&str>) -> bool {

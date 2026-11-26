@@ -695,6 +695,7 @@ const CheckoutInvoiceModal: React.FC<CheckoutInvoiceModalProps> = ({
       <!DOCTYPE html>
       <html>
         <head>
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" />
           <title>Invoice - ${escapeHtml(String(booking?.invoice_number || booking?.folio_number || `#${booking?.id ?? ''}`))}</title>
           <style>
             * {

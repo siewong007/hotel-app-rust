@@ -38,6 +38,7 @@ const POSTGRES_PORT: u16 = 5433; // Use non-standard port to avoid conflicts
 const POSTGRES_USER: &str = "hotel_admin";
 const POSTGRES_DB: &str = "hotel_management";
 const POSTGRES_PASSWORD_FILE: &str = "postgres-password.txt";
+const TOTP_ENCRYPTION_KEY_FILE: &str = "totp-encryption-key.txt";
 const CONFIGURED_POSTGRES_MAJOR_VERSION: &str = "19";
 const CONFIGURED_POSTGRES_BUILD_IDENTITY: &str = "19beta2";
 const POSTGRES_V1_CHECKSUM: &str =
@@ -565,6 +566,24 @@ fn read_or_create_postgres_password() -> Result<String, PostgresError> {
     );
     read_postgres_password_file()?.ok_or_else(|| {
         PostgresError::MigrationFailed("Failed to persist PostgreSQL credential".to_string())
+    })
+}
+
+fn totp_encryption_key_file_path() -> PathBuf {
+    get_data_directory().join(TOTP_ENCRYPTION_KEY_FILE)
+}
+
+pub fn read_or_create_totp_encryption_key() -> Result<String, PostgresError> {
+    let path = totp_encryption_key_file_path();
+    if let Some(key) = read_postgres_password_at(&path)? {
+        return Ok(key);
+    }
+
+    let key = generate_postgres_password();
+    write_postgres_password_at(&path, &key)?;
+    log::info!("Generated local TOTP encryption key at {:?}", path);
+    read_postgres_password_at(&path)?.ok_or_else(|| {
+        PostgresError::MigrationFailed("Failed to persist TOTP encryption key".to_string())
     })
 }
 
@@ -1536,6 +1555,7 @@ async fn backup_database_inner(
     // A dump that pg_restore can't even enumerate is worthless — verify now,
     // at creation time, rather than discovering it during a recovery.
     verify_backup_dump(app_handle, &backup_path, true).await?;
+    let _ = tighten_secret_file_permissions(&backup_path);
 
     // Uploads are user data the dump cannot cover (eKYC images, receipts,
     // room photos) — archive them alongside, sharing the timestamp stem.
@@ -1623,7 +1643,15 @@ fn backup_uploads(stem: &str) -> Result<Option<PathBuf>, PostgresError> {
 
     let out_path = backups_directory().join(format!("{}{}", stem, UPLOADS_FILE_SUFFIX));
     let written = (|| -> std::io::Result<()> {
-        let file = std::fs::File::create(&out_path)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&out_path)?;
+        let _ = tighten_secret_file_permissions(&out_path);
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
         let mut builder = tar::Builder::new(encoder);
         for dir in &roots {
@@ -2613,6 +2641,44 @@ SELECT COUNT(*) FROM updated;
             updated_count,
             bootstrap_password_file_path()
         );
+    }
+
+    // Remove initial-login-password.txt once no active user retains the seed
+    // placeholder hash and the seeded admin account has changed away from the
+    // generated bootstrap password.
+    let verify_sql = format!(
+        "SELECT COALESCE((SELECT password_hash FROM users WHERE username = 'admin' AND deleted_at IS NULL LIMIT 1), '') \
+         || '|' || \
+         CASE WHEN EXISTS (SELECT 1 FROM users WHERE password_hash = {} AND deleted_at IS NULL) THEN '1' ELSE '0' END;",
+        sql_string_literal(SEED_PLACEHOLDER_PASSWORD_HASH)
+    );
+    let verify_output = run_psql_scalar_sql(
+        app_handle,
+        "psql check bootstrap password removal eligibility",
+        &verify_sql,
+    )
+    .await?;
+    let verify_row = trimmed_lossy(&verify_output.stdout);
+    if let Some((admin_hash, has_placeholder)) = verify_row.rsplit_once('|')
+        && has_placeholder == "0"
+        && !admin_hash.is_empty()
+        && matches!(bcrypt::verify(&password, admin_hash), Ok(false))
+    {
+        let password_file = bootstrap_password_file_path();
+        if let Err(err) = std::fs::remove_file(&password_file) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "Failed to remove obsoleted bootstrap password file {:?}: {}",
+                    password_file,
+                    err
+                );
+            }
+        } else {
+            log::info!(
+                "Removed initial bootstrap password file {:?} because bootstrap credentials are no longer active.",
+                password_file
+            );
+        }
     }
 
     Ok(())

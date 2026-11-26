@@ -65,7 +65,16 @@ pub async fn authenticate(pool: &DbPool, metadata: &MetadataMap) -> Result<GrpcA
     };
 
     match AuthService::is_session_active(pool, user_id, &session_id).await {
-        Ok(true) => Ok(GrpcAuth { user_id, headers }),
+        Ok(true) => {
+            let (allowed, retry_after) =
+                crate::core::rate_limiter::check_grpc_user_limit(pool, user_id).await;
+            if !allowed {
+                return Err(Status::resource_exhausted(format!(
+                    "Too many gRPC requests. Please retry in {retry_after} seconds."
+                )));
+            }
+            Ok(GrpcAuth { user_id, headers })
+        }
         Ok(false) => Err(Status::unauthenticated("Session has been logged out")),
         Err(e) => {
             log::error!("gRPC session validation failed: {e}");

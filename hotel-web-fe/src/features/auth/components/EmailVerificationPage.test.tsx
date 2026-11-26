@@ -68,7 +68,7 @@ describe('EmailVerificationPage', () => {
     expect(screen.queryByText(/contact support/i)).toBeNull();
 
     fireEvent.click(backToLogin);
-    expect(mocks.navigate).toHaveBeenCalledWith('/login');
+    expect(mocks.navigate).toHaveBeenCalledWith('/login', { replace: true });
   });
 
   it('reports no critical axe violations', async () => {

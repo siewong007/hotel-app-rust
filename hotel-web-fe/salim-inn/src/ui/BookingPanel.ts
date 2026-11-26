@@ -50,7 +50,7 @@ export class BookingPanel {
         <p class="bk-msg" id="bk-msg" aria-live="polite"></p>
         <div class="bk-actions">
           <button class="pill pill--gold" type="submit">${c.submit}</button>
-          <a class="pill" data-bk="wa" href="${whatsappUrl('')}" target="_blank" rel="noopener">${c.whatsapp}</a>
+          <a class="pill" data-bk="wa" href="${whatsappUrl('')}" target="_blank" rel="noopener noreferrer">${c.whatsapp}</a>
           <a class="pill" data-bk="call" href="tel:${SITE.phoneE164}">${c.call}</a>
         </div>
         <ul class="bk-trust">

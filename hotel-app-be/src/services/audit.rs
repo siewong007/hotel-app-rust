@@ -537,18 +537,32 @@ pub async fn export_audit_logs_csv(
 
     // `Timestamp (UTC)` cells are RFC3339 — labeled because the screen shows
     // hotel-local time and the two must not be read as the same clock.
-    let mut csv_content = format!(
-        "# Exported by {exported_by} (user_id={user_id}) at {}\n# Times: UTC\n# Filters: user_id={:?} action={:?} resource_type={:?} resource_id={:?} category={:?} start_date={:?} end_date={:?} search={:?}\n# Rows: {row_count}; truncated={truncated}\n",
-        exported_at.to_rfc3339(),
-        params.user_id,
-        params.action,
-        params.resource_type,
-        params.resource_id,
-        params.category,
-        params.start_date,
-        params.end_date,
-        params.search,
-    );
+    // Funnel every preamble line through `csv_cell` so embedded commas or
+    // leading formula characters in filter parameters cannot split columns or
+    // inject spreadsheet formulas.
+    let header_lines = [
+        format!(
+            "# Exported by {exported_by} (user_id={user_id}) at {}",
+            exported_at.to_rfc3339()
+        ),
+        "# Times: UTC".to_string(),
+        format!(
+            "# Filters: user_id={:?} action={:?} resource_type={:?} resource_id={:?} category={:?} start_date={:?} end_date={:?} search={:?}",
+            params.user_id,
+            params.action,
+            params.resource_type,
+            params.resource_id,
+            params.category,
+            params.start_date,
+            params.end_date,
+            params.search,
+        ),
+        format!("# Rows: {row_count}; truncated={truncated}"),
+    ];
+    let mut csv_content: String = header_lines
+        .iter()
+        .map(|line| format!("{}\n", crate::utils::sanitization::csv_cell(line)))
+        .collect();
     csv_content.push_str(
         "ID,Timestamp (UTC),User ID,Username,Action,Category,Resource Type,Resource ID,Display Ref,Change Kind,IP Address,User Agent,Details\n",
     );

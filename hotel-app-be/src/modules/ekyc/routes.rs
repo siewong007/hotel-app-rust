@@ -1,6 +1,7 @@
 //! eKYC routes.
 
 use axum::body::Body;
+use axum::extract::DefaultBodyLimit;
 use axum::http::header;
 use axum::{
     Router,
@@ -25,7 +26,12 @@ use crate::core::rate_limiter::RateLimiters;
 pub fn routes() -> Router<DbPool> {
     Router::new()
         // User eKYC routes
-        .route("/ekyc/upload-document", post(upload_document))
+        .route(
+            "/ekyc/upload-document",
+            post(upload_document).layer(DefaultBodyLimit::max(
+                validation::MAX_EKYC_IMAGE_BYTES + 64 * 1024,
+            )),
+        )
         .route("/ekyc/submit", post(submit_ekyc))
         .route("/ekyc/status", get(get_status))
         .route("/ekyc/self-checkin", post(self_checkin))
@@ -151,10 +157,20 @@ async fn get_status(
 
 async fn self_checkin(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(input): Json<models::SelfCheckinRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    let ip = crate::routes::extract_client_ip(&headers, peer_addr);
+    let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!("Too many self check-in attempts. Please try again in {retry_after} seconds."),
+            retry_after,
+        ));
+    }
     Ok(Json(service::self_checkin(&pool, user_id, input).await?))
 }
 
@@ -352,11 +368,25 @@ async fn get_document(
     }
 
     let filename = &path[prefix.len()..];
-    if filename.contains('/') || filename.contains('\\') {
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
         return Err(ApiError::NotFound("Document not found".to_string()));
     }
 
-    let file_path = PathBuf::from(validation::EKYC_UPLOAD_DIR).join(filename);
+    let root = PathBuf::from(validation::EKYC_UPLOAD_DIR)
+        .canonicalize()
+        .map_err(|_| ApiError::NotFound("Document not found".to_string()))?;
+    let file_path = PathBuf::from(validation::EKYC_UPLOAD_DIR)
+        .join(filename)
+        .canonicalize()
+        .map_err(|_| ApiError::NotFound("Document not found".to_string()))?;
+    if !file_path.starts_with(&root) {
+        return Err(ApiError::NotFound("Document not found".to_string()));
+    }
     let bytes =
         fs::read(&file_path).map_err(|_| ApiError::NotFound("Document not found".to_string()))?;
     let content_type = match validation::image_extension(&bytes) {

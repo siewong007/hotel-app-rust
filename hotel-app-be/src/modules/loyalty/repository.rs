@@ -250,7 +250,7 @@ impl LoyaltyRepository {
             .is_some_and(|v| !v.trim().is_empty())
         {
             conditions.push(
-                "(lower(g.nick_name) LIKE lower($1) OR lower(COALESCE(g.email, '')) LIKE lower($1) OR lower(lm.member_number) LIKE lower($1))",
+                "(lower(g.nick_name) LIKE lower($1) ESCAPE '\\' OR lower(COALESCE(g.email, '')) LIKE lower($1) ESCAPE '\\' OR lower(lm.member_number) LIKE lower($1) ESCAPE '\\')",
             );
             bind_search = true;
         }
@@ -282,7 +282,9 @@ impl LoyaltyRepository {
         if bind_search {
             q = q.bind(format!(
                 "%{}%",
-                query.search.as_deref().unwrap_or_default().trim()
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(
+                    query.search.as_deref().unwrap_or_default().trim()
+                )
             ));
         }
         if bind_status {

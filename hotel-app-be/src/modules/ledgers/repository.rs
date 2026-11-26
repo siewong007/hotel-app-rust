@@ -168,7 +168,23 @@ pub async fn list_customer_ledgers(
     };
 
     // Normalise the free-text search (None when blank)
-    let search = query.search.as_deref().filter(|s| !s.trim().is_empty());
+    let company_name_pattern = query.company_name.as_deref().map(|s| {
+        format!(
+            "%{}%",
+            crate::utils::sanitization::Sanitizer::escape_like_pattern(s)
+        )
+    });
+    let search_pattern = query
+        .search
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| {
+            format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(s)
+            )
+        });
+    let search = search_pattern.as_deref();
     let invoice_state = match query.invoice_state.as_deref().filter(|s| !s.is_empty()) {
         Some("uninvoiced") => Some("uninvoiced"),
         Some("invoiced") => Some("invoiced"),
@@ -205,7 +221,7 @@ pub async fn list_customer_ledgers(
 
     let (count_sql, data_sql) = {
         let search_clause = if search.is_some() {
-            "AND ($8::text IS NULL OR (CAST(id AS TEXT) ILIKE '%' || $8 || '%' OR company_name ILIKE '%' || $8 || '%' OR description ILIKE '%' || $8 || '%' OR COALESCE(invoice_number,'') ILIKE '%' || $8 || '%' OR COALESCE(folio_number,'') ILIKE '%' || $8 || '%' OR COALESCE(contact_person,'') ILIKE '%' || $8 || '%' OR EXISTS (SELECT 1 FROM bookings b WHERE b.id = customer_ledgers.booking_id AND b.booking_number ILIKE '%' || $8 || '%')))"
+            "AND ($8::text IS NULL OR (CAST(id AS TEXT) ILIKE $8 ESCAPE '\\' OR company_name ILIKE $8 ESCAPE '\\' OR description ILIKE $8 ESCAPE '\\' OR COALESCE(invoice_number,'') ILIKE $8 ESCAPE '\\' OR COALESCE(folio_number,'') ILIKE $8 ESCAPE '\\' OR COALESCE(contact_person,'') ILIKE $8 ESCAPE '\\' OR EXISTS (SELECT 1 FROM bookings b WHERE b.id = customer_ledgers.booking_id AND b.booking_number ILIKE $8 ESCAPE '\\')))"
         } else {
             "AND ($8::text IS NULL OR TRUE)"
         };
@@ -213,7 +229,7 @@ pub async fn list_customer_ledgers(
         let balance_clause = balance_state_clause("$10::text", "$10", "CURRENT_DATE");
         let ui_clause = ui_status_clause("$11::text", "$11", "CURRENT_DATE");
         let base_where = format!(
-            "WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR company_name ILIKE '%' || $2 || '%') AND ($3::text IS NULL OR expense_type = $3) AND ($4::text IS NULL OR folio_type = $4) AND ($5::text IS NULL OR post_type = $5) AND ($6::text IS NULL OR department_code = $6) AND ($7::text IS NULL OR room_number = $7) {search_clause} {invoice_clause} {balance_clause} {ui_clause}"
+            "WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR company_name ILIKE $2 ESCAPE '\\') AND ($3::text IS NULL OR expense_type = $3) AND ($4::text IS NULL OR folio_type = $4) AND ($5::text IS NULL OR post_type = $5) AND ($6::text IS NULL OR department_code = $6) AND ($7::text IS NULL OR room_number = $7) {search_clause} {invoice_clause} {balance_clause} {ui_clause}"
         );
         let count = format!("SELECT COUNT(*) FROM customer_ledgers {base_where}");
         let data = format!(
@@ -224,7 +240,7 @@ pub async fn list_customer_ledgers(
 
     let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(&*count_sql))
         .bind(query.status.as_deref())
-        .bind(query.company_name.as_deref())
+        .bind(company_name_pattern.as_deref())
         .bind(query.expense_type.as_deref())
         .bind(query.folio_type.as_deref())
         .bind(query.post_type.as_deref())
@@ -240,7 +256,7 @@ pub async fn list_customer_ledgers(
 
     let rows = sqlx::query(sqlx::AssertSqlSafe(&*data_sql))
         .bind(query.status.as_deref())
-        .bind(query.company_name.as_deref())
+        .bind(company_name_pattern.as_deref())
         .bind(query.expense_type.as_deref())
         .bind(query.folio_type.as_deref())
         .bind(query.post_type.as_deref())
@@ -978,6 +994,22 @@ fn normalized_payment_date(value: Option<&str>) -> Result<Option<NaiveDate>, Api
     }
 }
 
+fn validated_receipt_file_url(value: Option<&str>) -> Result<Option<String>, ApiError> {
+    let Some(trimmed) = normalized_option(value) else {
+        return Ok(None);
+    };
+    if trimmed.starts_with("/uploads/")
+        && !trimmed.contains("..")
+        && !trimmed.contains('\\')
+        && !trimmed.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Ok(Some(trimmed));
+    }
+    crate::utils::sanitization::Sanitizer::sanitize_http_url(&trimmed)
+        .ok_or_else(|| ApiError::BadRequest("Invalid receipt file URL".to_string()))
+        .map(Some)
+}
+
 fn payment_values(
     amount: f64,
     payment_method: &str,
@@ -1001,7 +1033,7 @@ fn payment_values(
         payment_method: payment_method.trim().to_string(),
         payment_reference: normalized_option(payment_reference),
         receipt_number: normalized_option(receipt_number),
-        receipt_file_url: normalized_option(receipt_file_url),
+        receipt_file_url: validated_receipt_file_url(receipt_file_url)?,
         notes: normalized_option(notes),
         payment_date: normalized_payment_date(payment_date)?,
     })

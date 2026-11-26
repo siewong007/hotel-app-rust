@@ -29,6 +29,7 @@ class DefaultServerRepository(
     private val sessionManager: SessionManager,
     private val realtimeSocketClient: RealtimeSocketClient,
     private val onServerChanged: suspend () -> Unit = {},
+    private val probeSettingsApi: SettingsApi = settingsApi,
 ) : ServerRepository {
     override suspend fun probeAndOptionallySave(
         rawUrl: String,
@@ -38,11 +39,11 @@ class DefaultServerRepository(
         val normalized = ServerUrlNormalizer.normalize(rawUrl).getOrElse { return Result.failure(it) }
 
         val probeResult = safeApiCall {
-            val health = settingsApi.healthAt("$normalized/health")
+            val health = probeSettingsApi.healthAt("$normalized/health")
             if (health.status != "ok") {
                 error(health.message ?: "Server health check failed")
             }
-            val public = runCatching { settingsApi.publicSettingsAt("$normalized/api/settings/public") }
+            val public = runCatching { probeSettingsApi.publicSettingsAt("$normalized/api/settings/public") }
                 .getOrDefault(emptyList())
             val map = public.associate { it.key to it.value }
             val hotelName = map["hotel_name"]

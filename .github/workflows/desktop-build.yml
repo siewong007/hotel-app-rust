@@ -728,7 +728,15 @@ jobs:
           $buildArgs = @('--bundles', $bundles)
           if ($env:WINDOWS_CERT_THUMBPRINT) {
             $timestampUrl = if ($env:WINDOWS_SIGN_TIMESTAMP_URL) { $env:WINDOWS_SIGN_TIMESTAMP_URL } else { 'http://timestamp.digicert.com' }
-            $config = '{"bundle":{"windows":{"certificateThumbprint":"' + $env:WINDOWS_CERT_THUMBPRINT + '","digestAlgorithm":"sha256","timestampUrl":"' + $timestampUrl + '"}}}'
+            $config = @{
+              bundle = @{
+                windows = @{
+                  certificateThumbprint = $env:WINDOWS_CERT_THUMBPRINT
+                  digestAlgorithm       = 'sha256'
+                  timestampUrl          = $timestampUrl
+                }
+              }
+            } | ConvertTo-Json -Compress -Depth 5
             $buildArgs += @('--config', $config)
             Write-Host "Windows signing enabled via certificateThumbprint (timestamp: $timestampUrl)"
           } else {

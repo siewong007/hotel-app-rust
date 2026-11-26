@@ -146,24 +146,35 @@ pub fn save_base64_image(
     Ok(format!("{EKYC_UPLOAD_DIR}/{}", filename))
 }
 
+pub struct CommonEkycTextFields<'a> {
+    pub full_name: &'a str,
+    pub id_type: &'a str,
+    pub id_number: &'a str,
+    pub nationality: Option<&'a str>,
+    pub phone: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub id_issuing_country: Option<&'a str>,
+    pub current_address: Option<&'a str>,
+}
+
 /// Reject values that cannot fit their `ekyc_verifications` column.
 ///
 /// `EkycSubmissionRequest` carries no `validator` derive, so without this an
 /// over-long field reaches Postgres and surfaces as a 500 ("value too long for
 /// type character varying") rather than a 400 the caller can act on. Bounds
 /// mirror the column widths in `0001_v1_baseline.sql`.
-pub fn validate_submission_field_lengths(req: &EkycSubmissionRequest) -> Result<(), ApiError> {
+pub fn validate_common_text_fields(fields: CommonEkycTextFields<'_>) -> Result<(), ApiError> {
     let checks: [(&str, Option<&str>, usize); 8] = [
-        ("full_name", Some(req.full_name.as_str()), 255),
-        ("id_type", Some(req.id_type.as_str()), 80),
-        ("id_number", Some(req.id_number.as_str()), 255),
-        ("nationality", req.nationality.as_deref(), 100),
-        ("phone", req.phone.as_deref(), 50),
-        ("email", req.email.as_deref(), 255),
-        ("id_issuing_country", req.id_issuing_country.as_deref(), 100),
+        ("full_name", Some(fields.full_name), 255),
+        ("id_type", Some(fields.id_type), 80),
+        ("id_number", Some(fields.id_number), 255),
+        ("nationality", fields.nationality, 100),
+        ("phone", fields.phone, 50),
+        ("email", fields.email, 255),
+        ("id_issuing_country", fields.id_issuing_country, 100),
         // current_address is TEXT (unbounded in Postgres); cap it anyway so a
         // multi-megabyte string cannot be parked in the review queue.
-        ("current_address", req.current_address.as_deref(), 2000),
+        ("current_address", fields.current_address, 2000),
     ];
 
     for (field, value, max) in checks {
@@ -181,15 +192,15 @@ pub fn validate_submission_field_lengths(req: &EkycSubmissionRequest) -> Result<
     // persisted post-sanitization, so a name made entirely of control
     // characters passes a raw `trim().is_empty()` check and then lands in the
     // compliance record as an empty string.
-    if Sanitizer::sanitize_guest_name(&req.full_name).is_empty() {
+    if Sanitizer::sanitize_guest_name(fields.full_name).is_empty() {
         return Err(ApiError::BadRequest("full_name is required".to_string()));
     }
-    if req.id_number.trim().is_empty() {
+    if fields.id_number.trim().is_empty() {
         return Err(ApiError::BadRequest("id_number is required".to_string()));
     }
     // `sanitize_phone` keeps only digits and a leading '+', so a phone of pure
     // punctuation silently becomes "". Reject rather than store a blank.
-    if let Some(phone) = req.phone.as_deref()
+    if let Some(phone) = fields.phone
         && !phone.trim().is_empty()
         && Sanitizer::sanitize_phone(phone).is_empty()
     {
@@ -199,6 +210,19 @@ pub fn validate_submission_field_lengths(req: &EkycSubmissionRequest) -> Result<
     }
 
     Ok(())
+}
+
+pub fn validate_submission_field_lengths(req: &EkycSubmissionRequest) -> Result<(), ApiError> {
+    validate_common_text_fields(CommonEkycTextFields {
+        full_name: &req.full_name,
+        id_type: &req.id_type,
+        id_number: &req.id_number,
+        nationality: req.nationality.as_deref(),
+        phone: req.phone.as_deref(),
+        email: req.email.as_deref(),
+        id_issuing_country: req.id_issuing_country.as_deref(),
+        current_address: req.current_address.as_deref(),
+    })
 }
 
 pub fn validate_dates(

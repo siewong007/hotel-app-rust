@@ -174,6 +174,7 @@ async fn refresh(
     headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<(CookieJar, Json<models::RefreshTokenResponse>), ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
     let ip = extract_client_ip(&headers, peer_addr);
     let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
     if !allowed {
@@ -191,20 +192,34 @@ async fn refresh(
 
 async fn logout(
     State(pool): State<DbPool>,
+    limiters: Option<Extension<RateLimiters>>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<(CookieJar, Json<serde_json::Value>), ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
+    // Only for the sign-out audit row and rate limiting; optional so a missing
+    // peer address can never stop someone signing out.
+    let ip = connect_info.map(|Extension(ConnectInfo(peer))| extract_client_ip(&headers, peer));
+    if let (Some(Extension(limiters)), Some(client_ip)) = (limiters, ip) {
+        let (allowed, retry_after) = limiters.sensitive.check_with_retry(client_ip).await;
+        if !allowed {
+            return Err(ApiError::TooManyRequestsRetryAfter(
+                format!(
+                    "Too many logout attempts. Please try again in {} seconds.",
+                    retry_after
+                ),
+                retry_after,
+            ));
+        }
+    }
     let req = refresh_request_from_cookie(&jar)?;
-    // Only for the sign-out audit row; optional so a missing peer address can
-    // never stop someone signing out.
-    let ip = connect_info
-        .map(|Extension(ConnectInfo(peer))| extract_client_ip(&headers, peer).to_string());
+    let ip_str = ip.map(|addr| addr.to_string());
     let user_agent: Option<String> = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.chars().take(512).collect());
-    handlers::logout_handler(State(pool), jar, req, ip, user_agent).await
+    handlers::logout_handler(State(pool), jar, req, ip_str, user_agent).await
 }
 
 async fn register(

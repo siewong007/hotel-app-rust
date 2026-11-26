@@ -76,6 +76,22 @@ pub struct SuppressionDraft {
     pub notes: Option<String>,
 }
 
+fn sanitize_required_header_line(
+    value: &str,
+    field: &str,
+    min: usize,
+    max: usize,
+) -> Result<String, ApiError> {
+    let value = Sanitizer::sanitize_header_line(value);
+    let len = value.chars().count();
+    if len < min || len > max {
+        return Err(ApiError::BadRequest(format!(
+            "{field} must be between {min} and {max} characters"
+        )));
+    }
+    Ok(value)
+}
+
 fn sanitize_required_text(
     value: &str,
     field: &str,
@@ -210,7 +226,7 @@ pub fn validate_campaign_input(input: CampaignInput) -> Result<CampaignDraft, Ap
         name: sanitize_required_text(&input.name, "name", 1, 160)?,
         topic: campaign_type.clone(),
         campaign_type,
-        subject: sanitize_required_text(&input.subject, "subject", 1, 255)?,
+        subject: sanitize_required_header_line(&input.subject, "subject", 1, 255)?,
         body_html: validate_body(&input.body_html, "body_html")?,
         body_text: sanitize_optional_text(input.body_text, "body_text", MAX_BODY_CHARS)?,
         template_id: input.template_id,
@@ -237,7 +253,7 @@ pub fn validate_template_input(input: TemplateInput) -> Result<TemplateDraft, Ap
     Ok(TemplateDraft {
         code,
         name: sanitize_required_text(&input.name, "name", 1, 100)?,
-        subject: sanitize_required_text(&input.subject, "subject", 1, 255)?,
+        subject: sanitize_required_header_line(&input.subject, "subject", 1, 255)?,
         body_html: validate_body(&input.body_html, "body_html")?,
         body_text: sanitize_optional_text(input.body_text, "body_text", MAX_BODY_CHARS)?,
         variables,

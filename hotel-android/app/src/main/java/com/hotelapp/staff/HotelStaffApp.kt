@@ -14,6 +14,7 @@ import com.hotelapp.staff.core.network.NetworkFactory
 import com.hotelapp.staff.core.network.NetworkMonitor
 import com.hotelapp.staff.core.network.RealtimeSocketClient
 import com.hotelapp.staff.core.notifications.StaffNotificationManager
+import com.hotelapp.staff.core.print.InvoicePdfPrinter
 import com.hotelapp.staff.core.storage.HotelLocalDatabase
 import com.hotelapp.staff.core.storage.HotelLocalStore
 import com.hotelapp.staff.core.sync.OfflineOpsCoordinator
@@ -111,6 +112,14 @@ class AppContainer(val application: Application) {
         .addConverterFactory(HotelJson.asConverterFactory("application/json".toMediaType()))
         .build()
 
+    private val probeClient = NetworkFactory.createProbeClient()
+    private val probeRetrofit: Retrofit = Retrofit.Builder()
+        .baseUrl(NetworkFactory.PLACEHOLDER_BASE_URL)
+        .client(probeClient)
+        .addConverterFactory(HotelJson.asConverterFactory("application/json".toMediaType()))
+        .build()
+    private val probeSettingsApi: SettingsApi = probeRetrofit.create(SettingsApi::class.java)
+
     private val settingsApi: SettingsApi = retrofit.create(SettingsApi::class.java)
     private val authApi: AuthApi = retrofit.create(AuthApi::class.java)
     private val passkeyApi: PasskeyApi = retrofit.create(PasskeyApi::class.java)
@@ -125,19 +134,30 @@ class AppContainer(val application: Application) {
     private val ekycApi: EkycApi = retrofit.create(EkycApi::class.java)
     private val operationsApi: OperationsApi = retrofit.create(OperationsApi::class.java)
 
+    internal suspend fun clearTransientUserData() {
+        offlineOpsCoordinator.clearAll()
+        serverConfigStore.clearRecentSearches()
+        InvoicePdfPrinter.clearCachedInvoices(application)
+        WidgetRefreshWorker.clearWidget(
+            context = application,
+            localStore = localStore,
+            hotelName = serverConfigStore.config.value.hotelName,
+        )
+    }
+
+    internal suspend fun clearSessionData() {
+        cookieJar.clearAll()
+        clearTransientUserData()
+        serverConfigStore.setLastAuthenticatedUserId(null)
+    }
+
     val serverRepository: ServerRepository = DefaultServerRepository(
         settingsApi = settingsApi,
         serverConfigStore = serverConfigStore,
         sessionManager = sessionManager,
         realtimeSocketClient = realtimeSocketClient,
-        onServerChanged = {
-            offlineOpsCoordinator.clearAll()
-            WidgetRefreshWorker.clearWidget(
-                context = application,
-                localStore = localStore,
-                hotelName = serverConfigStore.config.value.hotelName,
-            )
-        },
+        onServerChanged = { clearSessionData() },
+        probeSettingsApi = probeSettingsApi,
     )
     val authRepository: AuthRepository = DefaultAuthRepository(
         authApi = authApi,
@@ -146,13 +166,13 @@ class AppContainer(val application: Application) {
         sessionManager = sessionManager,
         cookieJar = cookieJar,
         realtimeSocketClient = realtimeSocketClient,
-        onLoggedOut = {
-            offlineOpsCoordinator.clearAll()
-            WidgetRefreshWorker.clearWidget(
-                context = application,
-                localStore = localStore,
-                hotelName = serverConfigStore.config.value.hotelName,
-            )
+        onLoggedOut = { clearSessionData() },
+        onAuthenticatedUser = { userId ->
+            val previousUserId = serverConfigStore.getLastAuthenticatedUserId()
+            if (previousUserId != null && previousUserId != userId) {
+                clearTransientUserData()
+            }
+            serverConfigStore.setLastAuthenticatedUserId(userId)
         },
     )
     val bookingsRepository: BookingsRepository = DefaultBookingsRepository(bookingsApi)
@@ -179,10 +199,26 @@ class HotelStaffApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        InvoicePdfPrinter.clearCachedInvoices(this)
         container = AppContainer(this)
         container.staffNotificationManager.ensureChannels()
         WidgetRefreshWorker.schedulePeriodic(this)
 
+        appScope.launch {
+            var wasAuthenticated = false
+            container.sessionManager.authState.collect { state ->
+                when (state) {
+                    is AuthState.Authenticated -> wasAuthenticated = true
+                    AuthState.Unauthenticated -> {
+                        if (wasAuthenticated) {
+                            wasAuthenticated = false
+                            container.clearSessionData()
+                        }
+                    }
+                    AuthState.Checking -> Unit
+                }
+            }
+        }
         appScope.launch {
             container.offlineOpsCoordinator.refreshPendingCount()
         }

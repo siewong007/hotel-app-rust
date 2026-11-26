@@ -2,6 +2,7 @@ package com.hotelapp.staff
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,7 @@ import com.hotelapp.staff.core.auth.AuthState
 import com.hotelapp.staff.core.auth.BiometricLockManager
 import com.hotelapp.staff.core.auth.BiometricLockOverlay
 import com.hotelapp.staff.core.design.HotelTheme
+import com.hotelapp.staff.core.print.InvoicePdfPrinter
 import com.hotelapp.staff.navigation.HotelAppRoot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +44,7 @@ class MainActivity : FragmentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        InvoicePdfPrinter.clearCachedInvoices(applicationContext)
         captureDeepLink(intent)
         val container = (application as HotelStaffApp).container
         splashScreen.setKeepOnScreenCondition {
@@ -135,15 +138,18 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
+            LaunchedEffect(isAppLocked, authState, serverConfig.biometricLockEnabled) {
+                val shouldSecureWindow = authState is AuthState.Authenticated &&
+                    (isAppLocked || serverConfig.biometricLockEnabled)
+                if (shouldSecureWindow) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+
             HotelTheme(themePreference = serverConfig.themePreference) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    HotelAppRoot(
-                        container = container,
-                        windowWidthSizeClass = windowSizeClass.widthSizeClass,
-                        pendingDeepLink = pendingDeepLink,
-                        onConsumeDeepLink = { _pendingDeepLink.value = null },
-                        deferDeepLinks = isAppLocked,
-                    )
                     if (isAppLocked && authState is AuthState.Authenticated) {
                         BiometricLockOverlay(
                             hotelName = serverConfig.hotelName,
@@ -153,6 +159,14 @@ class MainActivity : FragmentActivity() {
                                 isAppLocked = false
                                 scope.launch { container.authRepository.logout() }
                             },
+                        )
+                    } else {
+                        HotelAppRoot(
+                            container = container,
+                            windowWidthSizeClass = windowSizeClass.widthSizeClass,
+                            pendingDeepLink = pendingDeepLink,
+                            onConsumeDeepLink = { _pendingDeepLink.value = null },
+                            deferDeepLinks = isAppLocked,
                         )
                     }
                 }
@@ -170,6 +184,8 @@ class MainActivity : FragmentActivity() {
         val data = intent?.dataString ?: intent?.getStringExtra(EXTRA_DEEP_LINK)
         if (!data.isNullOrBlank()) {
             _pendingDeepLink.value = data
+            intent?.data = null
+            intent?.removeExtra(EXTRA_DEEP_LINK)
         }
     }
 

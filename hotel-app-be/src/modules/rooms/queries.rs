@@ -787,6 +787,22 @@ pub async fn append_room_type_image(pool: &DbPool, id: i64, path: &str) -> Resul
     Ok(())
 }
 
+/// True when another room type still references `path` in its `images` array.
+pub async fn is_room_type_image_referenced_elsewhere(
+    pool: &DbPool,
+    exclude_room_type_id: i64,
+    path: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM room_types WHERE id <> $1 AND images @> jsonb_build_array($2::text))",
+    )
+    .bind(exclude_room_type_id)
+    .bind(path)
+    .fetch_one(pool)
+    .await
+    .map_err(db_err)
+}
+
 pub async fn room_type_name_and_code(
     pool: &DbPool,
     id: i64,

@@ -15,6 +15,7 @@ import {
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import BrandMark from '../components/common/BrandMark';
+import { getAccessToken } from '../auth/tokenStore';
 import { useTranslation, intlTag } from '../i18n';
 import {
   DesktopAppStatus,
@@ -121,7 +122,7 @@ export function DesktopServiceGate({ children }: DesktopServiceGateProps) {
 
     try {
       const { invoke } = await getTauriCoreApi();
-      await invoke('restart_backend');
+      await invoke('restart_backend', { accessToken: getAccessToken() });
       const nextStatus = await getDesktopStatus();
       setStatus(nextStatus);
     } catch (restartError) {
@@ -151,7 +152,7 @@ export function DesktopServiceGate({ children }: DesktopServiceGateProps) {
   const openDataFolder = async () => {
     try {
       const { invoke } = await getTauriCoreApi();
-      await invoke('open_data_folder');
+      await invoke('open_data_folder', { accessToken: getAccessToken() });
     } catch (folderError) {
       setError(folderError instanceof Error ? folderError.message : t('desktop.errors.openFolderFailed'));
     }

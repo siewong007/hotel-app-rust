@@ -1,6 +1,7 @@
 package com.hotelapp.staff.feature.guests
 
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hotelapp.staff.core.config.ServerConfigStore
 import com.hotelapp.staff.core.design.DetailScreenSkeleton
@@ -275,7 +275,9 @@ fun GuestDetailScreen(
                                                 label = "Call",
                                                 onClick = {
                                                     runCatching {
-                                                        context.startActivity(Intent(Intent.ACTION_DIAL, "tel:$phone".toUri()))
+                                                        context.startActivity(
+                                                            Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phone, null)),
+                                                        )
                                                     }
                                                 },
                                             )
@@ -291,7 +293,9 @@ fun GuestDetailScreen(
                                                 label = "Email",
                                                 onClick = {
                                                     runCatching {
-                                                        context.startActivity(Intent(Intent.ACTION_SENDTO, "mailto:$email".toUri()))
+                                                        context.startActivity(
+                                                            Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", email, null)),
+                                                        )
                                                     }
                                                 },
                                             )

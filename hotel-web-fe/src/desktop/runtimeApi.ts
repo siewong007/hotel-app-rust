@@ -1,3 +1,5 @@
+import { getAccessToken } from '../auth/tokenStore';
+
 const RUNTIME_API_BASE_URL_KEY = 'hotelRuntimeApiBaseUrl';
 const TAURI_MODES = new Set(['tauri', 'desktop']);
 let runtimeApiBaseUrl: string | null = null;
@@ -68,7 +70,9 @@ export interface DesktopUpgradeSummary {
 
 export async function upgradeDatabaseFromBackup(): Promise<DesktopUpgradeSummary> {
   const { invoke } = await getTauriCoreApi();
-  return invoke<DesktopUpgradeSummary>('upgrade_database_from_backup');
+  return invoke<DesktopUpgradeSummary>('upgrade_database_from_backup', {
+    accessToken: getAccessToken(),
+  });
 }
 
 /** One managed backup pair as returned by the `list_backups` command —
@@ -93,13 +97,13 @@ export interface DesktopRestoreSummary {
 
 export async function listBackups(): Promise<DesktopBackupInfo[]> {
   const { invoke } = await getTauriCoreApi();
-  return invoke<DesktopBackupInfo[]>('list_backups');
+  return invoke<DesktopBackupInfo[]>('list_backups', { accessToken: getAccessToken() });
 }
 
 /** Run a managed backup into the default backups dir; resolves to its path. */
 export async function backupNow(): Promise<string> {
   const { invoke } = await getTauriCoreApi();
-  return invoke<string>('backup_database', { destination: null });
+  return invoke<string>('backup_database', { destination: null, accessToken: getAccessToken() });
 }
 
 /**
@@ -110,12 +114,15 @@ export async function backupNow(): Promise<string> {
  */
 export async function restoreDatabase(filename: string): Promise<DesktopRestoreSummary> {
   const { invoke } = await getTauriCoreApi();
-  return invoke<DesktopRestoreSummary>('restore_database', { filename });
+  return invoke<DesktopRestoreSummary>('restore_database', {
+    filename,
+    accessToken: getAccessToken(),
+  });
 }
 
 export async function openBackupsFolder(): Promise<void> {
   const { invoke } = await getTauriCoreApi();
-  return invoke<void>('open_backups_folder');
+  return invoke<void>('open_backups_folder', { accessToken: getAccessToken() });
 }
 
 export function isTauriBuildTarget(): boolean {

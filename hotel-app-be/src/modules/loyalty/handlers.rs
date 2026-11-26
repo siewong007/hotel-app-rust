@@ -92,9 +92,11 @@ pub async fn gift_points_handler(
 pub async fn guest_loyalty_socket_handler(
     State(pool): State<DbPool>,
     Extension(hub): Extension<LoyaltyHub>,
+    limiters: Option<Extension<crate::core::rate_limiter::RateLimiters>>,
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
     let token = headers
         .get(axum::http::header::SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())
@@ -106,9 +108,22 @@ pub async fn guest_loyalty_socket_handler(
         })
         .ok_or_else(|| ApiError::Unauthorized("Missing guest session token".to_string()))?;
     let guest_id = guest_portal::require_guest_session_token(token, &pool).await?;
+    if let Some(Extension(limiters)) = limiters {
+        let (allowed, retry_after) = limiters
+            .guest_portal_token_read
+            .check_with_retry(format!("guest:{guest_id}"))
+            .await;
+        if !allowed {
+            return Err(ApiError::TooManyRequestsRetryAfter(
+                format!("Too many portal requests. Please try again in {retry_after} seconds."),
+                retry_after,
+            ));
+        }
+    }
+    let session_token = token.to_string();
     Ok(websocket
         .protocols(["hotel-guest-loyalty"])
-        .on_upgrade(move |socket| serve_guest_socket(socket, hub, guest_id)))
+        .on_upgrade(move |socket| serve_guest_socket(socket, hub, pool, guest_id, session_token)))
 }
 
 pub async fn loyalty_socket_handler(
@@ -117,6 +132,7 @@ pub async fn loyalty_socket_handler(
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
+    crate::core::middleware::validate_request_origin(&headers)?;
     let token = headers
         .get(axum::http::header::SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())
@@ -166,7 +182,7 @@ pub async fn loyalty_socket_handler(
     }
     Ok(websocket
         .protocols(["hotel-loyalty"])
-        .on_upgrade(move |socket| serve_socket(socket, hub)))
+        .on_upgrade(move |socket| serve_socket(socket, hub, pool, actor_user_id, session_id)))
 }
 
 pub async fn rules_handler(

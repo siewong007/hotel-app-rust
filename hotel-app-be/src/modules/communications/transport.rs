@@ -34,7 +34,8 @@ fn build_message(from: Mailbox, email: &OutgoingEmail) -> Result<Message, String
         .to
         .parse()
         .map_err(|_| "invalid recipient address".to_string())?;
-    let builder = Message::builder().from(from).to(to).subject(&email.subject);
+    let safe_subject = crate::utils::sanitization::Sanitizer::sanitize_header_line(&email.subject);
+    let builder = Message::builder().from(from).to(to).subject(safe_subject);
     let html_part = || {
         SinglePart::builder()
             .header(lettre::message::header::ContentType::TEXT_HTML)
@@ -62,9 +63,10 @@ fn build_message(from: Mailbox, email: &OutgoingEmail) -> Result<Message, String
             let content_type =
                 lettre::message::header::ContentType::parse(&attachment.content_type)
                     .map_err(|_| format!("invalid attachment type {}", attachment.content_type))?;
+            let safe_filename =
+                crate::utils::sanitization::Sanitizer::sanitize_header_line(&attachment.filename);
             mixed = mixed.singlepart(
-                MimeAttachment::new(attachment.filename.clone())
-                    .body(attachment.bytes.clone(), content_type),
+                MimeAttachment::new(safe_filename).body(attachment.bytes.clone(), content_type),
             );
         }
         builder.multipart(mixed)

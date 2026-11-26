@@ -72,11 +72,13 @@ jobs:
       # the check activates itself once one does.
       - name: Check for breaking proto changes
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if git cat-file -e "origin/${{ github.base_ref }}:proto/buf.yaml" 2>/dev/null; then
-            buf breaking proto --against ".git#branch=origin/${{ github.base_ref }},subdir=proto"
+          if git cat-file -e "origin/${BASE_REF}:proto/buf.yaml" 2>/dev/null; then
+            buf breaking proto --against ".git#branch=origin/${BASE_REF},subdir=proto"
           else
-            echo "No proto module on ${{ github.base_ref }}; skipping breaking check"
+            echo "No proto module on ${BASE_REF}; skipping breaking check"
           fi
 
   db-mirror:

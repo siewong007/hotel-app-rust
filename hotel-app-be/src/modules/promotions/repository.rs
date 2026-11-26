@@ -399,16 +399,22 @@ impl PromotionRepository {
         let clause = lifecycle_filter
             .and_then(super::lifecycle::lifecycle_clause)
             .unwrap_or("true");
+        let like_search = search.map(|s| {
+            format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(s)
+            )
+        });
         let count_sql = format!(
             r#"
                 SELECT COUNT(*)
                 {PROMOTION_ADMIN_FROM}
                 WHERE ({clause})
-                  AND ($1::text IS NULL OR LOWER(p.name) LIKE '%' || LOWER($1) || '%' OR LOWER(p.slug) LIKE '%' || LOWER($1) || '%')
+                  AND ($1::text IS NULL OR LOWER(p.name) LIKE LOWER($1) ESCAPE '\' OR LOWER(p.slug) LIKE LOWER($1) ESCAPE '\')
             "#,
         );
         let total = query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_sql))
-            .bind(search)
+            .bind(like_search.as_deref())
             .fetch_one(pool)
             .await
             .map_err(ApiError::from)?;
@@ -417,7 +423,7 @@ impl PromotionRepository {
                     SELECT {{PROMOTION_COLUMNS}}
                     {{PROMOTION_ADMIN_FROM}}
                     WHERE ({clause})
-                      AND ($1::text IS NULL OR LOWER(p.name) LIKE '%' || LOWER($1) || '%' OR LOWER(p.slug) LIKE '%' || LOWER($1) || '%')
+                      AND ($1::text IS NULL OR LOWER(p.name) LIKE LOWER($1) ESCAPE '\' OR LOWER(p.slug) LIKE LOWER($1) ESCAPE '\')
                     ORDER BY p.updated_at DESC
                     LIMIT $2 OFFSET $3
                 "#
@@ -425,7 +431,7 @@ impl PromotionRepository {
         .replace("{PROMOTION_COLUMNS}", PROMOTION_COLUMNS)
         .replace("{PROMOTION_ADMIN_FROM}", PROMOTION_ADMIN_FROM);
         let rows = query(sqlx::AssertSqlSafe(&*sql))
-            .bind(search)
+            .bind(like_search.as_deref())
             .bind(page_size)
             .bind(offset)
             .fetch_all(pool)
@@ -775,6 +781,12 @@ impl PromotionRepository {
         page_size: i64,
         offset: i64,
     ) -> Result<(i64, Vec<Voucher>), ApiError> {
+        let like_search = search.map(|s| {
+            format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(s)
+            )
+        });
         let count_sql = r#"
                 SELECT COUNT(*) FROM vouchers v
                 JOIN promotions p ON p.id = v.promotion_id
@@ -786,13 +798,14 @@ impl PromotionRepository {
                         AND v.expires_at < CURRENT_TIMESTAMP + INTERVAL '7 days')
                     OR ($1 <> 'expired' AND $1 <> 'expiring_soon' AND v.status = $1)
                 )
-                  AND ($2::text IS NULL OR LOWER(p.name) LIKE '%' || LOWER($2) || '%' OR LOWER(v.code) = LOWER($2))
+                  AND ($2::text IS NULL OR LOWER(p.name) LIKE LOWER($4) ESCAPE '\' OR LOWER(v.code) = LOWER($2))
                   AND ($3::bigint IS NULL OR v.promotion_id = $3)
             "#;
         let total = query_scalar::<_, i64>(count_sql)
             .bind(status)
             .bind(search)
             .bind(promotion_id)
+            .bind(like_search.as_deref())
             .fetch_one(pool)
             .await
             .map_err(ApiError::from)?;
@@ -809,7 +822,7 @@ impl PromotionRepository {
                     )
                       -- Raw codes are masked in staff responses. Only allow an exact
                       -- code lookup so substring searches cannot become a code oracle.
-                      AND ($2::text IS NULL OR LOWER(p.name) LIKE '%' || LOWER($2) || '%' OR LOWER(v.code) = LOWER($2))
+                      AND ($2::text IS NULL OR LOWER(p.name) LIKE LOWER($6) ESCAPE '\' OR LOWER(v.code) = LOWER($2))
                       AND ($3::bigint IS NULL OR v.promotion_id = $3)
                     ORDER BY v.created_at DESC LIMIT $4 OFFSET $5
                 "#
@@ -821,6 +834,7 @@ impl PromotionRepository {
             .bind(promotion_id)
             .bind(page_size)
             .bind(offset)
+            .bind(like_search.as_deref())
             .fetch_all(pool)
             .await
             .map_err(ApiError::from)?;

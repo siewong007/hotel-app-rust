@@ -52,6 +52,7 @@ fn turnstile_http_client() -> Result<&'static reqwest::Client, ApiError> {
     TURNSTILE_HTTP_CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(10))
                 .build()
                 .map_err(|_| "Turnstile HTTP client initialization failed".to_string())

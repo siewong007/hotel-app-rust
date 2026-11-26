@@ -15,7 +15,7 @@ import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 
 const EmailVerificationPage: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { t } = useTranslation('auth');
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -23,8 +23,17 @@ const EmailVerificationPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
+  const initialTokenRef = useRef<string | null>(searchParams.get('token'));
 
-  const token = searchParams.get('token');
+  const token = initialTokenRef.current;
+
+  useEffect(() => {
+    if (searchParams.has('token')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('token');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -49,7 +58,7 @@ const EmailVerificationPage: React.FC = () => {
           setCountdown((prev) => {
             if (prev <= 1) {
               if (timerRef.current) clearInterval(timerRef.current);
-              navigate('/login');
+              navigate('/login', { replace: true });
               return 0;
             }
             return prev - 1;
@@ -73,7 +82,7 @@ const EmailVerificationPage: React.FC = () => {
   }, [token, navigate, t]);
 
   const handleLoginRedirect = () => {
-    navigate('/login');
+    navigate('/login', { replace: true });
   };
 
   return (

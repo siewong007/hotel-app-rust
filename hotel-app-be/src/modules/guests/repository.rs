@@ -156,25 +156,28 @@ impl GuestRepository {
                 WHERE sc.guest_id = guests.id AND sc.status <> 'closed')) AS has_open_support"#;
 
         if let Some(q) = search {
-            let pattern = format!("%{}%", q.trim());
+            let pattern = format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(q.trim())
+            );
 
             let (p_search, p_limit, p_offset) = ("$1", "$2", "$3");
 
             let search_clause = format!(
-                "(CAST(id AS TEXT) {like_op} {p_search} \
-                 OR COALESCE(nick_name, '') {like_op} {p_search} \
-                 OR COALESCE(first_name, '') {like_op} {p_search} \
-                 OR COALESCE(last_name, '') {like_op} {p_search} \
-                 OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) {like_op} {p_search} \
-                 OR COALESCE(email, '') {like_op} {p_search} \
-                 OR COALESCE(phone, '') {like_op} {p_search} \
-                 OR COALESCE(ic_number, '') {like_op} {p_search} \
-                 OR COALESCE(company_name, '') {like_op} {p_search} \
+                "(CAST(id AS TEXT) {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(nick_name, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(first_name, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(last_name, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(email, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(phone, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(ic_number, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR COALESCE(company_name, '') {like_op} {p_search} ESCAPE '\\' \
                  OR EXISTS (SELECT 1 FROM users u \
                             WHERE u.guest_id = guests.id \
                               AND u.deleted_at IS NULL \
                               AND u.is_active = true \
-                              AND u.username {like_op} {p_search}))"
+                              AND u.username {like_op} {p_search} ESCAPE '\\'))"
             );
 
             let count_sql = format!(
@@ -1017,7 +1020,7 @@ impl GuestRepository {
                     OR ($3::TEXT IS NOT NULL AND regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $3)
                     OR ($4::TEXT IS NOT NULL AND LOWER(TRIM(ic_number)) = LOWER(TRIM($4)))
                     OR LOWER(TRIM(nick_name)) = LOWER(TRIM($5))
-                    OR LOWER(nick_name) LIKE LOWER($6)
+                    OR LOWER(nick_name) LIKE LOWER($6) ESCAPE '\'
                   )
                 ORDER BY updated_at DESC
                 LIMIT 100

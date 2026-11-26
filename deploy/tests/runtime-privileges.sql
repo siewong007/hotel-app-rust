@@ -118,5 +118,24 @@ DO $$ BEGIN
             RAISE;
         END IF;
     END;
+    -- Setting app.allow_audit_mutation as hotel_app must still fail the owner check.
+    SET LOCAL app.allow_audit_mutation = 'on';
+    BEGIN
+        UPDATE public.audit_logs SET action = action WHERE id = 929990002;
+        RAISE EXCEPTION 'runtime role updated audit_logs with app.allow_audit_mutation=on';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM <> 'audit_logs is append-only: UPDATE and DELETE are forbidden' THEN
+            RAISE;
+        END IF;
+    END;
+    BEGIN
+        DELETE FROM public.audit_logs WHERE id = 929990002;
+        RAISE EXCEPTION 'runtime role deleted audit_logs with app.allow_audit_mutation=on';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM <> 'audit_logs is append-only: UPDATE and DELETE are forbidden' THEN
+            RAISE;
+        END IF;
+    END;
+    RESET app.allow_audit_mutation;
 END $$;
 ROLLBACK;

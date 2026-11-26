@@ -57,6 +57,7 @@ pub fn is_enabled() -> bool {
 
 fn http_client() -> Result<reqwest::Client, ApiError> {
     reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| ApiError::Internal(format!("Failed to build HTTP client: {e}")))

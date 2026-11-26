@@ -46,7 +46,8 @@ async fn get_rate_plans(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_rate_plans(State(pool)).await
 }
 
@@ -64,7 +65,8 @@ async fn get_rate_plan(
     headers: HeaderMap,
     path: Path<i64>,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_rate_plan(State(pool), path).await
 }
 
@@ -73,7 +75,8 @@ async fn get_rate_plan_with_rates(
     headers: HeaderMap,
     path: Path<i64>,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_rate_plan_with_rates(State(pool), path).await
 }
 
@@ -102,7 +105,8 @@ async fn get_room_rates(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_room_rates(State(pool)).await
 }
 
@@ -129,7 +133,8 @@ async fn get_room_rates_by_plan(
     headers: HeaderMap,
     path: Path<i64>,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_room_rates_by_plan(State(pool), path).await
 }
 
@@ -138,7 +143,8 @@ async fn get_room_rate(
     headers: HeaderMap,
     path: Path<i64>,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_room_rate(State(pool), path).await
 }
 
@@ -166,7 +172,8 @@ async fn get_applicable_rate(
     headers: HeaderMap,
     query: Query<models::ApplicableRateQuery>,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_applicable_rate(State(pool), query).await
 }
 
@@ -174,6 +181,7 @@ async fn get_room_types_for_rates(
     State(pool): State<DbPool>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, handlers::RateError> {
-    require_permission_helper(&pool, &headers, "rooms:read").await?;
+    let user_id = require_permission_helper(&pool, &headers, "rooms:read").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_room_types_for_rates(State(pool)).await
 }

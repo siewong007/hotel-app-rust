@@ -63,9 +63,10 @@ pub(crate) fn persist_booking_access_token(token: &str) -> String {
 /// pre-cutover plaintext rows still match the raw token.
 pub(crate) fn booking_access_token_matches(presented: &str, stored: &str) -> bool {
     if stored.starts_with(BOOKING_ACCESS_TOKEN_HASH_PREFIX) {
-        stored == persist_booking_access_token(presented)
+        let digest = persist_booking_access_token(presented);
+        constant_time_eq::constant_time_eq(stored.as_bytes(), digest.as_bytes())
     } else {
-        stored == presented
+        constant_time_eq::constant_time_eq(stored.as_bytes(), presented.as_bytes())
     }
 }
 
@@ -612,6 +613,11 @@ pub async fn require_guest_session_token(token: &str, pool: &DbPool) -> Result<i
     GuestPortalSessionRepository::touch_session_guest_id(pool, &token_hash)
         .await?
         .ok_or_else(|| ApiError::Unauthorized("Invalid or expired guest session".to_string()))
+}
+
+pub async fn is_guest_session_token_active(token: &str, pool: &DbPool) -> Result<bool, ApiError> {
+    let token_hash = hash_session_token(token);
+    GuestPortalSessionRepository::is_session_active(pool, &token_hash).await
 }
 
 /// GET /guest-portal/me

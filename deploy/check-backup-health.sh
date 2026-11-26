@@ -42,20 +42,49 @@ FAIL_MARKER="${CHECK_BACKUP_FAIL_MARKER:-$(dirname "$STATUS_FILE")/backup-health
 NOW="${CHECK_BACKUP_NOW:-}"
 
 ALERT_ENV_FILE="${CHECK_BACKUP_ALERT_ENV:-$(dirname "$STATUS_FILE")/../backup-alert.env}"
-if [ -r "$ALERT_ENV_FILE" ]; then
-    # shellcheck disable=SC1090
-    . "$ALERT_ENV_FILE"
-fi
 ALERT_WEBHOOK="${SALIMINN_ALERT_WEBHOOK:-}"
+if [ -r "$ALERT_ENV_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        case "$line" in
+            ""|\#*) continue ;;
+            SALIMINN_ALERT_WEBHOOK=*)
+                ALERT_WEBHOOK="${line#SALIMINN_ALERT_WEBHOOK=}"
+                case "$ALERT_WEBHOOK" in
+                    \"*\") ALERT_WEBHOOK="${ALERT_WEBHOOK#\"}"; ALERT_WEBHOOK="${ALERT_WEBHOOK%\"}" ;;
+                    \'*\') ALERT_WEBHOOK="${ALERT_WEBHOOK#\'}"; ALERT_WEBHOOK="${ALERT_WEBHOOK%\'}" ;;
+                esac
+                ;;
+        esac
+    done < "$ALERT_ENV_FILE"
+fi
 
 emit() { printf '[saliminn-backup-health] %s\n' "$*"; }
 
+json_escape() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    printf '%s' "$s"
+}
+
 alert() {
     [ -n "$ALERT_WEBHOOK" ] || return 0
+    case "$ALERT_WEBHOOK" in
+        https://*) ;;
+        *)
+            emit "WARNING: refusing non-HTTPS alert webhook URL"
+            return 0
+            ;;
+    esac
     command -v curl >/dev/null 2>&1 || return 0
-    local text="${1//\"/\\\"}"
+    local text
+    text=$(json_escape "saliminn backup-health: $1")
     curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
-        -d "{\"text\":\"saliminn backup-health: $text\"}" "$ALERT_WEBHOOK" >/dev/null 2>&1 \
+        -d "{\"text\":\"$text\"}" "$ALERT_WEBHOOK" >/dev/null 2>&1 \
         || emit "WARNING: alert webhook POST failed"
 }
 

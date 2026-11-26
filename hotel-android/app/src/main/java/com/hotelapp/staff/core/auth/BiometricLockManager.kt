@@ -1,6 +1,7 @@
 package com.hotelapp.staff.core.auth
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -24,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -81,9 +83,11 @@ fun BiometricLockOverlay(
     modifier: Modifier = Modifier,
 ) {
     val colors = HotelTheme.colors
+    BackHandler(enabled = true) {}
     Box(
         modifier = modifier
             .fillMaxSize()
+            .pointerInput(Unit) {}
             .background(colors.surfaceApp)
             .padding(28.dp),
         contentAlignment = Alignment.Center,

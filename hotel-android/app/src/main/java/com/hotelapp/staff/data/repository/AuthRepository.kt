@@ -34,6 +34,7 @@ class DefaultAuthRepository(
     private val cookieJar: EncryptedCookieJar,
     private val realtimeSocketClient: RealtimeSocketClient,
     private val onLoggedOut: suspend () -> Unit = {},
+    private val onAuthenticatedUser: suspend (Long) -> Unit = {},
 ) : AuthRepository {
 
     override suspend fun restoreSession(): Boolean {
@@ -77,6 +78,7 @@ class DefaultAuthRepository(
                 permissions = access.permissions,
                 routePolicies = access.routePolicies,
             )
+            onAuthenticatedUser(profile.id)
             sessionManager.setAuthenticated(refreshed.accessToken, session)
             realtimeSocketClient.start()
         }
@@ -155,6 +157,7 @@ class DefaultAuthRepository(
             twoFactorEnrollmentDeadline = response.twoFactorEnrollmentDeadline,
             recoveryCodesRemaining = response.recoveryCodesRemaining,
         )
+        onAuthenticatedUser(response.user.id)
         sessionManager.setAuthenticated(response.accessToken, session)
         runCatching { serverRepository?.refreshBranding() }
         realtimeSocketClient.start()

@@ -26,7 +26,7 @@ const GUEST_PATH_PREFIXES = [
 ] as const;
 
 function pathnameOf(path: string): string {
-  const cut = path.split('?')[0] ?? path;
+  const cut = (path.split('?')[0] ?? path).replace(/^\/+/, '/');
   if (cut.length > 1 && cut.endsWith('/')) {
     return cut.slice(0, -1);
   }
@@ -73,6 +73,7 @@ export function shouldUseDocumentNavigation(
 }
 
 export function hrefFromAppPath(to: string): string {
-  const url = new URL(to, 'https://guest.invalid');
-  return `${url.pathname}${url.search}${url.hash}`;
+  const safePath = to.replace(/^\/+/, '/');
+  const url = new URL(safePath, 'https://guest.invalid');
+  return `${url.pathname.replace(/^\/+/, '/')}${url.search}${url.hash}`;
 }

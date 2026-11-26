@@ -38,7 +38,10 @@ pub async fn global_search(
         })
         .unwrap_or_default();
 
-    let pattern = format!("%{}%", query);
+    let pattern = format!(
+        "%{}%",
+        crate::utils::sanitization::Sanitizer::escape_like_pattern(&query)
+    );
     let mut groups = Vec::new();
 
     if wants_type(&wanted_types, "bookings") && can_read(pool, user_id, "bookings:read").await {

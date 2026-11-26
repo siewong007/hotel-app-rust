@@ -175,13 +175,13 @@ pub async fn disable_2fa(
     let mut code_valid = false;
     if AuthService::verify_totp_code(&totp_secret, &req.code).unwrap_or(false) {
         code_valid = true;
-    } else if let Some(index) = AuthService::check_recovery_code(&req.code, &recovery_codes) {
-        code_valid = true;
-        let mut updated_codes = recovery_codes.clone();
-        updated_codes.remove(index);
-        AuthService::update_recovery_codes(pool, user_id, &updated_codes)
+    } else if let Some(index) = AuthService::check_recovery_code(&req.code, &recovery_codes)
+        && AuthService::consume_recovery_code(pool, user_id, &recovery_codes[index])
             .await
-            .map_err(|error| ApiError::Database(error.to_string()))?;
+            .map_err(|error| ApiError::Database(error.to_string()))?
+            .is_some()
+    {
+        code_valid = true;
     }
 
     if !code_valid {

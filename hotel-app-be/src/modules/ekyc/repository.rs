@@ -619,7 +619,12 @@ impl EkycRepository {
         );
 
         let exact_search = normalized_search(params.search.as_deref());
-        let like_search = exact_search.as_ref().map(|search| format!("%{}%", search));
+        let like_search = exact_search.as_ref().map(|search| {
+            format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(search)
+            )
+        });
 
         let total_row = bind_count_filters(
             sqlx::query(sqlx::AssertSqlSafe(&*count_query)),
@@ -1029,9 +1034,9 @@ fn list_query(select_clause: &str, order_clause: &str, page_clause: &str) -> Str
           AND (
               $12 IS NULL
               OR CAST(e.id AS TEXT) = $12
-              OR LOWER(COALESCE(e.full_name, '')) LIKE LOWER($13)
-              OR LOWER(COALESCE(e.email, '')) LIKE LOWER($13)
-              OR COALESCE(e.phone, '') LIKE $13
+              OR LOWER(COALESCE(e.full_name, '')) LIKE LOWER($13) ESCAPE '\'
+              OR LOWER(COALESCE(e.email, '')) LIKE LOWER($13) ESCAPE '\'
+              OR COALESCE(e.phone, '') LIKE $13 ESCAPE '\'
               OR COALESCE(e.id_number, '') = $12
               OR CAST(e.user_id AS TEXT) = $12
           )

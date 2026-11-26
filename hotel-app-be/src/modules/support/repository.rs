@@ -300,9 +300,9 @@ WHERE (
   AND ($4::text IS NULL OR c.priority = $4)
   AND ($5::bigint IS NULL OR c.assigned_to_user_id = $5)
   AND ($6::text IS NULL OR (
-        lower(c.conversation_number) LIKE lower($6)
-        OR lower(COALESCE(g.nick_name, g.first_name || ' ' || g.last_name, '')) LIKE lower($6)
-        OR lower(COALESCE(b.booking_number, '')) LIKE lower($6)
+        lower(c.conversation_number) LIKE lower($6) ESCAPE '\'
+        OR lower(COALESCE(g.nick_name, g.first_name || ' ' || g.last_name, '')) LIKE lower($6) ESCAPE '\'
+        OR lower(COALESCE(b.booking_number, '')) LIKE lower($6) ESCAPE '\'
   ))
 "#;
         let count_sql = format!(
@@ -316,7 +316,12 @@ WHERE (
         let search_pattern = search
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(|value| format!("%{value}%"));
+            .map(|value| {
+                format!(
+                    "%{}%",
+                    crate::utils::sanitization::Sanitizer::escape_like_pattern(value)
+                )
+            });
 
         let total = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_sql))
             .bind(queue)

@@ -233,4 +233,10 @@ object InvoicePdfPrinter {
         doc.finishPage(page)
         return doc
     }
+
+    fun clearCachedInvoices(context: Context) {
+        runCatching {
+            File(context.cacheDir, "invoices").deleteRecursively()
+        }
+    }
 }

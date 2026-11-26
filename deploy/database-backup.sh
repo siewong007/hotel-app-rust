@@ -42,6 +42,7 @@
 # saliminn-backup-health.timer has something machine-readable to alert on; a
 # nightly backup nobody checks is indistinguishable from no backup at all.
 set -Eeuo pipefail
+umask 077
 
 # SALIMINN_BACKUP_DIR / SALIMINN_SKIP_DUMP exist so the retention logic can be
 # exercised against a scratch directory without touching production, matching the

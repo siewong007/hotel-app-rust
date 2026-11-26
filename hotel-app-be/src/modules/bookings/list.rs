@@ -77,41 +77,47 @@ pub fn build_booking_list_query(
         param_idx += 1;
         let p = param_placeholder(param_idx);
         conditions.push(format!(
-            "(CAST(b.id AS TEXT) {like_op} {p} \
-              OR g.nick_name {like_op} {p} \
-              OR b.booking_number {like_op} {p} \
-              OR b.folio_number {like_op} {p} \
-              OR r.room_number {like_op} {p} \
-              OR ('room ' || r.room_number) {like_op} {p} \
-              OR ('rm ' || r.room_number) {like_op} {p} \
-              OR EXISTS (SELECT 1 FROM invoices inv WHERE inv.booking_id = b.id AND inv.invoice_number {like_op} {p}) \
-              OR EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {like_op} {p}) \
-              OR EXISTS (SELECT 1 FROM booking_groups bgs WHERE bgs.id = b.booking_group_id AND bgs.group_number {like_op} {p}) \
+            "(CAST(b.id AS TEXT) {like_op} {p} ESCAPE '\\' \
+              OR g.nick_name {like_op} {p} ESCAPE '\\' \
+              OR b.booking_number {like_op} {p} ESCAPE '\\' \
+              OR b.folio_number {like_op} {p} ESCAPE '\\' \
+              OR r.room_number {like_op} {p} ESCAPE '\\' \
+              OR ('room ' || r.room_number) {like_op} {p} ESCAPE '\\' \
+              OR ('rm ' || r.room_number) {like_op} {p} ESCAPE '\\' \
+              OR EXISTS (SELECT 1 FROM invoices inv WHERE inv.booking_id = b.id AND inv.invoice_number {like_op} {p} ESCAPE '\\') \
+              OR EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {like_op} {p} ESCAPE '\\') \
+              OR EXISTS (SELECT 1 FROM booking_groups bgs WHERE bgs.id = b.booking_group_id AND bgs.group_number {like_op} {p} ESCAPE '\\') \
               OR EXISTS ( \
                   SELECT 1 FROM customer_ledgers cl \
                   WHERE cl.booking_id = b.id \
                     AND ( \
-                        CAST(cl.id AS TEXT) {like_op} {p} \
-                        OR COALESCE(cl.invoice_number, '') {like_op} {p} \
-                        OR COALESCE(cl.folio_number, '') {like_op} {p} \
-                        OR COALESCE(cl.reference_number, '') {like_op} {p} \
-                        OR COALESCE(cl.transaction_code, '') {like_op} {p} \
-                        OR COALESCE(cl.payment_reference, '') {like_op} {p} \
-                        OR COALESCE(cl.company_name, '') {like_op} {p} \
-                        OR COALESCE(cl.contact_person, '') {like_op} {p} \
-                        OR COALESCE(cl.description, '') {like_op} {p} \
-                        OR COALESCE(cl.room_number, '') {like_op} {p} \
+                        CAST(cl.id AS TEXT) {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.invoice_number, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.folio_number, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.reference_number, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.transaction_code, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.payment_reference, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.company_name, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.contact_person, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.description, '') {like_op} {p} ESCAPE '\\' \
+                        OR COALESCE(cl.room_number, '') {like_op} {p} ESCAPE '\\' \
                     ) \
               ))"
         ));
-        binds.search = Some(format!("%{}%", s.trim()));
+        binds.search = Some(format!(
+            "%{}%",
+            crate::utils::sanitization::Sanitizer::escape_like_pattern(s.trim())
+        ));
     }
 
     if let Some(rn) = room_number {
         param_idx += 1;
         let p = param_placeholder(param_idx);
-        conditions.push(format!("r.room_number {like_op} {p}"));
-        binds.room_number = Some(format!("%{}%", rn.trim()));
+        conditions.push(format!("r.room_number {like_op} {p} ESCAPE '\\'"));
+        binds.room_number = Some(format!(
+            "%{}%",
+            crate::utils::sanitization::Sanitizer::escape_like_pattern(rn.trim())
+        ));
     }
 
     // When a payment method is filtered, the date filter targets the *payment*
@@ -195,10 +201,13 @@ pub fn build_booking_list_query(
         param_idx += 1;
         let p = param_placeholder(param_idx);
         conditions.push(format!(
-            "(b.source {like_op} {p} OR b.remarks {like_op} {p} \
-              OR EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {like_op} {p}))"
+            "(b.source {like_op} {p} ESCAPE '\\' OR b.remarks {like_op} {p} ESCAPE '\\' \
+              OR EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {like_op} {p} ESCAPE '\\'))"
         ));
-        binds.online_channel = Some(format!("%{}%", oc.trim()));
+        binds.online_channel = Some(format!(
+            "%{}%",
+            crate::utils::sanitization::Sanitizer::escape_like_pattern(oc.trim())
+        ));
     }
 
     if matches!(params.company_billed, Some(true)) {
@@ -600,15 +609,13 @@ mod tests {
         let p = param_placeholder(1);
 
         let like = like_operator();
-        assert!(
-            query
-                .count_sql
-                .contains(&format!("(b.source {like} {p} OR b.remarks {like} {p}"))
-        );
+        assert!(query.count_sql.contains(&format!(
+            "(b.source {like} {p} ESCAPE '\\' OR b.remarks {like} {p} ESCAPE '\\'"
+        )));
         // A booking whose channel is only recorded as `booking_channel_id`
         // (every guest web booking) must still match by channel name.
         assert!(query.count_sql.contains(&format!(
-            "EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {like} {p})"
+            "EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {like} {p} ESCAPE '\\')"
         )));
         assert_eq!(query.binds.online_channel.as_deref(), Some("%Booking.com%"));
     }
@@ -622,7 +629,7 @@ mod tests {
         let p = param_placeholder(1);
 
         assert!(query.count_sql.contains(&format!(
-            "EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {} {})",
+            "EXISTS (SELECT 1 FROM booking_channels bc WHERE bc.id = b.booking_channel_id AND bc.name {} {} ESCAPE '\\')",
             like_operator(),
             p
         )));
@@ -638,12 +645,12 @@ mod tests {
         let p = param_placeholder(1);
 
         assert!(query.count_sql.contains(&format!(
-            "('room ' || r.room_number) {} {}",
+            "('room ' || r.room_number) {} {} ESCAPE '\\'",
             like_operator(),
             p
         )));
         assert!(query.count_sql.contains(&format!(
-            "('rm ' || r.room_number) {} {}",
+            "('rm ' || r.room_number) {} {} ESCAPE '\\'",
             like_operator(),
             p
         )));

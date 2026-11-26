@@ -147,7 +147,10 @@ impl AuditRepository {
             count_sqlx = count_sqlx.bind(end_date.clone());
         }
         if let Some(ref search) = params.search {
-            count_sqlx = count_sqlx.bind(format!("%{}%", search));
+            count_sqlx = count_sqlx.bind(format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(search)
+            ));
             if let Ok(id) = search.parse::<i64>() {
                 count_sqlx = count_sqlx.bind(id);
             }
@@ -466,7 +469,7 @@ fn build_log_where_clause(
     }
     if let Some(search) = params.search.as_deref() {
         let details_filter = if search_details {
-            format!(" OR a.details::text ILIKE ${}", bind_index)
+            format!(" OR a.details::text ILIKE ${} ESCAPE '\\'", bind_index)
         } else {
             String::new()
         };
@@ -476,7 +479,7 @@ fn build_log_where_clause(
             String::new()
         };
         where_clauses.push(format!(
-            "(a.action ILIKE ${0} OR a.resource_type ILIKE ${0} OR u.username ILIKE ${0}{1}{2})",
+            "(a.action ILIKE ${0} ESCAPE '\\' OR a.resource_type ILIKE ${0} ESCAPE '\\' OR u.username ILIKE ${0} ESCAPE '\\'{1}{2})",
             bind_index, details_filter, id_filter
         ));
         bind_index += 1;
@@ -519,7 +522,7 @@ fn build_category_count_where_clause(params: &AuditLogQuery) -> (String, i32) {
     }
     if params.search.is_some() {
         where_clauses.push(format!(
-            "(a.action ILIKE ${0} OR a.resource_type ILIKE ${0} OR u.username ILIKE ${0} OR a.details::text ILIKE ${0})",
+            "(a.action ILIKE ${0} ESCAPE '\\' OR a.resource_type ILIKE ${0} ESCAPE '\\' OR u.username ILIKE ${0} ESCAPE '\\' OR a.details::text ILIKE ${0} ESCAPE '\\')",
             bind_index
         ));
     }
@@ -558,7 +561,10 @@ fn bind_log_filters<'q, O>(
         query = query.bind(end_date.clone());
     }
     if let Some(ref search) = params.search {
-        query = query.bind(format!("%{}%", search));
+        query = query.bind(format!(
+            "%{}%",
+            crate::utils::sanitization::Sanitizer::escape_like_pattern(search)
+        ));
         if let Ok(id) = search.parse::<i64>() {
             query = query.bind(id);
         }

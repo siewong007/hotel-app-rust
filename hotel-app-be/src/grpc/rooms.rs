@@ -283,6 +283,9 @@ impl RoomService for RoomGrpc {
         check_permission(&self.pool, auth.user_id, "rooms:read")
             .await
             .map_err(to_status)?;
+        crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         let currency = self.currency().await?;
         let rooms = room_service::get_rooms_handler(State(self.pool.clone()))
@@ -306,6 +309,9 @@ impl RoomService for RoomGrpc {
     ) -> Result<Response<pb::SearchRoomsResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
         check_permission(&self.pool, auth.user_id, "rooms:read")
+            .await
+            .map_err(to_status)?;
+        crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
             .await
             .map_err(to_status)?;
         let req = request.into_inner();
@@ -338,6 +344,9 @@ impl RoomService for RoomGrpc {
     ) -> Result<Response<pb::GetRoomResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
         check_permission(&self.pool, auth.user_id, "rooms:read")
+            .await
+            .map_err(to_status)?;
+        crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
             .await
             .map_err(to_status)?;
         let id = c::require_name(&request.into_inner().name, "rooms")?;
@@ -880,6 +889,9 @@ impl RoomService for RoomGrpc {
         check_permission(&self.pool, auth.user_id, "rooms:read")
             .await
             .map_err(to_status)?;
+        crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         let reviews = room_service::get_room_reviews_handler(
             State(self.pool.clone()),
@@ -1258,6 +1270,9 @@ impl RoomTypeService for RoomTypeGrpc {
                 .0
         } else {
             check_permission(&self.pool, auth.user_id, "rooms:read")
+                .await
+                .map_err(to_status)?;
+            crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
                 .await
                 .map_err(to_status)?;
             room_service::get_room_types_handler(State(self.pool.clone()))

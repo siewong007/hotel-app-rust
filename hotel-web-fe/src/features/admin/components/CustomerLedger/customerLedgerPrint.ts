@@ -81,6 +81,7 @@ export function printCompanyInvoice(invoiceNumber: string): void {
     <!DOCTYPE html>
     <html>
       <head>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" />
         <title>${escapeHtml(t('finance:ledger.print.invoiceDocTitle', { number: invoiceNumber }))}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -169,6 +170,7 @@ export function downloadCompanyInvoice(params: {
     <html>
       <head>
         <meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" />
         <title>Invoice - ${escapeHtml(invoiceNumber)}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -325,6 +327,7 @@ export function printCompanyStatement(params: {
   const htmlContent = `
     <html>
       <head>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" />
         <title>${escapeHtml(t('finance:ledger.print.statementDocTitle', { company: companyName }))}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
@@ -429,6 +432,7 @@ export function printSingleReceipt(params: {
   const htmlContent = `
     <html>
       <head>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;" />
         <title>${escapeHtml(t('finance:ledger.print.receiptDocTitle', { number: entry.invoice_number || entry.folio_number || `#${entry.id}` }))}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
