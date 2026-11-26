@@ -40,22 +40,32 @@ pub struct EmailQueueHealth {
     pub sent_24h: i64,
 }
 
-/// One staff notification as seen by a specific user (`read_at` null = unread).
-#[derive(Debug, Clone, Serialize, FromRow)]
+/// One staff notification as seen by a specific user (`read_at` null = unread),
+/// enriched with derived urgency, deep-link routing, and live completion state.
+#[derive(Debug, Clone, Serialize)]
 pub struct StaffNotificationItem {
     pub id: i64,
+    pub audience_permission: String,
     pub kind: String,
     pub subject: Option<String>,
     pub title: String,
     pub body: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub read_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub priority: String,
+    pub category: String,
+    pub action_url: Option<String>,
+    pub action_label_key: Option<String>,
+    pub requires_action: bool,
+    pub action_pending: bool,
 }
 
-/// `GET /api/system/notifications` — the caller's feed plus its unread count.
+/// `GET /api/system/notifications` — the caller's feed plus actionable counters.
 #[derive(Debug, Serialize)]
 pub struct StaffNotificationsResponse {
     pub unread: i64,
+    pub urgent_unread: i64,
+    pub action_pending_count: i64,
     pub items: Vec<StaffNotificationItem>,
 }
 

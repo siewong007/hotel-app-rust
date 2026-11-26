@@ -36,8 +36,8 @@ export function useStaffNotifications(enabled: boolean, open: boolean) {
   return useQuery({
     queryKey: ['system', 'staff-notifications'],
     queryFn: getStaffNotifications,
-    staleTime: 15_000,
-    refetchInterval: open ? 15_000 : 60_000,
+    staleTime: 10_000,
+    refetchInterval: open ? 15_000 : 45_000,
     refetchIntervalInBackground: false,
     enabled,
   });

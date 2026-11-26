@@ -14,6 +14,11 @@ const KNOWN_DOMAINS = new Set<ApiDomain>([
   'ledgers',
   'housekeeping',
   'night-audit',
+  'notifications',
+  'payments',
+  'support',
+  'ekyc',
+  'maintenance',
 ]);
 
 /**

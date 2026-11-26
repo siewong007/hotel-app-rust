@@ -6,10 +6,12 @@ const mocks = vi.hoisted(() => ({
   hasPermission: true as boolean | ((permission: string) => boolean),
   serverUnread: 3,
   staffUnread: 0,
+  urgentUnread: 0,
   staffItems: [] as Array<Record<string, unknown>>,
-  items: [] as Array<Record<string, unknown>>,
-  // What the bell asked the feed hook for, render by render.
   feedCalls: [] as Array<{ enabled: boolean; open: boolean }>,
+  markOneStaffRead: vi.fn(),
+  markAllStaffRead: vi.fn(),
+  markLocalRead: vi.fn(),
 }));
 
 vi.mock('../../auth/AuthContext', () => ({
@@ -24,36 +26,36 @@ vi.mock('../../features/notifications/hooks/useDeliveryFeed', () => ({
   useDeliveryFeed: (params: { tier?: string }, enabled: boolean, open: boolean) => {
     mocks.feedCalls.push({ enabled, open });
     const all = [
-        {
-          id: 11,
-          campaign_id: null,
-          kind: 'checkout_receipt',
-          guest_id: 5,
-          topic: 'checkout_receipt',
-          recipient_masked: 'j•••@example.com',
-          subject: 'Your receipt for booking BK-1',
-          status: 'sent',
-          attempts: 1,
-          last_error: null,
-          sent_at: null,
-          created_at: new Date().toISOString(),
-          tier: 'transactional',
-        },
-        {
-          id: 12,
-          campaign_id: 7,
-          kind: 'campaign',
-          guest_id: 5,
-          topic: 'announcement',
-          recipient_masked: 'b•••@example.com',
-          subject: 'Summer promo',
-          status: 'sent',
-          attempts: 1,
-          last_error: null,
-          sent_at: null,
-          created_at: new Date().toISOString(),
-          tier: 'marketing',
-        },
+      {
+        id: 11,
+        campaign_id: null,
+        kind: 'checkout_receipt',
+        guest_id: 5,
+        topic: 'checkout_receipt',
+        recipient_masked: 'j•••@example.com',
+        subject: 'Your receipt for booking BK-1',
+        status: 'sent',
+        attempts: 1,
+        last_error: null,
+        sent_at: null,
+        created_at: new Date().toISOString(),
+        tier: 'transactional',
+      },
+      {
+        id: 12,
+        campaign_id: 7,
+        kind: 'campaign',
+        guest_id: 5,
+        topic: 'announcement',
+        recipient_masked: 'b•••@example.com',
+        subject: 'Summer promo',
+        status: 'sent',
+        attempts: 1,
+        last_error: null,
+        sent_at: null,
+        created_at: new Date().toISOString(),
+        tier: 'marketing',
+      },
     ];
     const items = !params?.tier || params.tier === 'all'
       ? all
@@ -71,7 +73,6 @@ vi.mock('../../features/notifications/hooks/useDeliveryFeed', () => ({
   },
 }));
 
-// The compat Link needs router context; stub it as a plain anchor.
 vi.mock('../../router/compat', () => ({
   Link: ({ to, children, ...rest }: { to: string; children?: React.ReactNode }) => (
     <a href={to} {...rest}>
@@ -82,17 +83,23 @@ vi.mock('../../router/compat', () => ({
 
 vi.mock('../../utils/notificationStore', () => ({
   useNotifications: () => ({ items: [], unreadCount: 0 }),
-  markAllRead: vi.fn(),
+  markAllRead: (...args: unknown[]) => mocks.markLocalRead(...args),
   clearAll: vi.fn(),
   removeNotification: vi.fn(),
 }));
 
 vi.mock('../../features/admin/system/hooks', () => ({
   useStaffNotifications: () => ({
-    data: { unread: mocks.staffUnread, items: mocks.staffItems },
+    data: {
+      unread: mocks.staffUnread,
+      urgent_unread: mocks.urgentUnread,
+      action_pending_count: mocks.staffUnread,
+      items: mocks.staffItems,
+    },
     isPending: false,
   }),
-  useMarkAllStaffNotificationsRead: () => ({ mutate: vi.fn() }),
+  useMarkStaffNotificationRead: () => ({ mutate: mocks.markOneStaffRead, isPending: false }),
+  useMarkAllStaffNotificationsRead: () => ({ mutate: mocks.markAllStaffRead, isPending: false }),
 }));
 
 import { NotificationCenter } from './NotificationCenter';
@@ -102,57 +109,37 @@ describe('NotificationCenter', () => {
     mocks.hasPermission = true;
     mocks.serverUnread = 3;
     mocks.staffUnread = 0;
+    mocks.urgentUnread = 0;
     mocks.staffItems = [];
     mocks.feedCalls = [];
+    mocks.markOneStaffRead.mockReset();
+    mocks.markAllStaffRead.mockReset();
+    mocks.markLocalRead.mockReset();
   });
 
   afterEach(cleanup);
 
-  it('shows the server unread count on the badge for staff with feed access', () => {
+  it('counts actionable staff unread on the bell badge and shows View all for all staff', () => {
+    mocks.hasPermission = false;
+    mocks.staffUnread = 2;
+
     render(<NotificationCenter />);
 
-    const bell = screen.getByLabelText('Notifications (3 unread)');
+    const bell = screen.getByLabelText('Notifications (2 unread)');
     expect(bell).toBeTruthy();
+    // Guest outbox feed must stay disabled without communications:read.
     expect(mocks.feedCalls.length).toBeGreaterThan(0);
-    expect(mocks.feedCalls.every((call) => call.enabled)).toBe(true);
+    expect(mocks.feedCalls.every((call) => !call.enabled)).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
     const viewAll = screen.getByLabelText('View all notifications');
     expect(viewAll.getAttribute('href')).toBe('/notifications');
+    expect(mocks.markAllStaffRead).not.toHaveBeenCalled();
   });
 
-  it('falls back to in-app alerts count without communications:read', () => {
-    mocks.hasPermission = false;
-
-    render(<NotificationCenter />);
-
-    // No server unread -> alerts count (0) means no "(N unread)" suffix.
-    expect(screen.getByLabelText('Notifications')).toBeTruthy();
-    // ... and the feed is never requested: it would only collect 403s, each
-    // one a "no permission" toast.
-    fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
-    expect(mocks.feedCalls.length).toBeGreaterThan(0);
-    expect(mocks.feedCalls.every((call) => !call.enabled)).toBe(true);
-  });
-
-  it('groups the outbox feed into priority tabs and filters by tier', () => {
-    render(<NotificationCenter />);
-
-    fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
-
-    // Alerts tab is default; switch to Transactional.
-    fireEvent.click(screen.getByRole('tab', { name: 'Transactional' }));
-    expect(screen.getByText('Your receipt for booking BK-1')).toBeTruthy();
-    expect(screen.queryByText('Summer promo')).toBeNull();
-
-    // Marketing tab shows only the campaign mail.
-    fireEvent.click(screen.getByRole('tab', { name: 'Marketing' }));
-    expect(screen.getByText('Summer promo')).toBeTruthy();
-    expect(screen.queryByText(/receipt for booking/)).toBeNull();
-  });
-
-  it('shows persisted staff alerts on the System tab and counts them in the badge', () => {
-    mocks.staffUnread = 1;
+  it('defaults to Action Required, avoids auto-mark-read, and marks single items on CTA or check', () => {
+    mocks.staffUnread = 2;
+    mocks.urgentUnread = 1;
     mocks.staffItems = [
       {
         id: 1,
@@ -162,51 +149,44 @@ describe('NotificationCenter', () => {
         body: 'db timeout',
         created_at: new Date().toISOString(),
         read_at: null,
+        priority: 'urgent',
+        category: 'system',
+        action_url: '/jobs',
+        action_label_key: 'inspectJobs',
+        requires_action: true,
+        action_pending: true,
       },
-    ];
-
-    render(<NotificationCenter />);
-
-    // Badge = in-app unread (0) + feed unread (3) + staff unread (1).
-    expect(screen.getByLabelText('Notifications (4 unread)')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
-    fireEvent.click(screen.getByRole('tab', { name: 'System' }));
-    expect(screen.getByText('Background job failed: night_audit')).toBeTruthy();
-    expect(screen.getByText('db timeout')).toBeTruthy();
-  });
-
-  it('shows a guest bank-transfer claim to reception without communications access', () => {
-    mocks.hasPermission = (permission: string) => permission === 'payments:read';
-    mocks.serverUnread = 0;
-    mocks.staffUnread = 1;
-    mocks.staffItems = [
       {
-        id: 9,
-        kind: 'bank_transfer_pending',
-        subject: 'BK-200',
-        title: 'Payment pending approval',
-        body: 'raw english body',
+        id: 2,
+        kind: 'ekyc_pending_review',
+        subject: '42',
+        title: 'eKYC awaiting review',
+        body: 'Verification #42 submitted.',
         created_at: new Date().toISOString(),
         read_at: null,
+        priority: 'high',
+        category: 'ekyc',
+        action_url: '/ekyc-admin?application_id=42',
+        action_label_key: 'reviewEkyc',
+        requires_action: true,
+        action_pending: true,
       },
     ];
 
     render(<NotificationCenter />);
 
-    expect(screen.getByLabelText('Notifications (1 unread)')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
-    fireEvent.click(screen.getByRole('tab', { name: 'System' }));
-    expect(screen.getByText('Payment pending approval')).toBeTruthy();
-    expect(screen.getByText('A guest submitted a bank transfer for BK-200. It is waiting for approval.')).toBeTruthy();
-    expect(screen.queryByText('raw english body')).toBeNull();
-    const review = screen.getByRole('link', { name: 'Review payment' });
-    expect(review.getAttribute('href')).toBe('/payment-approvals');
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications (2 unread)' }));
+    expect(mocks.markAllStaffRead).not.toHaveBeenCalled();
+    expect(screen.getByText('Background job failed: night_audit')).toBeTruthy();
+    expect(screen.getByText('db timeout')).toBeTruthy();
+
+    const inspectLink = screen.getByRole('link', { name: 'Inspect jobs' });
+    expect(inspectLink.getAttribute('href')).toBe('/jobs');
+    fireEvent.click(inspectLink);
+    expect(mocks.markOneStaffRead).toHaveBeenCalledWith(1);
   });
 
-  it('shows a guest support alert to support viewers without settings or payments access', () => {
-    mocks.hasPermission = (permission: string) => permission === 'support:read';
-    mocks.serverUnread = 0;
+  it('supports explicit Mark all as read and per-item Mark as read buttons', () => {
     mocks.staffUnread = 1;
     mocks.staffItems = [
       {
@@ -217,15 +197,70 @@ describe('NotificationCenter', () => {
         body: 'A guest opened support conversation SUP-2026-0001.',
         created_at: new Date().toISOString(),
         read_at: null,
+        priority: 'high',
+        category: 'support',
+        action_url: '/support?search=SUP-2026-0001',
+        action_label_key: 'replyGuest',
+        requires_action: true,
+        action_pending: true,
+      },
+    ];
+
+    render(<NotificationCenter />);
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications (1 unread)' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as read' }));
+    expect(mocks.markOneStaffRead).toHaveBeenCalledWith(14);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all as read' }));
+    expect(mocks.markAllStaffRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows localized bank-transfer claim on default Action Required tab without communications:read', () => {
+    mocks.hasPermission = (permission: string) => permission === 'payments:read';
+    mocks.serverUnread = 0;
+    mocks.staffUnread = 1;
+    mocks.urgentUnread = 1;
+    mocks.staffItems = [
+      {
+        id: 9,
+        kind: 'bank_transfer_pending',
+        subject: 'BK-200',
+        title: 'Payment pending approval',
+        body: 'raw english body',
+        created_at: new Date().toISOString(),
+        read_at: null,
+        priority: 'urgent',
+        category: 'payments',
+        action_url: '/payment-approvals',
+        action_label_key: 'reviewPayment',
+        requires_action: true,
+        action_pending: true,
       },
     ];
 
     render(<NotificationCenter />);
 
-    expect(screen.getByLabelText('Notifications (1 unread)')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications (1 unread)' }));
+    expect(screen.getByText('Payment pending approval')).toBeTruthy();
+    expect(screen.getByText('A guest submitted a bank transfer for BK-200. It is waiting for approval.')).toBeTruthy();
+    expect(screen.queryByText('raw english body')).toBeNull();
+    const review = screen.getByRole('link', { name: 'Review payment' });
+    expect(review.getAttribute('href')).toBe('/payment-approvals');
+  });
+
+  it('groups the outbox feed on Deliveries tab and filters by tier', () => {
+    render(<NotificationCenter />);
+
     fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }));
-    fireEvent.click(screen.getByRole('tab', { name: 'System' }));
-    expect(screen.getByText('Guest support request')).toBeTruthy();
-    expect(screen.getByText('A guest opened support conversation SUP-2026-0001.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Deliveries' }));
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Transactional' }));
+    expect(screen.getByText('Your receipt for booking BK-1')).toBeTruthy();
+    expect(screen.queryByText('Summer promo')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Marketing' }));
+    expect(screen.getByText('Summer promo')).toBeTruthy();
+    expect(screen.queryByText(/receipt for booking/)).toBeNull();
   });
 });

@@ -42,8 +42,15 @@ async fn tick(pool: &DbPool) -> Result<serde_json::Value, crate::core::error::Ap
     if expired_paypal > 0 {
         log::info!("Automatically released {expired_paypal} stale PayPal payment attempt(s)");
     }
+    if rejected > 0 || expired_paypal > 0 {
+        crate::modules::system::notifications::publish_notifications_changed(pool);
+        crate::modules::system::notifications::publish_domain_changed(pool, "payments");
+    }
+    let support_sla_alerts =
+        crate::modules::system::notifications::sweep_support_sla_notifications(pool).await?;
     Ok(serde_json::json!({
         "rejected_receipts": rejected,
         "expired_paypal_attempts": expired_paypal,
+        "support_sla_alerts": support_sla_alerts,
     }))
 }

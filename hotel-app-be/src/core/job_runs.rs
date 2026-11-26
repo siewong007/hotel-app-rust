@@ -84,8 +84,8 @@ pub async fn record(
     // most one per job per hour so a loop that keeps failing does not bury the
     // notification center. `staff_notifications` ships in the same baseline as
     // `job_runs`, so the table_present gate above covers it too.
-    if let Some(error) = error
-        && let Err(e) = sqlx::query(
+    if let Some(error) = error {
+        match sqlx::query(
             "INSERT INTO staff_notifications
                 (audience_permission, kind, subject, title, body)
              SELECT 'settings:manage', 'job_failure', $1, $2, $3
@@ -100,8 +100,14 @@ pub async fn record(
         .bind(error)
         .execute(pool)
         .await
-    {
-        log::warn!("staff notification write failed for {job_name}: {e}");
+        {
+            Ok(done) => {
+                if done.rows_affected() > 0 {
+                    crate::modules::system::notifications::publish_notifications_changed(pool);
+                }
+            }
+            Err(e) => log::warn!("staff notification write failed for {job_name}: {e}"),
+        }
     }
 }
 

@@ -954,6 +954,21 @@ async fn create_group_inner(
     }
 
     tx.commit().await.map_err(ApiError::from)?;
+    crate::modules::system::notifications::notify_staff(
+        pool,
+        crate::modules::system::notifications::StaffNotificationDraft {
+            audience_permission: "bookings:read",
+            kind: "online_booking_created",
+            subject: Some(&group.group_number),
+            title: "New online group booking",
+            body: Some(&format!(
+                "Group booking {} ({} rooms, {} to {}) created online.",
+                group.group_number, group.room_count, group.check_in_date, group.check_out_date,
+            )),
+        },
+    )
+    .await;
+    crate::modules::system::notifications::publish_domain_changed(pool, "bookings");
 
     for (room_type_id, _) in rooms_per_type(input.rooms) {
         let remaining = Repository::available_count(
@@ -1664,6 +1679,7 @@ pub async fn add_room_for_guest(
     )
     .await?;
     tx.commit().await.map_err(ApiError::from)?;
+    crate::modules::system::notifications::publish_domain_changed(pool, "bookings");
 
     let remaining = Repository::available_count(
         pool,

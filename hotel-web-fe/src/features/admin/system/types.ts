@@ -46,17 +46,37 @@ export interface SystemHealthResponse {
   job_runs_enabled: boolean;
 }
 
+export type StaffNotificationPriority = 'urgent' | 'high' | 'normal';
+
+export type StaffNotificationCategory =
+  | 'payments'
+  | 'support'
+  | 'bookings'
+  | 'ekyc'
+  | 'maintenance'
+  | 'housekeeping'
+  | 'system';
+
 export interface StaffNotificationItem {
   id: number;
+  audience_permission?: string;
   kind: string;
   subject: string | null;
   title: string;
   body: string | null;
   created_at: string;
   read_at: string | null;
+  priority?: StaffNotificationPriority;
+  category?: StaffNotificationCategory;
+  action_url?: string | null;
+  action_label_key?: string | null;
+  requires_action?: boolean;
+  action_pending?: boolean;
 }
 
 export interface StaffNotificationsResponse {
   unread: number;
+  urgent_unread?: number;
+  action_pending_count?: number;
   items: StaffNotificationItem[];
 }

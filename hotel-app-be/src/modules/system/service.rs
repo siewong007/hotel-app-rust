@@ -57,7 +57,7 @@ pub async fn recent_job_failures(pool: &DbPool) -> Result<Vec<JobRunRow>, ApiErr
     repository::recent_failures(pool, RECENT_FAILURES_LIMIT).await
 }
 
-const NOTIFICATIONS_LIMIT: i64 = 50;
+const NOTIFICATIONS_LIMIT: i64 = 100;
 
 /// The caller's notification feed. Visibility is audience-based: a
 /// notification addressed to `settings:manage` reaches exactly the users whose
@@ -70,6 +70,8 @@ pub async fn my_notifications(
     if !repository::table_present(pool).await {
         return Ok(StaffNotificationsResponse {
             unread: 0,
+            urgent_unread: 0,
+            action_pending_count: 0,
             items: Vec::new(),
         });
     }
@@ -78,9 +80,24 @@ pub async fn my_notifications(
     let items = repository::list_notifications(pool, user_id, &names, NOTIFICATIONS_LIMIT).await?;
     let unread = items
         .iter()
-        .filter(|n: &&StaffNotificationItem| n.read_at.is_none())
+        .filter(|n: &&StaffNotificationItem| n.read_at.is_none() && n.action_pending)
         .count() as i64;
-    Ok(StaffNotificationsResponse { unread, items })
+    let urgent_unread = items
+        .iter()
+        .filter(|n: &&StaffNotificationItem| {
+            n.read_at.is_none() && n.action_pending && n.priority == "urgent"
+        })
+        .count() as i64;
+    let action_pending_count = items
+        .iter()
+        .filter(|n: &&StaffNotificationItem| n.action_pending && n.requires_action)
+        .count() as i64;
+    Ok(StaffNotificationsResponse {
+        unread,
+        urgent_unread,
+        action_pending_count,
+        items,
+    })
 }
 
 pub async fn mark_notification_read(
@@ -93,7 +110,9 @@ pub async fn mark_notification_read(
     }
     let permissions = RbacRepository::permission_names_for_user(pool, user_id).await?;
     let names: Vec<String> = permissions.into_iter().collect();
-    repository::mark_notification_read(pool, notification_id, user_id, &names).await
+    repository::mark_notification_read(pool, notification_id, user_id, &names).await?;
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    Ok(())
 }
 
 pub async fn mark_all_notifications_read(pool: &DbPool, user_id: i64) -> Result<(), ApiError> {
@@ -102,5 +121,7 @@ pub async fn mark_all_notifications_read(pool: &DbPool, user_id: i64) -> Result<
     }
     let permissions = RbacRepository::permission_names_for_user(pool, user_id).await?;
     let names: Vec<String> = permissions.into_iter().collect();
-    repository::mark_all_notifications_read(pool, user_id, &names).await
+    repository::mark_all_notifications_read(pool, user_id, &names).await?;
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    Ok(())
 }

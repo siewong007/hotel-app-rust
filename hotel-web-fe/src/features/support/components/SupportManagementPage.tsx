@@ -46,6 +46,17 @@ import {
 import SupportConversationDetail from './SupportConversationDetail';
 import SupportConversationList from './SupportConversationList';
 import { useResetOnChange } from '../../../hooks/useResetOnChange';
+import { useBrowserSearchParams } from '../../../router/compat';
+
+const VALID_SUPPORT_QUEUES = new Set<SupportQueue>([
+  'unassigned',
+  'mine',
+  'waiting_for_staff',
+  'waiting_for_guest',
+  'at_risk',
+  'resolved',
+  'closed',
+]);
 
 const INITIAL_PARAMS: SupportConversationListParams = {
   queue: 'waiting_for_staff',
@@ -71,10 +82,32 @@ function metricForQueue(queue: SupportQueue, metrics?: SupportQueueMetrics): num
 export default function SupportManagementPage() {
   const { hasPermission, user } = useAuth();
   const { t } = useTranslation('support');
-  const [params, setParams] = useState<SupportConversationListParams>(INITIAL_PARAMS);
+  const pageSearchParams = useBrowserSearchParams();
+  const routedSearch = pageSearchParams.get('search')?.trim() || '';
+  const routedQueue = pageSearchParams.get('queue')?.trim() || '';
+  const [params, setParams] = useState<SupportConversationListParams>(() => ({
+    ...INITIAL_PARAMS,
+    queue: VALID_SUPPORT_QUEUES.has(routedQueue as SupportQueue)
+      ? (routedQueue as SupportQueue)
+      : INITIAL_PARAMS.queue,
+    search: routedSearch || undefined,
+  }));
   const [selectedConversationId, setSelectedConversationId] = useState<number>();
+  const [autoSelectedSearch, setAutoSelectedSearch] = useState('');
   const deferredSearch = useDeferredValue(params.search);
   const queryParams = useMemo(() => ({ ...params, search: deferredSearch }), [deferredSearch, params]);
+
+  useEffect(() => {
+    if (!routedSearch && !routedQueue) return;
+    setParams(current => ({
+      ...current,
+      queue: VALID_SUPPORT_QUEUES.has(routedQueue as SupportQueue)
+        ? (routedQueue as SupportQueue)
+        : current.queue,
+      search: routedSearch || current.search,
+      page: 1,
+    }));
+  }, [routedSearch, routedQueue]);
 
   const canWrite = hasPermission('support:write') || hasPermission('support:manage');
   const canAssign = hasPermission('support:assign') || hasPermission('support:manage');
@@ -91,7 +124,20 @@ export default function SupportManagementPage() {
   const conversations = useMemo(() => listData?.items ?? [], [listData]);
   const queryError = queueQuery.error || detailQuery.error || agentsQuery.error;
 
-  useResetOnChange([conversations, selectedConversationId], () => {
+  useResetOnChange([conversations, selectedConversationId, routedSearch, autoSelectedSearch], () => {
+    if (!routedSearch && autoSelectedSearch) {
+      setAutoSelectedSearch('');
+    }
+    if (routedSearch && autoSelectedSearch !== routedSearch && conversations.length > 0) {
+      const exact = conversations.find(
+        conversation => conversation.conversation_number?.toLowerCase() === routedSearch.toLowerCase(),
+      );
+      if (exact) {
+        setAutoSelectedSearch(routedSearch);
+        setSelectedConversationId(exact.id);
+        return;
+      }
+    }
     if (!selectedConversationId && conversations[0]) {
       setSelectedConversationId(conversations[0].id);
     }

@@ -2,8 +2,14 @@
   "title": "Notifications",
   "pageTitle": "Guest Deliveries",
   "pageSubtitle": "Outbound messages sent to guests — staff alerts live under the topbar bell",
+  "inboxTitle": "Action Inbox",
+  "inboxSubtitle": "Operational alerts requiring staff review or follow-up",
   "markAllRead": "Mark all as read",
   "empty": "No notifications",
+  "tabs": {
+    "actionInbox": "Action Inbox",
+    "guestDeliveries": "Guest Deliveries"
+  },
   "toast": {
     "saved": "Saved.",
     "deleted": "Deleted.",
@@ -15,20 +21,80 @@
   "center": {
     "alerts": "Alerts",
     "system": "System",
+    "actionRequired": "Action Required",
+    "deliveries": "Deliveries",
+    "activity": "Activity",
     "clearAll": "Clear all",
     "viewAllAria": "View all notifications",
     "noSystemAlerts": "No system alerts",
+    "noActionItems": "You're all caught up — no pending staff alerts",
     "bankTransferPendingTitle": "Payment pending approval",
     "bankTransferPendingBody": "A guest submitted a bank transfer for {{booking}}. It is waiting for approval.",
     "reviewPayment": "Review payment",
     "allCaughtUp": "You're all caught up",
     "dismiss": "Dismiss notification",
+    "markRead": "Mark as read",
+    "handled": "Handled",
+    "actionNeeded": "Action needed",
+    "urgentBannerCount": "{{count}} urgent alerts — {{title}}",
+    "acknowledge": "Acknowledge alert",
+    "newAlert": "New alert",
     "unreadAria": "Notifications ({{count}} unread)"
   },
   "priority": {
     "info": "Info",
     "warning": "Warning",
     "critical": "Critical"
+  },
+  "staffPriority": {
+    "urgent": "Urgent",
+    "high": "High",
+    "normal": "Normal"
+  },
+  "categories": {
+    "all": "All",
+    "payments": "Payments",
+    "support": "Support",
+    "bookings": "Bookings",
+    "ekyc": "eKYC",
+    "maintenance": "Maintenance",
+    "housekeeping": "Housekeeping",
+    "system": "System"
+  },
+  "filters": {
+    "actionNeeded": "Action needed",
+    "unread": "Unread",
+    "all": "All",
+    "allPriorities": "All priorities",
+    "searchPlaceholder": "Search alerts…"
+  },
+  "actions": {
+    "reviewPayment": "Review payment",
+    "reviewReceipt": "Review receipt",
+    "reviewCancellation": "Review cancellation",
+    "replyGuest": "Reply to guest",
+    "handleSlaBreach": "Handle SLA breach",
+    "replyBeforeSla": "Reply before SLA",
+    "reviewEkyc": "Review eKYC",
+    "openMaintenance": "Open maintenance",
+    "viewBooking": "View booking",
+    "inspectJobs": "Inspect jobs",
+    "open": "Open"
+  },
+  "templates": {
+    "paymentReceiptUploadedTitle": "Payment receipt uploaded",
+    "paymentReceiptUploadedBody": "A guest uploaded a payment receipt for {{booking}}. It is ready for review.",
+    "supportSlaBreachedTitle": "Support SLA breached",
+    "supportSlaBreachedBody": "Conversation {{conversation}} has breached its response SLA.",
+    "supportSlaAtRiskTitle": "Support SLA at risk",
+    "supportSlaAtRiskBody": "Conversation {{conversation}} is due within 30 minutes.",
+    "ekycPendingTitle": "eKYC awaiting review",
+    "ekycPendingBody": "Verification #{{id}} was submitted and needs review.",
+    "maintenanceCriticalTitle": "Critical maintenance ticket",
+    "maintenanceHighTitle": "High-priority maintenance ticket",
+    "maintenanceBody": "Maintenance ticket {{ticket}} requires immediate attention.",
+    "onlineBookingTitle": "New online booking",
+    "onlineBookingBody": "Online booking {{booking}} was created."
   },
   "meta": "{{priority}} priority · {{time}}",
   "tier": {

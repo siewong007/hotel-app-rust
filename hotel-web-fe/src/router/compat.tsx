@@ -64,9 +64,35 @@ export function useNavigate(): CompatNavigateFn {
         hash: target.hash.replace(/^#/, ''),
         replace: options?.replace,
       });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('hotel:locationchange'));
+      }
     },
     [tsNavigate, router]
   );
+}
+
+/**
+ * Reads `window.location.search` without requiring a TanStack Router provider,
+ * staying synced on popstate and compat `navigate()` transitions.
+ */
+export function useBrowserSearchParams(): URLSearchParams {
+  const [search, setSearch] = React.useState(() =>
+    typeof window !== 'undefined' ? window.location.search : '',
+  );
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const sync = () => setSearch(window.location.search);
+    window.addEventListener('popstate', sync);
+    window.addEventListener('hotel:locationchange', sync);
+    return () => {
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener('hotel:locationchange', sync);
+    };
+  }, []);
+
+  return React.useMemo(() => new URLSearchParams(search), [search]);
 }
 
 export interface CompatLocation {

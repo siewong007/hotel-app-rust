@@ -26,6 +26,7 @@ class StaffNotificationManager(
 ) {
     private val appContext = context.applicationContext
     private val lastPostedByChannel = mutableMapOf<String, Long>()
+    private var lastSpecificDomainPostedAt: Long = 0L
     private val idCounter = AtomicLong(2000L)
 
     fun ensureChannels() {
@@ -121,6 +122,15 @@ class StaffNotificationManager(
                     "hotelstaff://ekyc",
                 )
             }
+            "support" -> {
+                if (!session.hasPermission("support:read")) return
+                Quad(
+                    CHANNEL_URGENT,
+                    "Guest support alert",
+                    "A guest support request needs staff attention.",
+                    "hotelstaff://dashboard",
+                )
+            }
             "notifications" -> Quad(
                 CHANNEL_URGENT,
                 "New staff notification",
@@ -130,12 +140,18 @@ class StaffNotificationManager(
             else -> return
         }
 
-        // Throttle per channel (15s) to prevent flooding during burst syncs.
+        // Throttle per channel (15s) to prevent flooding during burst syncs, and
+        // skip the generic "notifications" toast when a specific domain already fired.
         val now = System.currentTimeMillis()
+        val isGeneric = domain.equals("notifications", ignoreCase = true)
         synchronized(lastPostedByChannel) {
+            if (isGeneric && now - lastSpecificDomainPostedAt < 3_000L) return
             val prev = lastPostedByChannel[channel] ?: 0L
             if (now - prev < 15_000L) return
             lastPostedByChannel[channel] = now
+            if (!isGeneric) {
+                lastSpecificDomainPostedAt = now
+            }
         }
 
         postNotification(

@@ -69,6 +69,7 @@ export function invalidatePaymentApprovalDependencies(queryClient: QueryClient) 
   invalidate(queryClient, queryKeys.analytics.all);
   invalidate(queryClient, queryKeys.invoices.all);
   invalidate(queryClient, queryKeys.ledgers.all);
+  invalidate(queryClient, queryKeys.system.staffNotifications());
 }
 
 export function invalidateImportedData(queryClient: QueryClient) {
@@ -96,7 +97,12 @@ export type ApiDomain =
   | 'rooms'
   | 'ledgers'
   | 'housekeeping'
-  | 'night-audit';
+  | 'night-audit'
+  | 'notifications'
+  | 'payments'
+  | 'support'
+  | 'ekyc'
+  | 'maintenance';
 
 /**
  * Map an API request path to the data domain a successful mutation affects.
@@ -129,6 +135,12 @@ export function domainForApiPath(path: string): ApiDomain | null {
       return 'housekeeping';
     case 'night-audit':
       return 'night-audit';
+    case 'support':
+      return 'support';
+    case 'ekyc':
+      return 'ekyc';
+    case 'maintenance':
+      return 'maintenance';
     default:
       return null;
   }
@@ -145,8 +157,29 @@ export function invalidateDomain(queryClient: QueryClient, domain: ApiDomain) {
     case 'ledgers':
       return invalidateLedgerDependencies(queryClient);
     case 'housekeeping':
-      return invalidate(queryClient, queryKeys.housekeeping.all);
+      invalidate(queryClient, queryKeys.housekeeping.all);
+      invalidate(queryClient, queryKeys.system.staffNotifications());
+      return;
     case 'night-audit':
       return invalidateNightAuditDependencies(queryClient);
+    case 'notifications':
+      invalidate(queryClient, queryKeys.system.staffNotifications());
+      invalidate(queryClient, queryKeys.system.jobFailures());
+      return;
+    case 'payments':
+      return invalidatePaymentApprovalDependencies(queryClient);
+    case 'support':
+      invalidate(queryClient, queryKeys.support.all);
+      invalidate(queryClient, queryKeys.system.staffNotifications());
+      return;
+    case 'ekyc':
+      invalidate(queryClient, queryKeys.ekyc.all);
+      invalidate(queryClient, queryKeys.system.staffNotifications());
+      return;
+    case 'maintenance':
+      invalidate(queryClient, queryKeys.maintenance.all);
+      invalidate(queryClient, queryKeys.housekeeping.all);
+      invalidate(queryClient, queryKeys.system.staffNotifications());
+      return;
   }
 }

@@ -382,6 +382,13 @@ async fn guest_support_rings_the_staff_bell_once_per_request() {
     assert!(
         visible
             .iter()
+            .filter(|n| n.subject.as_deref() == Some(number.as_str()))
+            .all(|n| !n.action_pending),
+        "after send_staff_message moves status to waiting_for_guest, action_pending clears"
+    );
+    assert!(
+        visible
+            .iter()
             .any(|n| n.subject.as_deref() == Some(message_subject.as_str()))
     );
     let via_manage =
@@ -438,6 +445,26 @@ async fn guest_support_rings_the_staff_bell_once_per_request() {
     .await
     .unwrap();
     assert_eq!(cancel_title, "Cancellation request");
+
+    let cancel_list =
+        system_repository::list_notifications(&pool, STAFF_ID, &["support:read".to_string()], 50)
+            .await
+            .unwrap();
+    let cancel_item = cancel_list
+        .iter()
+        .find(|n| {
+            n.kind == "guest_support_conversation"
+                && n.subject.as_deref() == Some(cancel_number.as_str())
+        })
+        .expect("cancellation bell item should be listed");
+    assert_eq!(cancel_item.priority, "urgent");
+    assert_eq!(cancel_item.category, "support");
+    assert!(cancel_item.requires_action);
+    assert!(cancel_item.action_pending);
+    assert_eq!(
+        cancel_item.action_label_key.as_deref(),
+        Some("reviewCancellation")
+    );
 
     let (again_id, again_number) = open_cancellation_request(
         &pool,

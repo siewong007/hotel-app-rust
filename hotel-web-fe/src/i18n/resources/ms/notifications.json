@@ -2,8 +2,14 @@
   "title": "Pemberitahuan",
   "pageTitle": "Penghantaran Tetamu",
   "pageSubtitle": "Mesej keluar yang dihantar kepada tetamu — makluman kakitangan berada di bawah loceng bar atas",
+  "inboxTitle": "Peti Tindakan",
+  "inboxSubtitle": "Makluman operasi yang memerlukan semakan atau tindakan susulan kakitangan",
   "markAllRead": "Tanda semua sebagai dibaca",
   "empty": "Tiada pemberitahuan",
+  "tabs": {
+    "actionInbox": "Peti Tindakan",
+    "guestDeliveries": "Penghantaran Tetamu"
+  },
   "toast": {
     "saved": "Disimpan.",
     "deleted": "Dipadam.",
@@ -15,20 +21,80 @@
   "center": {
     "alerts": "Makluman",
     "system": "Sistem",
+    "actionRequired": "Tindakan Diperlukan",
+    "deliveries": "Penghantaran",
+    "activity": "Aktiviti",
     "clearAll": "Kosongkan semua",
     "viewAllAria": "Lihat semua pemberitahuan",
     "noSystemAlerts": "Tiada makluman sistem",
+    "noActionItems": "Semua selesai — tiada makluman kakitangan yang tertunda",
     "bankTransferPendingTitle": "Bayaran menunggu kelulusan",
     "bankTransferPendingBody": "Seorang tetamu menghantar pindahan bank untuk {{booking}}. Ia menunggu kelulusan.",
     "reviewPayment": "Semak bayaran",
     "allCaughtUp": "Semua sudah dibaca",
     "dismiss": "Ketepikan pemberitahuan",
+    "markRead": "Tanda sebagai dibaca",
+    "handled": "Selesai",
+    "actionNeeded": "Perlu tindakan",
+    "urgentBannerCount": "{{count}} makluman segera — {{title}}",
+    "acknowledge": "Sahkan makluman",
+    "newAlert": "Makluman baharu",
     "unreadAria": "Pemberitahuan ({{count}} belum dibaca)"
   },
   "priority": {
     "info": "Maklumat",
     "warning": "Amaran",
     "critical": "Kritikal"
+  },
+  "staffPriority": {
+    "urgent": "Segera",
+    "high": "Tinggi",
+    "normal": "Biasa"
+  },
+  "categories": {
+    "all": "Semua",
+    "payments": "Bayaran",
+    "support": "Sokongan",
+    "bookings": "Tempahan",
+    "ekyc": "eKYC",
+    "maintenance": "Penyelenggaraan",
+    "housekeeping": "Pengemasan",
+    "system": "Sistem"
+  },
+  "filters": {
+    "actionNeeded": "Perlu tindakan",
+    "unread": "Belum dibaca",
+    "all": "Semua",
+    "allPriorities": "Semua keutamaan",
+    "searchPlaceholder": "Cari makluman…"
+  },
+  "actions": {
+    "reviewPayment": "Semak bayaran",
+    "reviewReceipt": "Semak resit",
+    "reviewCancellation": "Semak pembatalan",
+    "replyGuest": "Balas tetamu",
+    "handleSlaBreach": "Kendalikan pelanggaran SLA",
+    "replyBeforeSla": "Balas sebelum SLA",
+    "reviewEkyc": "Semak eKYC",
+    "openMaintenance": "Buka penyelenggaraan",
+    "viewBooking": "Lihat tempahan",
+    "inspectJobs": "Periksa tugas",
+    "open": "Buka"
+  },
+  "templates": {
+    "paymentReceiptUploadedTitle": "Resit bayaran dimuat naik",
+    "paymentReceiptUploadedBody": "Tetamu memuat naik resit bayaran untuk {{booking}}. Ia sedia untuk disemak.",
+    "supportSlaBreachedTitle": "SLA sokongan dilanggar",
+    "supportSlaBreachedBody": "Perbualan {{conversation}} telah melepasi SLA responsnya.",
+    "supportSlaAtRiskTitle": "SLA sokongan berisiko",
+    "supportSlaAtRiskBody": "Perbualan {{conversation}} akan tamat tempoh dalam 30 minit.",
+    "ekycPendingTitle": "eKYC menunggu semakan",
+    "ekycPendingBody": "Pengesahan #{{id}} telah dihantar dan memerlukan semakan.",
+    "maintenanceCriticalTitle": "Tiket penyelenggaraan kritikal",
+    "maintenanceHighTitle": "Tiket penyelenggaraan keutamaan tinggi",
+    "maintenanceBody": "Tiket penyelenggaraan {{ticket}} memerlukan perhatian segera.",
+    "onlineBookingTitle": "Tempahan dalam talian baharu",
+    "onlineBookingBody": "Tempahan dalam talian {{booking}} telah dibuat."
   },
   "meta": "Prioriti {{priority}} · {{time}}",
   "tier": {

@@ -589,6 +589,8 @@ pub async fn send_staff_message(
         current.summary.guest_id,
         conversation_id,
     ));
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "support");
 
     let _ = AuditLog::log_event(
         pool,
@@ -870,6 +872,8 @@ pub async fn apply_staff_action(
         current.summary.guest_id,
         conversation_id,
     ));
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "support");
 
     let _ = AuditLog::log_event(
         pool,
@@ -1073,6 +1077,8 @@ pub async fn create_guest_conversation(
         guest_id,
         conversation_id,
     ));
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "support");
 
     let _ = AuditLog::log_event(
         pool,
@@ -1238,6 +1244,8 @@ pub async fn open_cancellation_request(
         guest_id,
         conversation_id,
     ));
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "support");
     let _ = AuditLog::log_event(
         pool,
         AuditEvent {
@@ -1372,6 +1380,8 @@ pub async fn send_guest_message(
         guest_id,
         conversation_id,
     ));
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "support");
 
     let _ = AuditLog::log_event(
         pool,
@@ -1448,6 +1458,8 @@ pub async fn reopen_guest_conversation(
         guest_id,
         conversation_id,
     ));
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "support");
 
     let _ = AuditLog::log_event(
         pool,

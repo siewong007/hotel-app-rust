@@ -1836,6 +1836,8 @@ async fn create_bank_transfer_claim_inner(
     }
 
     tx.commit().await.map_err(ApiError::from)?;
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "payments");
 
     Ok(PaymentActionResponse {
         payment_id,
@@ -2696,6 +2698,9 @@ pub async fn approve_payment(
         }
     }
 
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "payments");
+
     Ok(response)
 }
 
@@ -3283,6 +3288,8 @@ async fn reject_group_payment(
         reason,
     )
     .await;
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "payments");
     Ok(PaymentActionResponse {
         payment_id,
         status: "void".to_string(),
@@ -3438,6 +3445,8 @@ async fn reject_payment_by(
         reason,
     )
     .await;
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "payments");
 
     Ok(PaymentActionResponse {
         payment_id,
@@ -3550,6 +3559,24 @@ pub async fn save_payment_receipt(
         },
     )
     .await?;
+    let subject = receipt
+        .booking_number
+        .clone()
+        .unwrap_or_else(|| format!("PAY-{payment_id}"));
+    crate::modules::system::notifications::notify_staff(
+        pool,
+        crate::modules::system::notifications::StaffNotificationDraft {
+            audience_permission: "payments:read",
+            kind: "payment_receipt_uploaded",
+            subject: Some(&subject),
+            title: "Payment receipt uploaded",
+            body: Some(&format!(
+                "A guest uploaded a payment receipt for {subject}. It is ready for review."
+            )),
+        },
+    )
+    .await;
+    crate::modules::system::notifications::publish_domain_changed(pool, "payments");
     Ok(())
 }
 
@@ -4046,6 +4073,8 @@ async fn create_group_bank_transfer_claim_inner(
         }
     }
     tx.commit().await.map_err(ApiError::from)?;
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "payments");
 
     Ok(GroupPaymentActionResponse {
         booking_group_id: group_id,

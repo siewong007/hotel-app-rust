@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -25,11 +24,14 @@ import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SupportAgent
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -41,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,15 +70,26 @@ import com.hotelapp.staff.core.format.DateFormatter
 import com.hotelapp.staff.core.network.RealtimeSocketClient
 import com.hotelapp.staff.data.dto.StaffNotificationItemDto
 import com.hotelapp.staff.data.repository.NotificationsRepository
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class NotificationFilter {
+    ACTION_NEEDED,
+    ALL,
+}
+
 data class NotificationsUiState(
     val isLoading: Boolean = false,
     val unreadCount: Long = 0,
+    val urgentUnreadCount: Long = 0,
+    val actionPendingCount: Long = 0,
+    val filter: NotificationFilter = NotificationFilter.ACTION_NEEDED,
     val items: List<StaffNotificationItemDto> = emptyList(),
     val error: String? = null,
 )
@@ -88,6 +102,11 @@ class NotificationsViewModel(
     private val _uiState = MutableStateFlow(NotificationsUiState())
     val uiState: StateFlow<NotificationsUiState> = _uiState.asStateFlow()
 
+    private val _incomingAlerts = MutableSharedFlow<StaffNotificationItemDto>(extraBufferCapacity = 8)
+    val incomingAlerts: SharedFlow<StaffNotificationItemDto> = _incomingAlerts.asSharedFlow()
+
+    private var knownIds: MutableSet<Long>? = null
+
     init {
         refresh()
         viewModelScope.launch {
@@ -99,6 +118,10 @@ class NotificationsViewModel(
         }
     }
 
+    fun setFilter(filter: NotificationFilter) {
+        _uiState.update { it.copy(filter = filter) }
+    }
+
     fun refresh(silent: Boolean = false) {
         viewModelScope.launch {
             if (!silent) {
@@ -106,10 +129,38 @@ class NotificationsViewModel(
             }
             repository.list()
                 .onSuccess { res ->
+                    val currentKnown = knownIds
+                    if (currentKnown == null) {
+                        knownIds = res.items.map { it.id }.toMutableSet()
+                    } else {
+                        val freshAlert = res.items.firstOrNull { item ->
+                            !currentKnown.contains(item.id) && item.readAt == null && item.actionPending
+                        }
+                        res.items.forEach { currentKnown.add(it.id) }
+                        if (freshAlert != null) {
+                            _incomingAlerts.tryEmit(freshAlert)
+                        }
+                    }
+
+                    val derivedUrgent = if (res.urgentUnread > 0) {
+                        res.urgentUnread
+                    } else {
+                        res.items.count {
+                            it.readAt == null && it.actionPending && effectivePriority(it) == "urgent"
+                        }.toLong()
+                    }
+                    val derivedPending = if (res.actionPendingCount > 0) {
+                        res.actionPendingCount
+                    } else {
+                        res.items.count { it.actionPending && it.requiresAction }.toLong()
+                    }
+
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             unreadCount = res.unread,
+                            urgentUnreadCount = derivedUrgent,
+                            actionPendingCount = derivedPending,
                             items = res.items,
                             error = null,
                         )
@@ -126,10 +177,13 @@ class NotificationsViewModel(
     fun markRead(id: Long) {
         viewModelScope.launch {
             _uiState.update { cur ->
-                val targetWasUnread = cur.items.any { it.id == id && it.readAt == null }
+                val target = cur.items.firstOrNull { it.id == id }
+                val targetWasUnread = target != null && target.readAt == null && target.actionPending
+                val targetWasUrgent = targetWasUnread && effectivePriority(target) == "urgent"
                 cur.copy(
                     items = cur.items.map { item -> if (item.id == id) item.copy(readAt = item.readAt ?: "read") else item },
                     unreadCount = if (targetWasUnread) (cur.unreadCount - 1).coerceAtLeast(0L) else cur.unreadCount,
+                    urgentUnreadCount = if (targetWasUrgent) (cur.urgentUnreadCount - 1).coerceAtLeast(0L) else cur.urgentUnreadCount,
                 )
             }
             repository.markRead(id).onSuccess {
@@ -144,6 +198,7 @@ class NotificationsViewModel(
                 cur.copy(
                     items = cur.items.map { item -> item.copy(readAt = item.readAt ?: "read") },
                     unreadCount = 0L,
+                    urgentUnreadCount = 0L,
                 )
             }
             repository.markAllRead().onSuccess {
@@ -153,38 +208,117 @@ class NotificationsViewModel(
     }
 }
 
-private fun notificationIconAndTone(kind: String, colors: HotelExtendedColors): Pair<ImageVector, StatusTone> =
-    when (kind.lowercase()) {
-        "booking", "bookings", "reservation", "checkin", "checkout" ->
-            Icons.Outlined.CalendarMonth to colors.info
-        "payment", "payments", "invoice" ->
-            Icons.Outlined.Payments to colors.success
-        "housekeeping", "cleaning" ->
-            Icons.Outlined.CleaningServices to colors.warning
-        "maintenance", "repair" ->
-            Icons.Outlined.Build to colors.orange
-        "ekyc", "identity", "verification" ->
-            Icons.Outlined.Badge to colors.info
-        "support", "guest_message", "inquiry" ->
-            Icons.Outlined.SupportAgent to colors.violet
-        else -> Icons.Outlined.Notifications to colors.neutral
+fun effectivePriority(item: StaffNotificationItemDto): String {
+    if (item.priority in setOf("urgent", "high", "normal") && item.priority != "normal") {
+        return item.priority
     }
+    return when (item.kind.lowercase()) {
+        "bank_transfer_pending",
+        "payment_receipt_uploaded",
+        "support_sla_breached",
+        "maintenance_critical",
+        "job_failure",
+        -> "urgent"
+        "guest_support_conversation" ->
+            if (item.title.equals("Cancellation request", ignoreCase = true)) "urgent" else "high"
+        "guest_support_message",
+        "support_sla_at_risk",
+        "ekyc_pending_review",
+        "maintenance_high",
+        -> "high"
+        else -> item.priority.lowercase()
+    }
+}
+
+fun notificationActionLabel(item: StaffNotificationItemDto): String =
+    when (item.actionLabelKey) {
+        "reviewPayment" -> "Review payment"
+        "reviewReceipt" -> "Review receipt"
+        "reviewCancellation" -> "Review cancellation"
+        "replyGuest", "replyBeforeSla", "handleSlaBreach" -> "Open support"
+        "reviewEkyc" -> "Review eKYC"
+        "openMaintenance" -> "Open maintenance"
+        "viewBooking" -> "View booking"
+        "inspectJobs" -> "Inspect jobs"
+        else -> when (item.kind.lowercase()) {
+            "bank_transfer_pending" -> "Review payment"
+            "payment_receipt_uploaded" -> "Review receipt"
+            "guest_support_conversation",
+            "guest_support_message",
+            "support_sla_breached",
+            "support_sla_at_risk",
+            -> "Open support"
+            "ekyc_pending_review" -> "Review eKYC"
+            "maintenance_critical", "maintenance_high" -> "Open maintenance"
+            "online_booking_created" -> "View booking"
+            "job_failure" -> "Inspect jobs"
+            else -> "Open"
+        }
+    }
+
+private fun notificationIconAndTone(
+    kind: String,
+    priority: String,
+    colors: HotelExtendedColors,
+): Pair<ImageVector, StatusTone> {
+    val icon = when (kind.lowercase()) {
+        "online_booking_created", "booking", "bookings", "reservation", "checkin", "checkout" ->
+            Icons.Outlined.CalendarMonth
+        "bank_transfer_pending", "payment_receipt_uploaded", "payment", "payments", "invoice" ->
+            Icons.Outlined.Payments
+        "housekeeping", "cleaning" ->
+            Icons.Outlined.CleaningServices
+        "maintenance_critical", "maintenance_high", "maintenance", "repair" ->
+            Icons.Outlined.Build
+        "ekyc_pending_review", "ekyc", "identity", "verification" ->
+            Icons.Outlined.Badge
+        "guest_support_conversation",
+        "guest_support_message",
+        "support_sla_breached",
+        "support_sla_at_risk",
+        "support",
+        "guest_message",
+        "inquiry",
+        -> Icons.Outlined.SupportAgent
+        "job_failure" ->
+            Icons.Outlined.ErrorOutline
+        else -> Icons.Outlined.Notifications
+    }
+    val tone = when {
+        priority == "urgent" -> colors.danger
+        priority == "high" -> colors.warning
+        kind.lowercase() in setOf("online_booking_created", "booking", "bookings", "ekyc_pending_review", "ekyc") -> colors.info
+        kind.lowercase() in setOf("housekeeping", "cleaning") -> colors.warning
+        kind.lowercase() in setOf("maintenance_high", "maintenance", "repair") -> colors.orange
+        kind.lowercase() in setOf("payment", "payments", "invoice") -> colors.success
+        else -> colors.neutral
+    }
+    return icon to tone
+}
 
 @Composable
 fun NotificationsModalSheet(
     viewModel: NotificationsViewModel,
     onDismiss: () -> Unit,
+    onOpenItem: (StaffNotificationItemDto) -> Unit = {},
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
     val scope = rememberCoroutineScope()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    val displayedItems = remember(state.items, state.filter) {
+        when (state.filter) {
+            NotificationFilter.ACTION_NEEDED -> state.items.filter { it.actionPending || it.readAt == null }
+            NotificationFilter.ALL -> state.items
+        }
+    }
+
     HotelModalSheetContainer(onDismiss = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 260.dp, max = 580.dp)
+                .heightIn(min = 260.dp, max = 600.dp)
                 .padding(horizontal = 20.dp),
         ) {
             Row(
@@ -203,13 +337,18 @@ fun NotificationsModalSheet(
                         style = MaterialTheme.typography.titleLarge,
                     )
                     if (state.unreadCount > 0) {
+                        val urgent = state.urgentUnreadCount > 0
                         StatusPill(
                             label = "${state.unreadCount} unread",
-                            tone = StatusTone(
-                                fg = colors.primaryOnSurface,
-                                bg = colors.primarySubtle,
-                                border = colors.primarySubtleBorder,
-                            ),
+                            tone = if (urgent) {
+                                colors.danger
+                            } else {
+                                StatusTone(
+                                    fg = colors.primaryOnSurface,
+                                    bg = colors.primarySubtle,
+                                    border = colors.primarySubtleBorder,
+                                )
+                            },
                         )
                     }
                 }
@@ -236,7 +375,31 @@ fun NotificationsModalSheet(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            ) {
+                val pendingTotal = state.items.count { it.actionPending || it.readAt == null }
+                FilterChip(
+                    selected = state.filter == NotificationFilter.ACTION_NEEDED,
+                    onClick = { viewModel.setFilter(NotificationFilter.ACTION_NEEDED) },
+                    label = { Text("Action needed ($pendingTotal)") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.primarySubtle,
+                        selectedLabelColor = colors.primaryOnSurface,
+                    ),
+                )
+                FilterChip(
+                    selected = state.filter == NotificationFilter.ALL,
+                    onClick = { viewModel.setFilter(NotificationFilter.ALL) },
+                    label = { Text("All (${state.items.size})") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.primarySubtle,
+                        selectedLabelColor = colors.primaryOnSurface,
+                    ),
+                )
+            }
 
             when {
                 state.isLoading -> ListCardSkeleton(
@@ -247,26 +410,39 @@ fun NotificationsModalSheet(
                     message = state.error!!,
                     onRetry = { viewModel.refresh() },
                 )
-                state.items.isEmpty() -> EmptyStateView(
-                    title = "All caught up",
-                    subtitle = "No staff notifications yet.",
-                    icon = Icons.Outlined.NotificationsNone,
-                )
+                displayedItems.isEmpty() -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    EmptyStateView(
+                        title = "All caught up",
+                        subtitle = if (state.filter == NotificationFilter.ACTION_NEEDED && state.items.isNotEmpty()) {
+                            "No pending actions right now."
+                        } else {
+                            "No staff notifications yet."
+                        },
+                        icon = Icons.Outlined.NotificationsNone,
+                    )
+                    if (state.filter == NotificationFilter.ACTION_NEEDED && state.items.isNotEmpty()) {
+                        TextButton(onClick = { viewModel.setFilter(NotificationFilter.ALL) }) {
+                            Text("Show all history", color = colors.primaryOnSurface)
+                        }
+                    }
+                }
                 else -> LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(bottom = 24.dp),
                 ) {
-                    items(state.items, key = { it.id }) { item ->
-                        val isUnread = item.readAt == null
-                        val (icon, tone) = notificationIconAndTone(item.kind, colors)
+                    items(displayedItems, key = { it.id }) { item ->
+                        val priority = effectivePriority(item)
+                        val isPending = item.actionPending
+                        val isUnread = item.readAt == null && isPending
+                        val (icon, tone) = notificationIconAndTone(item.kind, priority, colors)
                         val dismissState = rememberSwipeToDismissBoxState()
 
                         SwipeToDismissBox(
                             state = dismissState,
-                            enableDismissFromStartToEnd = isUnread,
+                            enableDismissFromStartToEnd = item.readAt == null,
                             enableDismissFromEndToStart = false,
                             onDismiss = { direction ->
-                                if (direction == SwipeToDismissBoxValue.StartToEnd && isUnread) {
+                                if (direction == SwipeToDismissBoxValue.StartToEnd && item.readAt == null) {
                                     haptics.confirm()
                                     viewModel.markRead(item.id)
                                     scope.launch {
@@ -303,16 +479,20 @@ fun NotificationsModalSheet(
                                 }
                             },
                         ) {
+                            val cardBorder = when {
+                                isUnread && priority == "urgent" -> colors.danger.border
+                                isUnread -> colors.primarySubtleBorder
+                                else -> colors.borderSubtle
+                            }
                             HotelCard(
-                                onClick = if (isUnread) {
-                                    {
-                                        haptics.tick()
-                                        viewModel.markRead(item.id)
-                                    }
-                                } else null,
+                                onClick = {
+                                    haptics.click()
+                                    viewModel.markRead(item.id)
+                                    onOpenItem(item)
+                                },
                                 contentPadding = PaddingValues(0.dp),
                                 containerColor = if (isUnread) colors.surfaceRaised else colors.surfaceBase,
-                                borderColor = if (isUnread) colors.primarySubtleBorder else colors.borderSubtle,
+                                borderColor = cardBorder,
                             ) {
                                 ListItem(
                                     leadingContent = {
@@ -333,12 +513,29 @@ fun NotificationsModalSheet(
                                         }
                                     },
                                     headlineContent = {
-                                        Text(
-                                            text = item.title,
-                                            color = colors.textPrimary,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = if (isUnread) FontWeight.SemiBold else FontWeight.Medium,
-                                        )
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            if (priority == "urgent" || priority == "high" || item.requiresAction) {
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    if (priority == "urgent") {
+                                                        StatusPill(label = "URGENT", tone = colors.danger)
+                                                    } else if (priority == "high") {
+                                                        StatusPill(label = "HIGH", tone = colors.warning)
+                                                    }
+                                                    if (item.requiresAction) {
+                                                        StatusPill(
+                                                            label = if (isPending) "Action needed" else "Handled",
+                                                            tone = if (isPending) colors.info else colors.success,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Text(
+                                                text = item.title,
+                                                color = colors.textPrimary,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = if (isUnread) FontWeight.SemiBold else FontWeight.Medium,
+                                            )
+                                        }
                                     },
                                     supportingContent = {
                                         Column {
@@ -350,12 +547,32 @@ fun NotificationsModalSheet(
                                                     style = MaterialTheme.typography.bodySmall,
                                                 )
                                             }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = DateFormatter.formatRelativeTimestamp(item.createdAt),
-                                                color = colors.textMuted,
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    text = DateFormatter.formatRelativeTimestamp(item.createdAt),
+                                                    color = colors.textMuted,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                )
+                                                TextButton(
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                                    onClick = {
+                                                        haptics.click()
+                                                        viewModel.markRead(item.id)
+                                                        onOpenItem(item)
+                                                    },
+                                                ) {
+                                                    Text(
+                                                        text = notificationActionLabel(item),
+                                                        color = if (priority == "urgent" && isPending) colors.danger.fg else colors.primaryOnSurface,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                    )
+                                                }
+                                            }
                                         }
                                     },
                                     trailingContent = if (isUnread) {
@@ -364,7 +581,7 @@ fun NotificationsModalSheet(
                                                 modifier = Modifier
                                                     .size(8.dp)
                                                     .clip(CircleShape)
-                                                    .background(colors.primaryMain),
+                                                    .background(if (priority == "urgent") colors.danger.fg else colors.primaryMain),
                                             )
                                         }
                                     } else null,

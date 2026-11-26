@@ -90,16 +90,25 @@ data class GuestProfileDto(
 @Serializable
 data class StaffNotificationItemDto(
     val id: Long,
+    @SerialName("audience_permission") val audiencePermission: String? = null,
     val kind: String,
     val subject: String? = null,
     val title: String,
     val body: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("read_at") val readAt: String? = null,
+    val priority: String = "normal",
+    val category: String = "system",
+    @SerialName("action_url") val actionUrl: String? = null,
+    @SerialName("action_label_key") val actionLabelKey: String? = null,
+    @SerialName("requires_action") val requiresAction: Boolean = false,
+    @SerialName("action_pending") val actionPending: Boolean = true,
 )
 
 @Serializable
 data class StaffNotificationsResponseDto(
     val unread: Long = 0,
+    @SerialName("urgent_unread") val urgentUnread: Long = 0,
+    @SerialName("action_pending_count") val actionPendingCount: Long = 0,
     val items: List<StaffNotificationItemDto> = emptyList(),
 )

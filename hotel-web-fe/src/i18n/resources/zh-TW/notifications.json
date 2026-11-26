@@ -2,8 +2,14 @@
   "title": "通知",
   "pageTitle": "賓客訊息發送",
   "pageSubtitle": "發送給賓客的訊息 — 員工提醒位於頂欄鈴鐺圖示",
+  "inboxTitle": "待辦收件匣",
+  "inboxSubtitle": "需要員工審核或跟進的營運告警",
   "markAllRead": "全部標記為已讀",
   "empty": "沒有通知",
+  "tabs": {
+    "actionInbox": "待辦收件匣",
+    "guestDeliveries": "賓客訊息發送"
+  },
   "toast": {
     "saved": "已儲存。",
     "deleted": "已刪除。",
@@ -15,20 +21,80 @@
   "center": {
     "alerts": "提醒",
     "system": "系統",
+    "actionRequired": "待處理",
+    "deliveries": "發送紀錄",
+    "activity": "動態",
     "clearAll": "全部清除",
     "viewAllAria": "查看所有通知",
     "noSystemAlerts": "沒有系統提醒",
+    "noActionItems": "已全數處理 — 沒有待辦員工告警",
     "bankTransferPendingTitle": "付款待核准",
     "bankTransferPendingBody": "客人提交了預訂 {{booking}} 的銀行轉帳，正在等待核准。",
     "reviewPayment": "審核付款",
     "allCaughtUp": "全部已讀完畢",
     "dismiss": "關閉通知",
+    "markRead": "標記為已讀",
+    "handled": "已處理",
+    "actionNeeded": "需處理",
+    "urgentBannerCount": "{{count}} 項緊急告警 — {{title}}",
+    "acknowledge": "確認告警",
+    "newAlert": "新告警",
     "unreadAria": "通知（{{count}} 則未讀）"
   },
   "priority": {
     "info": "資訊",
     "warning": "警告",
     "critical": "緊急"
+  },
+  "staffPriority": {
+    "urgent": "緊急",
+    "high": "高",
+    "normal": "一般"
+  },
+  "categories": {
+    "all": "全部",
+    "payments": "付款",
+    "support": "客服",
+    "bookings": "預訂",
+    "ekyc": "身份驗證",
+    "maintenance": "維修",
+    "housekeeping": "房務",
+    "system": "系統"
+  },
+  "filters": {
+    "actionNeeded": "需處理",
+    "unread": "未讀",
+    "all": "全部",
+    "allPriorities": "所有優先級",
+    "searchPlaceholder": "搜尋告警…"
+  },
+  "actions": {
+    "reviewPayment": "審核付款",
+    "reviewReceipt": "審核收據",
+    "reviewCancellation": "審核取消請求",
+    "replyGuest": "回覆賓客",
+    "handleSlaBreach": "處理 SLA 逾時",
+    "replyBeforeSla": "SLA 到期前回覆",
+    "reviewEkyc": "審核身份驗證",
+    "openMaintenance": "開啟維修單",
+    "viewBooking": "檢視預訂",
+    "inspectJobs": "檢查工作",
+    "open": "開啟"
+  },
+  "templates": {
+    "paymentReceiptUploadedTitle": "已上傳付款收據",
+    "paymentReceiptUploadedBody": "賓客已上傳預訂 {{booking}} 的付款收據，待審核。",
+    "supportSlaBreachedTitle": "客服 SLA 已逾時",
+    "supportSlaBreachedBody": "對話 {{conversation}} 已超過回覆 SLA 時限。",
+    "supportSlaAtRiskTitle": "客服 SLA 即將到期",
+    "supportSlaAtRiskBody": "對話 {{conversation}} 將於 30 分鐘內到期。",
+    "ekycPendingTitle": "身份驗證待審核",
+    "ekycPendingBody": "驗證申請 #{{id}} 已提交，需要審核。",
+    "maintenanceCriticalTitle": "緊急維修工單",
+    "maintenanceHighTitle": "高優先級維修工單",
+    "maintenanceBody": "維修工單 {{ticket}} 需要立即處理。",
+    "onlineBookingTitle": "新線上預訂",
+    "onlineBookingBody": "已建立線上預訂 {{booking}}。"
   },
   "meta": "{{priority}} 優先級 · {{time}}",
   "tier": {

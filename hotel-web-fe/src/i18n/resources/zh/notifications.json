@@ -2,8 +2,14 @@
   "title": "通知",
   "pageTitle": "宾客投递",
   "pageSubtitle": "发送给宾客的外发消息——员工提醒在顶栏铃铛下",
+  "inboxTitle": "待办收件箱",
+  "inboxSubtitle": "需要员工审核或跟进的运营告警",
   "markAllRead": "全部标为已读",
   "empty": "暂无通知",
+  "tabs": {
+    "actionInbox": "待办收件箱",
+    "guestDeliveries": "宾客投递"
+  },
   "toast": {
     "saved": "已保存。",
     "deleted": "已删除。",
@@ -15,20 +21,80 @@
   "center": {
     "alerts": "提醒",
     "system": "系统",
+    "actionRequired": "待处理",
+    "deliveries": "投递",
+    "activity": "动态",
     "clearAll": "全部清除",
     "viewAllAria": "查看所有通知",
     "noSystemAlerts": "暂无系统告警",
+    "noActionItems": "已全部处理——暂无待办员工告警",
     "bankTransferPendingTitle": "付款待批准",
     "bankTransferPendingBody": "客人提交了预订 {{booking}} 的银行转账，正在等待批准。",
     "reviewPayment": "审核付款",
     "allCaughtUp": "您已读完所有通知",
     "dismiss": "忽略此通知",
+    "markRead": "标为已读",
+    "handled": "已处理",
+    "actionNeeded": "需处理",
+    "urgentBannerCount": "{{count}} 项紧急告警——{{title}}",
+    "acknowledge": "确认告警",
+    "newAlert": "新告警",
     "unreadAria": "通知（{{count}} 条未读）"
   },
   "priority": {
     "info": "提示",
     "warning": "警告",
     "critical": "严重"
+  },
+  "staffPriority": {
+    "urgent": "紧急",
+    "high": "高",
+    "normal": "普通"
+  },
+  "categories": {
+    "all": "全部",
+    "payments": "付款",
+    "support": "客服",
+    "bookings": "预订",
+    "ekyc": "身份认证",
+    "maintenance": "维修",
+    "housekeeping": "客房保洁",
+    "system": "系统"
+  },
+  "filters": {
+    "actionNeeded": "待处理",
+    "unread": "未读",
+    "all": "全部",
+    "allPriorities": "所有优先级",
+    "searchPlaceholder": "搜索告警…"
+  },
+  "actions": {
+    "reviewPayment": "审核付款",
+    "reviewReceipt": "审核回执",
+    "reviewCancellation": "处理取消请求",
+    "replyGuest": "回复宾客",
+    "handleSlaBreach": "处理 SLA 超时",
+    "replyBeforeSla": "SLA 到期前回复",
+    "reviewEkyc": "审核身份认证",
+    "openMaintenance": "打开维修单",
+    "viewBooking": "查看预订",
+    "inspectJobs": "检查任务",
+    "open": "打开"
+  },
+  "templates": {
+    "paymentReceiptUploadedTitle": "已上传付款回执",
+    "paymentReceiptUploadedBody": "宾客已上传预订 {{booking}} 的付款回执，等待审核。",
+    "supportSlaBreachedTitle": "客服 SLA 已超时",
+    "supportSlaBreachedBody": "对话 {{conversation}} 已超出响应 SLA 时限。",
+    "supportSlaAtRiskTitle": "客服 SLA 即将到期",
+    "supportSlaAtRiskBody": "对话 {{conversation}} 将在 30 分钟内到期。",
+    "ekycPendingTitle": "身份认证待审核",
+    "ekycPendingBody": "认证申请 #{{id}} 已提交，需要审核。",
+    "maintenanceCriticalTitle": "紧急维修工单",
+    "maintenanceHighTitle": "高优先级维修工单",
+    "maintenanceBody": "维修工单 {{ticket}} 需要立即处理。",
+    "onlineBookingTitle": "新在线预订",
+    "onlineBookingBody": "已创建在线预订 {{booking}}。"
   },
   "meta": "{{priority}} 优先级 · {{time}}",
   "tier": {

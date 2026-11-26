@@ -321,6 +321,22 @@ pub async fn submit_ekyc(
     )
     .await;
 
+    let id_str = verification.id.to_string();
+    crate::modules::system::notifications::notify_staff(
+        pool,
+        crate::modules::system::notifications::StaffNotificationDraft {
+            audience_permission: "ekyc:read",
+            kind: "ekyc_pending_review",
+            subject: Some(&id_str),
+            title: "eKYC awaiting review",
+            body: Some(&format!(
+                "{full_name} submitted eKYC verification #{id_str} for review."
+            )),
+        },
+    )
+    .await;
+    crate::modules::system::notifications::publish_domain_changed(pool, "ekyc");
+
     Ok(validation::status_response(&verification))
 }
 
@@ -854,6 +870,9 @@ pub async fn apply_review_action(
         },
     )
     .await?;
+
+    crate::modules::system::notifications::publish_notifications_changed(pool);
+    crate::modules::system::notifications::publish_domain_changed(pool, "ekyc");
 
     let include_provider_raw =
         AuthService::check_permission(pool, actor_id, "ekyc:view_provider_raw")

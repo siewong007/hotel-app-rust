@@ -9,6 +9,9 @@ import { AppTopbar } from '../components/layout/AppTopbar';
 import { MobileNavBar } from '../components/layout/MobileNavBar';
 import { MobileQuickActions } from '../components/layout/MobileQuickActions';
 import { UrgentTransferAlert } from '../features/admin/components/UrgentTransferAlert';
+import { UrgentStaffAlertsBanner } from '../components/layout/UrgentStaffAlertsBanner';
+import { StaffAlertToaster } from '../components/layout/StaffAlertToaster';
+import { useStaffNotifications } from '../features/admin/system/hooks';
 import { CommandPaletteProvider } from '../components/layout/CommandPalette';
 import { UpdateNotifier } from '../desktop/UpdateNotifier';
 import { BootSplash, LoadingFallback, MinimalLoadingFallback } from './RouteFallbacks';
@@ -42,6 +45,16 @@ export const RootLayout: React.FC = () => {
   const isOffersPage = pathname === '/offers' || pathname.startsWith('/offers/');
   const isGuestExperience = isGuestPortal || isOffersPage || pathname === '/register' || pathname === '/login' || pathname === '/complete-profile';
   const isGuestModelHome = isGuestPortal;
+  const isStaffShell =
+    isAuthenticated &&
+    user?.user_type !== 'guest' &&
+    !isGuestExperience &&
+    !publicGuestPath &&
+    !isOffersPage &&
+    !isGuestModelHome &&
+    !isAdminPortal;
+  const staffNotifications = useStaffNotifications(isStaffShell, false);
+  const staffUnread = isStaffShell ? (staffNotifications.data?.unread ?? 0) : 0;
   const isTimelinePage = pathname.startsWith('/timeline');
   const boardSkinActive =
     isAuthenticated && !isTimelinePage && !isGuestPortal && !isOffersPage && !isGuestModelHome;
@@ -60,7 +73,7 @@ export const RootLayout: React.FC = () => {
     // `app.title` is the last-resort tab title — the settings themselves carry
     // a default, so an empty `hotel_name` reaching here is already abnormal.
     const displayName = hotelName.trim() || tCommon('app.title');
-    document.title = displayName;
+    document.title = staffUnread > 0 ? `(${staffUnread}) ${displayName}` : displayName;
     // The sign-in/register card's eyebrow is a CSS ::before, so its text has to
     // reach the stylesheet as a quoted custom property (see .auth-card in index.css).
     document.documentElement.style.setProperty(
@@ -70,7 +83,7 @@ export const RootLayout: React.FC = () => {
 
     const favicon = document.querySelector<HTMLLinkElement>('#app-favicon');
     if (favicon) favicon.href = isGuestExperience ? GUEST_FAVICON : ADMIN_FAVICON;
-  }, [isGuestExperience, hotelName, tCommon]);
+  }, [isGuestExperience, hotelName, tCommon, staffUnread]);
 
   useEffect(() => {
     const showResourceLocked = () => {
@@ -165,6 +178,7 @@ export const RootLayout: React.FC = () => {
           <Box sx={{ position: 'sticky', top: 0, zIndex: (theme) => theme.zIndex.appBar + 1 }}>
             <OfflineBanner />
             <UrgentTransferAlert />
+            <UrgentStaffAlertsBanner />
             <AppTopbar />
           </Box>
           <Container
@@ -194,6 +208,7 @@ export const RootLayout: React.FC = () => {
         <MobileQuickActions />
         {/* Desktop-only background update check; renders nothing on the web. */}
         <UpdateNotifier />
+        <StaffAlertToaster />
 
         <Suspense fallback={<MinimalLoadingFallback />}>
           <FirstLoginPasskeyPrompt

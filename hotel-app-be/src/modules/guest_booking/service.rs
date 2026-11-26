@@ -1489,6 +1489,25 @@ pub async fn create(
     }
 
     tx.commit().await.map_err(ApiError::from)?;
+    crate::modules::system::notifications::notify_staff(
+        pool,
+        crate::modules::system::notifications::StaffNotificationDraft {
+            audience_permission: "bookings:read",
+            kind: "online_booking_created",
+            subject: Some(&booking_number),
+            title: "New online booking",
+            body: Some(&format!(
+                "Online booking {booking_number} for {} ({} — {}, {} to {}).",
+                contact.nick_name,
+                quote.room_type_name,
+                booking_status,
+                quote.check_in_date,
+                quote.check_out_date,
+            )),
+        },
+    )
+    .await;
+    crate::modules::system::notifications::publish_domain_changed(pool, "bookings");
     let confirmation = Repository::confirmation_by_id(pool, booking_id).await?;
     let remaining_rooms = Repository::available_count(
         pool,
@@ -1779,6 +1798,21 @@ pub async fn create_anonymous(
     .await?;
 
     tx.commit().await.map_err(ApiError::from)?;
+    crate::modules::system::notifications::notify_staff(
+        pool,
+        crate::modules::system::notifications::StaffNotificationDraft {
+            audience_permission: "bookings:read",
+            kind: "online_booking_created",
+            subject: Some(&booking_number),
+            title: "New online booking",
+            body: Some(&format!(
+                "Online booking {booking_number} for {} ({}, {} to {}).",
+                guest.nick_name, quote.room_type_name, quote.check_in_date, quote.check_out_date,
+            )),
+        },
+    )
+    .await;
+    crate::modules::system::notifications::publish_domain_changed(pool, "bookings");
 
     // Outside the booking transaction on purpose: failing to store a mailing
     // preference must not roll back a booking the guest is about to pay for.

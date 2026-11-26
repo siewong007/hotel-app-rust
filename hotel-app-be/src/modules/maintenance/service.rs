@@ -211,6 +211,38 @@ pub async fn create_ticket(
     )
     .await;
 
+    if matches!(ticket.priority.as_str(), "critical" | "high") {
+        let is_critical = ticket.priority == "critical";
+        let room_label = ticket
+            .room_number
+            .as_deref()
+            .map(|r| format!(" (Room {r})"))
+            .unwrap_or_default();
+        crate::modules::system::notifications::notify_staff(
+            pool,
+            crate::modules::system::notifications::StaffNotificationDraft {
+                audience_permission: "maintenance:read",
+                kind: if is_critical {
+                    "maintenance_critical"
+                } else {
+                    "maintenance_high"
+                },
+                subject: Some(&ticket.ticket_number),
+                title: if is_critical {
+                    "Critical maintenance ticket"
+                } else {
+                    "High-priority maintenance ticket"
+                },
+                body: Some(&format!(
+                    "{}: {}{room_label}.",
+                    ticket.ticket_number, ticket.title
+                )),
+            },
+        )
+        .await;
+    }
+    crate::modules::system::notifications::publish_domain_changed(pool, "maintenance");
+
     Ok(ticket)
 }
 
@@ -282,6 +314,44 @@ pub async fn update_ticket(
         },
     )
     .await;
+
+    let priority_escalated = existing.priority != ticket.priority
+        && matches!(ticket.priority.as_str(), "critical" | "high");
+    if priority_escalated {
+        let is_critical = ticket.priority == "critical";
+        let room_label = ticket
+            .room_number
+            .as_deref()
+            .map(|r| format!(" (Room {r})"))
+            .unwrap_or_default();
+        crate::modules::system::notifications::notify_staff(
+            pool,
+            crate::modules::system::notifications::StaffNotificationDraft {
+                audience_permission: "maintenance:read",
+                kind: if is_critical {
+                    "maintenance_critical"
+                } else {
+                    "maintenance_high"
+                },
+                subject: Some(&ticket.ticket_number),
+                title: if is_critical {
+                    "Critical maintenance ticket"
+                } else {
+                    "High-priority maintenance ticket"
+                },
+                body: Some(&format!(
+                    "{}: {}{room_label}.",
+                    ticket.ticket_number, ticket.title
+                )),
+            },
+        )
+        .await;
+    } else if matches!(ticket.status.as_str(), "resolved" | "closed")
+        && existing.status != ticket.status
+    {
+        crate::modules::system::notifications::publish_notifications_changed(pool);
+    }
+    crate::modules::system::notifications::publish_domain_changed(pool, "maintenance");
 
     Ok(ticket)
 }

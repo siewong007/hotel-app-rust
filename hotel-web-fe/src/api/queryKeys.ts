@@ -29,6 +29,8 @@ const maintenance = ['maintenance'] as const;
 const promotions = ['promotions'] as const;
 const adminPromotionLists = [...promotions, 'admin', 'list'] as const;
 const paymentApprovals = ['payment-approvals'] as const;
+const system = ['system'] as const;
+const support = ['support'] as const;
 
 const paramsOrEmpty = <T extends KeyParams | AuditLogQuery | undefined>(params: T) => params ?? {};
 
@@ -243,5 +245,14 @@ export const queryKeys = {
     pending: (page: number, perPage: number) =>
       [...paymentApprovals, 'pending', page, perPage] as const,
     paypalConflicts: [...paymentApprovals, 'paypal-conflicts'] as const,
+  },
+  system: {
+    all: system,
+    health: () => [...system, 'health'] as const,
+    jobFailures: () => [...system, 'job-failures'] as const,
+    staffNotifications: () => [...system, 'staff-notifications'] as const,
+  },
+  support: {
+    all: support,
   },
 } as const;

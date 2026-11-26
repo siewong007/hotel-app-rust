@@ -33,6 +33,7 @@ import com.hotelapp.staff.data.dto.PendingPaymentPageDto
 import com.hotelapp.staff.data.dto.RecordPaymentRequestDto
 import com.hotelapp.staff.data.dto.RoomDetailedStatusDto
 import com.hotelapp.staff.data.dto.RoomWithOccupancyDto
+import com.hotelapp.staff.data.dto.StaffNotificationsResponseDto
 import com.hotelapp.staff.data.dto.UpdateHousekeepingTaskRequestDto
 import com.hotelapp.staff.data.dto.UpdateMaintenanceTicketRequestDto
 import com.hotelapp.staff.data.dto.UserSessionInfoDto
@@ -42,6 +43,7 @@ import com.hotelapp.staff.data.repository.BookingsRepository
 import com.hotelapp.staff.data.repository.EkycRepository
 import com.hotelapp.staff.data.repository.HousekeepingRepository
 import com.hotelapp.staff.data.repository.MaintenanceRepository
+import com.hotelapp.staff.data.repository.NotificationsRepository
 import com.hotelapp.staff.data.repository.PaymentsRepository
 import com.hotelapp.staff.data.repository.RoomsRepository
 import com.hotelapp.staff.data.repository.SearchRepository
@@ -286,4 +288,20 @@ class FakeEkycRepository : EkycRepository {
         return actionResult
     }
     override suspend fun reasonCodes() = codesResult
+}
+
+class FakeNotificationsRepository : NotificationsRepository {
+    var listResult: Result<StaffNotificationsResponseDto> = Result.success(StaffNotificationsResponseDto())
+    val markedReadIds = mutableListOf<Long>()
+    var markAllReadCalls = 0
+
+    override suspend fun list(): Result<StaffNotificationsResponseDto> = listResult
+    override suspend fun markRead(id: Long): Result<Unit> {
+        markedReadIds.add(id)
+        return Result.success(Unit)
+    }
+    override suspend fun markAllRead(): Result<Unit> {
+        markAllReadCalls += 1
+        return Result.success(Unit)
+    }
 }

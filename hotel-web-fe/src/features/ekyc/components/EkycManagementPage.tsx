@@ -86,6 +86,7 @@ import { useTranslation, statusLabel } from '../../../i18n';
 import type { UseTranslationResult } from '../../../i18n/useTranslation';
 import { formatHotelDateTime } from '../../../utils/date';
 import { useResetOnChange } from '../../../hooks/useResetOnChange';
+import { useBrowserSearchParams } from '../../../router/compat';
 
 const STATUS_OPTIONS = [
   'submitted',
@@ -335,9 +336,21 @@ const MetricTile: React.FC<{ label: string; value: React.ReactNode; accent?: 'de
 const EkycManagementPage: React.FC = () => {
   const { t, tOr } = useTranslation('ekyc');
   const isPhone = useIsPhone();
+  const pageSearchParams = useBrowserSearchParams();
+  const routedApplicationId = pageSearchParams.get('application_id')?.trim() || '';
+  const routedStatus = pageSearchParams.get('status')?.trim() || '';
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<EkycListParams>(() => getSavedFilters());
-  const [selectedId, setSelectedId] = useState<number | undefined>();
+  const [filters, setFilters] = useState<EkycListParams>(() => {
+    const base = getSavedFilters();
+    return routedStatus && STATUS_OPTIONS.includes(routedStatus)
+      ? { ...base, status: routedStatus, page: 1 }
+      : base;
+  });
+  const [selectedId, setSelectedId] = useState<number | undefined>(() =>
+    routedApplicationId && /^\d+$/.test(routedApplicationId)
+      ? Number(routedApplicationId)
+      : undefined,
+  );
   const [error, setError] = useState('');
   const [actionMode, setActionMode] = useState<string | null>(null);
   const [reasonCode, setReasonCode] = useState('');
@@ -365,6 +378,15 @@ const EkycManagementPage: React.FC = () => {
   const detail = detailQuery.data;
   const reasonCodes = reasonCodesQuery.data ?? [];
   const processing = reviewActionMutation.isPending || revealMutation.isPending;
+
+  useEffect(() => {
+    if (routedApplicationId && /^\d+$/.test(routedApplicationId)) {
+      setSelectedId(Number(routedApplicationId));
+    }
+    if (routedStatus && STATUS_OPTIONS.includes(routedStatus)) {
+      setFilters((current) => ({ ...current, status: routedStatus, page: 1 }));
+    }
+  }, [routedApplicationId, routedStatus]);
 
   useEffect(() => {
     const { search: _omittedSearch, ...filtersToPersist } = filters;

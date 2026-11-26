@@ -3,6 +3,7 @@ import {
   Badge,
   Box,
   Button,
+  Chip,
   IconButton,
   Popover,
   Tab,
@@ -10,7 +11,10 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
+import { keyframes } from '@mui/system';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
+import DoneIcon from '@mui/icons-material/Done';
 import CloseIcon from '@mui/icons-material/Close';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -27,11 +31,23 @@ import { useAuth } from '../../auth/AuthContext';
 import { useTranslation } from '../../i18n';
 import { Link } from '../../router/compat';
 import { useDeliveryFeed } from '../../features/notifications/hooks/useDeliveryFeed';
-import { DeliveryTabs, TIER_TAB_KEYS } from '../../features/notifications/components/DeliveryTabs';
+import { DeliveryTabs } from '../../features/notifications/components/DeliveryTabs';
+import { StaffNotificationIcon } from '../../features/notifications/components/StaffNotificationIcon';
 import { formatRelativeMs } from '../../features/notifications/utils/relativeTime';
+import {
+  priorityLabel,
+  resolveActionLabel,
+  resolveActionPending,
+  resolveActionUrl,
+  resolveCategory,
+  resolvePriority,
+  resolveRequiresAction,
+  resolveTitleAndBody,
+} from '../../features/notifications/utils/staffNotificationPresentation';
 import type { TierFilter } from '../../features/notifications/types';
 import {
   useMarkAllStaffNotificationsRead,
+  useMarkStaffNotificationRead,
   useStaffNotifications,
 } from '../../features/admin/system/hooks';
 
@@ -52,9 +68,13 @@ const PRIORITY_KEYS: Record<ApiNotificationPriority, string> = {
   critical: 'priority.critical',
 };
 
-/** Which popover tab is active: in-app alerts, persisted staff alerts, or one
- * of the guest-email server tiers. */
-type CenterTab = 'alerts' | 'system' | TierFilter;
+const bellPulse = keyframes`
+  0% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.55); }
+  70% { box-shadow: 0 0 0 8px rgba(211, 47, 47, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
+`;
+
+type CenterTab = 'action' | 'deliveries' | 'activity';
 
 export const NotificationCenter: React.FC = () => {
   const { user, hasPermission } = useAuth();
@@ -62,38 +82,34 @@ export const NotificationCenter: React.FC = () => {
   const userId = user?.id;
   const { items, unreadCount } = useNotifications(userId);
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
-  const [tab, setTab] = React.useState<CenterTab>('alerts');
+  const [tab, setTab] = React.useState<CenterTab>('action');
+  const [feedTier, setFeedTier] = React.useState<TierFilter>('all');
   const open = Boolean(anchorEl);
 
-  // Staff holding communications:read additionally see the guest-email outbox
-  // feed, grouped into priority tiers by delivery kind.
   const canReadFeed = hasPermission('communications:read');
-  const feedTier: TierFilter = tab === 'alerts' || tab === 'system' ? 'all' : tab;
   const feed = useDeliveryFeed(
     { tier: feedTier },
     canReadFeed,
-    open && tab !== 'alerts' && tab !== 'system',
+    open && tab === 'deliveries',
   );
-  const serverUnread = canReadFeed ? feed.data?.unread ?? null : null;
 
-  // Persisted staff alerts are addressed to permission holders. Job failures
-  // use settings:manage; a guest bank-transfer claim uses payments:read,
-  // which reception already holds (and payments:manage implies); guest
-  // support alerts use support:read (and support:manage implies).
-  const canSeeStaffAlerts =
-    hasPermission('settings:manage') ||
-    hasPermission('payments:read') ||
-    hasPermission('support:read');
-  const staffAlerts = useStaffNotifications(canSeeStaffAlerts, open);
+  // Every authenticated staff member receives notifications addressed to
+  // any of their effective RBAC permissions from `/api/system/notifications`.
+  const isStaff = Boolean(user && (user as { user_type?: string }).user_type !== 'guest');
+  const staffAlerts = useStaffNotifications(isStaff, open);
+  const markOneStaffRead = useMarkStaffNotificationRead();
   const markAllStaffRead = useMarkAllStaffNotificationsRead();
-  const staffUnread = canSeeStaffAlerts ? staffAlerts.data?.unread ?? 0 : 0;
 
-  const badgeCount = unreadCount + (serverUnread ?? 0) + staffUnread;
+  const staffItems = staffAlerts.data?.items ?? [];
+  const staffUnread = isStaff ? (staffAlerts.data?.unread ?? 0) : 0;
+  const hasUrgent = isStaff && (staffAlerts.data?.urgent_unread ?? 0) > 0;
+  const badgeCount = staffUnread + unreadCount;
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
-    // Opening the center acknowledges the unread in-app notifications.
-    markAllRead(userId);
+    if (tab === 'activity') {
+      markAllRead(userId);
+    }
   };
   const handleClose = () => setAnchorEl(null);
 
@@ -107,12 +123,19 @@ export const NotificationCenter: React.FC = () => {
           }
           sx={{
             flexShrink: 0,
-            color: 'inherit',
+            color: hasUrgent ? 'error.main' : 'inherit',
+            borderRadius: '50%',
+            animation: hasUrgent ? `${bellPulse} 1.8s infinite` : 'none',
+            '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
             '&:hover': { bgcolor: 'action.hover' },
           }}
         >
           <Badge badgeContent={badgeCount} color="error" max={99} overlap="circular">
-            <NotificationsNoneIcon fontSize="small" />
+            {hasUrgent ? (
+              <NotificationsActiveIcon fontSize="small" />
+            ) : (
+              <NotificationsNoneIcon fontSize="small" />
+            )}
           </Badge>
         </IconButton>
       </Tooltip>
@@ -123,7 +146,11 @@ export const NotificationCenter: React.FC = () => {
         onClose={handleClose}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        slotProps={{ paper: { sx: { mt: 1, width: 'min(420px, 92vw)', borderRadius: 2, overflow: 'hidden' } } }}
+        slotProps={{
+          paper: {
+            sx: { mt: 1, width: 'min(440px, 94vw)', borderRadius: 2, overflow: 'hidden' },
+          },
+        }}
       >
         <Box
           sx={{
@@ -136,119 +163,211 @@ export const NotificationCenter: React.FC = () => {
             borderColor: 'divider',
           }}
         >
-          <Typography sx={{ fontSize: '0.9rem', fontWeight: 700 }}>{t('title')}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontSize: '0.92rem', fontWeight: 700 }}>{t('title')}</Typography>
+            {staffUnread > 0 && (
+              <Chip
+                size="small"
+                color={hasUrgent ? 'error' : 'primary'}
+                label={staffUnread}
+                sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }}
+              />
+            )}
+          </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            {items.length > 0 && (
-              <Button size="small" onClick={() => clearAll(userId)} sx={{ textTransform: 'none', fontSize: '0.75rem' }}>
+            {tab === 'action' && staffUnread > 0 && (
+              <Button
+                size="small"
+                onClick={() => markAllStaffRead.mutate()}
+                disabled={markAllStaffRead.isPending}
+                sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+              >
+                {t('markAllRead')}
+              </Button>
+            )}
+            {tab === 'activity' && items.length > 0 && (
+              <Button
+                size="small"
+                onClick={() => clearAll(userId)}
+                sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+              >
                 {t('center.clearAll')}
               </Button>
             )}
-            {canReadFeed && (
-              <Button
-                size="small"
-                component={Link}
-                to="/notifications"
-                onClick={handleClose}
-                sx={{ textTransform: 'none', fontSize: '0.75rem' }}
-                aria-label={t('center.viewAllAria')}
-              >
-                {t('common:actions.viewAll')}
-              </Button>
-            )}
+            <Button
+              size="small"
+              component={Link}
+              to="/notifications"
+              onClick={handleClose}
+              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+              aria-label={t('center.viewAllAria')}
+            >
+              {t('common:actions.viewAll')}
+            </Button>
           </Box>
         </Box>
 
-        {(canReadFeed || canSeeStaffAlerts) && (
-          <Tabs
-            value={tab}
-            onChange={(_, next: CenterTab) => {
-              setTab(next);
-              if (next === 'system') markAllStaffRead.mutate();
-            }}
-            variant="fullWidth"
-            sx={{ minHeight: 36, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTab-root': { minHeight: 36, minWidth: 0, px: 1, fontSize: '0.75rem' } }}
-          >
-            <Tab value="alerts" label={t('center.alerts')} />
-            {canSeeStaffAlerts && <Tab value="system" label={t('center.system')} />}
-            {canReadFeed &&
-              (Object.keys(TIER_TAB_KEYS) as TierFilter[]).map((key) => (
-                <Tab key={key} value={key} label={t(TIER_TAB_KEYS[key])} />
-              ))}
-          </Tabs>
-        )}
+        <Tabs
+          value={tab}
+          onChange={(_, next: CenterTab) => {
+            setTab(next);
+            if (next === 'activity') {
+              markAllRead(userId);
+            }
+          }}
+          variant="fullWidth"
+          sx={{
+            minHeight: 36,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            '& .MuiTab-root': { minHeight: 36, minWidth: 0, px: 1, fontSize: '0.75rem', textTransform: 'none' },
+          }}
+        >
+          <Tab
+            value="action"
+            label={
+              staffUnread > 0
+                ? `${t('center.actionRequired')} (${staffUnread})`
+                : t('center.actionRequired')
+            }
+          />
+          {canReadFeed && <Tab value="deliveries" label={t('center.deliveries')} />}
+          <Tab value="activity" label={t('center.activity')} />
+        </Tabs>
 
-        {canSeeStaffAlerts && tab === 'system' ? (
-          <Box sx={{ maxHeight: 420, overflowY: 'auto' }}>
-            {(staffAlerts.data?.items ?? []).length === 0 ? (
+        {tab === 'action' ? (
+          <Box sx={{ maxHeight: 440, overflowY: 'auto' }}>
+            {staffItems.length === 0 ? (
               <Box sx={{ px: 2, py: 5, textAlign: 'center', color: 'text.secondary' }}>
                 <NotificationsNoneIcon sx={{ fontSize: 32, opacity: 0.4, mb: 1 }} />
                 <Typography sx={{ fontSize: '0.85rem' }}>
-                  {staffAlerts.isPending ? t('common:state.loading') : t('center.noSystemAlerts')}
+                  {staffAlerts.isPending ? t('common:state.loading') : t('center.noActionItems')}
                 </Typography>
               </Box>
             ) : (
-              (staffAlerts.data?.items ?? []).map((item) => (
-                <Box
-                  key={item.id}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 1.25,
-                    px: 2,
-                    py: 1.25,
-                    borderBottom: '1px solid',
-                    borderColor: 'divider',
-                    '&:last-of-type': { borderBottom: 'none' },
-                  }}
-                >
-                  <Box sx={{ color: item.kind === 'bank_transfer_pending' ? 'var(--hotel-warning)' : 'var(--hotel-danger)', display: 'flex', mt: '2px' }}>
-                    {item.kind === 'bank_transfer_pending'
-                      ? <WarningAmberIcon fontSize="small" />
-                      : <ErrorOutlineIcon fontSize="small" />}
-                  </Box>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography
-                      sx={{
-                        fontSize: '0.82rem',
-                        lineHeight: 1.35,
-                        fontWeight: item.read_at ? 400 : 600,
-                      }}
-                    >
-                      {item.kind === 'bank_transfer_pending'
-                        ? t('center.bankTransferPendingTitle')
-                        : item.title}
-                    </Typography>
-                    {(item.kind === 'bank_transfer_pending' || item.body) && (
-                      <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mt: 0.25 }}>
-                        {item.kind === 'bank_transfer_pending'
-                          ? t('center.bankTransferPendingBody', { booking: item.subject ?? '' })
-                          : item.body}
-                      </Typography>
-                    )}
-                    {item.kind === 'bank_transfer_pending' && (
-                      <Button
-                        size="small"
-                        component={Link}
-                        to="/payment-approvals"
-                        onClick={handleClose}
-                        sx={{ textTransform: 'none', fontSize: '0.75rem', px: 0, minWidth: 0 }}
+              staffItems.map((item) => {
+                const priority = resolvePriority(item);
+                const category = resolveCategory(item);
+                const pending = resolveActionPending(item);
+                const requiresAction = resolveRequiresAction(item);
+                const actionUrl = resolveActionUrl(item);
+                const ctaLabel = resolveActionLabel(item, t);
+                const { title, body } = resolveTitleAndBody(item, t);
+                const unreadPending = item.read_at === null && pending;
+
+                return (
+                  <Box
+                    key={item.id}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 1.25,
+                      px: 2,
+                      py: 1.25,
+                      borderBottom: '1px solid',
+                      borderColor: 'divider',
+                      borderLeft: '3px solid',
+                      borderLeftColor: !pending
+                        ? 'transparent'
+                        : priority === 'urgent'
+                          ? 'error.main'
+                          : priority === 'high'
+                            ? 'warning.main'
+                            : 'info.main',
+                      bgcolor: unreadPending ? 'action.hover' : 'transparent',
+                      opacity: pending ? 1 : 0.72,
+                      '&:last-of-type': { borderBottom: 'none' },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', mt: '3px' }}>
+                      <StaffNotificationIcon category={category} priority={priority} pending={pending} />
+                    </Box>
+
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', mb: 0.25 }}>
+                        {priority !== 'normal' && (
+                          <Chip
+                            size="small"
+                            label={priorityLabel(priority, t)}
+                            color={priority === 'urgent' ? 'error' : 'warning'}
+                            variant={pending ? 'filled' : 'outlined'}
+                            sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }}
+                          />
+                        )}
+                        {requiresAction && (
+                          <Chip
+                            size="small"
+                            label={pending ? t('center.actionNeeded') : t('center.handled')}
+                            color={pending ? 'primary' : 'success'}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: '0.65rem' }}
+                          />
+                        )}
+                        <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary', ml: 'auto' }}>
+                          {formatRelativeMs(Date.parse(item.created_at), t)}
+                        </Typography>
+                      </Box>
+
+                      <Typography
+                        sx={{
+                          fontSize: '0.82rem',
+                          lineHeight: 1.35,
+                          fontWeight: unreadPending ? 700 : 500,
+                        }}
                       >
-                        {t('center.reviewPayment')}
-                      </Button>
-                    )}
-                    <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary', mt: 0.25 }}>
-                      {formatRelativeMs(Date.parse(item.created_at), t)}
-                    </Typography>
+                        {title}
+                      </Typography>
+
+                      {body ? (
+                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mt: 0.25 }}>
+                          {body}
+                        </Typography>
+                      ) : null}
+
+                      {(actionUrl || item.read_at === null) && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.75, gap: 1 }}>
+                          {actionUrl ? (
+                            <Button
+                              size="small"
+                              component={Link}
+                              to={actionUrl}
+                              onClick={() => {
+                                if (item.read_at === null) markOneStaffRead.mutate(item.id);
+                                handleClose();
+                              }}
+                              variant={pending ? 'outlined' : 'text'}
+                              color={priority === 'urgent' && pending ? 'error' : 'primary'}
+                              sx={{ textTransform: 'none', fontSize: '0.74rem', py: 0.25, px: pending ? 1 : 0 }}
+                            >
+                              {ctaLabel}
+                            </Button>
+                          ) : (
+                            <span />
+                          )}
+                          {item.read_at === null && (
+                            <Tooltip title={t('center.markRead')}>
+                              <IconButton
+                                size="small"
+                                aria-label={t('center.markRead')}
+                                onClick={() => markOneStaffRead.mutate(item.id)}
+                              >
+                                <DoneIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
+                      )}
+                    </Box>
                   </Box>
-                </Box>
-              ))
+                );
+              })
             )}
           </Box>
-        ) : canReadFeed && tab !== 'alerts' ? (
+        ) : canReadFeed && tab === 'deliveries' ? (
           <DeliveryTabs
-            showTabs={false}
+            showTabs
             tier={feedTier}
-            onTierChange={(next) => setTab(next)}
+            onTierChange={(next) => setFeedTier(next)}
             items={feed.data?.items ?? []}
             emptyMessage={
               feed.isPending ? t('common:state.loading') : t('center.allCaughtUp')

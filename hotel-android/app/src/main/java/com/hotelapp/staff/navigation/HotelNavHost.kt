@@ -13,6 +13,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,8 +42,10 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.KingBed
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
@@ -58,8 +63,12 @@ import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -79,7 +88,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,10 +134,13 @@ import com.hotelapp.staff.feature.housekeeping.HousekeepingScreen
 import com.hotelapp.staff.feature.housekeeping.HousekeepingViewModel
 import com.hotelapp.staff.feature.maintenance.MaintenanceScreen
 import com.hotelapp.staff.feature.maintenance.MaintenanceViewModel
+import com.hotelapp.staff.data.dto.StaffNotificationItemDto
 import com.hotelapp.staff.feature.more.MoreScreen
 import com.hotelapp.staff.feature.more.MoreViewModel
 import com.hotelapp.staff.feature.notifications.NotificationsModalSheet
 import com.hotelapp.staff.feature.notifications.NotificationsViewModel
+import com.hotelapp.staff.feature.notifications.effectivePriority
+import com.hotelapp.staff.feature.notifications.notificationActionLabel
 import com.hotelapp.staff.feature.payments.PendingPaymentsScreen
 import com.hotelapp.staff.feature.payments.PendingPaymentsViewModel
 import com.hotelapp.staff.feature.rooms.RoomsScreen
@@ -327,6 +341,71 @@ private fun AuthenticatedNavHost(
         }
     }
 
+    fun openStaffNotification(item: StaffNotificationItemDto) {
+        haptics.click()
+        notificationsViewModel.markRead(item.id)
+        showNotificationsSheet = false
+        val kind = item.kind.lowercase()
+        val category = item.category.lowercase()
+        when {
+            category == "payments" || kind in setOf("bank_transfer_pending", "payment_receipt_uploaded") -> {
+                if (session.hasPermission("payments:read")) {
+                    navController.navigate(PendingPaymentsRoute) { launchSingleTop = true }
+                } else {
+                    showMessage("Your role does not have permission to open pending payments.")
+                }
+            }
+            category == "ekyc" || kind == "ekyc_pending_review" -> {
+                if (session.hasPermission("ekyc:read")) {
+                    navController.navigate(EkycQueueRoute) { launchSingleTop = true }
+                } else {
+                    showMessage("Your role does not have permission to review eKYC applications.")
+                }
+            }
+            category == "maintenance" || kind in setOf("maintenance_critical", "maintenance_high") -> {
+                if (session.hasPermission("maintenance:read")) {
+                    navController.navigate(MaintenanceRoute) { launchSingleTop = true }
+                } else {
+                    showMessage("Your role does not have permission to open maintenance tickets.")
+                }
+            }
+            category == "housekeeping" -> {
+                if (session.hasPermission("housekeeping:read")) {
+                    navigateTopTab(HousekeepingRoute)
+                } else {
+                    showMessage("Your role does not have permission to open housekeeping.")
+                }
+            }
+            category == "bookings" || kind == "online_booking_created" -> {
+                if (session.hasPermission("bookings:read")) {
+                    navigateTopTab(BookingsRoute("all"))
+                } else {
+                    showMessage("Your role does not have permission to open bookings.")
+                }
+            }
+            else -> {
+                val ref = item.subject?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                showMessage("Open the web console to handle: ${item.title}$ref")
+            }
+        }
+    }
+
+    LaunchedEffect(notificationsViewModel) {
+        notificationsViewModel.incomingAlerts.collect { alert ->
+            val ref = alert.subject?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = "${alert.title}$ref",
+                actionLabel = notificationActionLabel(alert),
+                withDismissAction = true,
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                openStaffNotification(alert)
+            }
+        }
+    }
+
     LaunchedEffect(incomingDeepLink, session, deferDeepLinks) {
         if (deferDeepLinks) return@LaunchedEffect
         val raw = incomingDeepLink ?: return@LaunchedEffect
@@ -443,6 +522,23 @@ private fun AuthenticatedNavHost(
                                     showNotificationsSheet = true
                                 },
                             ) {
+                                val hasUrgent = notificationsState.urgentUnreadCount > 0
+                                val reducedMotion = rememberReducedMotion()
+                                val bellPulseAlpha = if (hasUrgent && !reducedMotion) {
+                                    val infinite = rememberInfiniteTransition(label = "bell_urgent_pulse")
+                                    val a by infinite.animateFloat(
+                                        initialValue = 1f,
+                                        targetValue = 0.5f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(700),
+                                            repeatMode = RepeatMode.Reverse,
+                                        ),
+                                        label = "bell_alpha",
+                                    )
+                                    a
+                                } else {
+                                    1f
+                                }
                                 val badgeDesc = if (notificationsState.unreadCount > 0) {
                                     "Notifications, ${notificationsState.unreadCount} unread"
                                 } else {
@@ -452,8 +548,8 @@ private fun AuthenticatedNavHost(
                                     badge = {
                                         if (notificationsState.unreadCount > 0) {
                                             Badge(
-                                                containerColor = colors.primaryMain,
-                                                contentColor = colors.primaryContrastText,
+                                                containerColor = if (hasUrgent) colors.danger.fg else colors.primaryMain,
+                                                contentColor = if (hasUrgent) Color.White else colors.primaryContrastText,
                                             ) {
                                                 Text(notificationsState.unreadCount.coerceAtMost(99).toString())
                                             }
@@ -461,15 +557,73 @@ private fun AuthenticatedNavHost(
                                     },
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.Notifications,
+                                        imageVector = if (hasUrgent) Icons.Outlined.NotificationsActive else Icons.Outlined.Notifications,
                                         contentDescription = badgeDesc,
-                                        tint = colors.textPrimary,
+                                        tint = if (hasUrgent) colors.danger.fg else colors.textPrimary,
+                                        modifier = Modifier.alpha(bellPulseAlpha),
                                     )
                                 }
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surfaceBase),
                     )
+                    val urgentPendingItems = remember(notificationsState.items) {
+                        notificationsState.items.filter {
+                            effectivePriority(it) == "urgent" && it.actionPending && it.readAt == null
+                        }
+                    }
+                    val topUrgent = urgentPendingItems.firstOrNull()
+                    if (topUrgent != null) {
+                        Surface(
+                            color = colors.danger.bg,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.click()
+                                    showNotificationsSheet = true
+                                }
+                                .border(1.dp, colors.danger.border),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.WarningAmber,
+                                    contentDescription = null,
+                                    tint = colors.danger.fg,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = if (urgentPendingItems.size > 1) {
+                                        "${urgentPendingItems.size} urgent · ${topUrgent.title}"
+                                    } else {
+                                        topUrgent.title
+                                    },
+                                    color = colors.danger.fg,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    onClick = { openStaffNotification(topUrgent) },
+                                ) {
+                                    Text(
+                                        text = notificationActionLabel(topUrgent),
+                                        color = colors.danger.fg,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     HorizontalDivider(color = colors.borderSubtle, thickness = 1.dp)
                 }
             }
@@ -951,6 +1105,7 @@ private fun AuthenticatedNavHost(
         NotificationsModalSheet(
             viewModel = notificationsViewModel,
             onDismiss = { showNotificationsSheet = false },
+            onOpenItem = ::openStaffNotification,
         )
     }
 }
