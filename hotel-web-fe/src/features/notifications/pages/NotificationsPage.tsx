@@ -22,6 +22,7 @@ import SearchIcon from '@mui/icons-material/Search';
 
 import PageHeader from '../../../components/common/PageHeader';
 import { useAuth } from '../../../auth/AuthContext';
+import { useResetOnChange } from '../../../hooks/useResetOnChange';
 import { useTranslation, statusLabel } from '../../../i18n';
 import { Link, useBrowserSearchParams } from '../../../router/compat';
 import {
@@ -74,7 +75,8 @@ const NotificationsPage: React.FC = () => {
   const { user, hasPermission } = useAuth();
   const { t } = useTranslation('notifications');
   const searchParams = useBrowserSearchParams();
-  const initialUrgent = searchParams.get('filter') === 'urgent';
+  const urlFilter = searchParams.get('filter');
+  const initialUrgent = urlFilter === 'urgent';
 
   const canReadFeed = hasPermission('communications:read');
   const isStaff = Boolean(!user || (user as { user_type?: string }).user_type !== 'guest');
@@ -87,13 +89,13 @@ const NotificationsPage: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = React.useState<'all' | StaffNotificationCategory>('all');
   const [searchQuery, setSearchQuery] = React.useState('');
 
-  React.useEffect(() => {
-    if (searchParams.get('filter') === 'urgent') {
+  useResetOnChange([urlFilter], () => {
+    if (urlFilter === 'urgent') {
       setSection('inbox');
       setPriorityFilter('urgent');
       setStatusFilter('action_needed');
     }
-  }, [searchParams]);
+  });
 
   const [tier, setTier] = React.useState<TierFilter>('all');
   const [deliveryStatus, setDeliveryStatus] = React.useState('');

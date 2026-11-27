@@ -191,7 +191,7 @@ const PortalBookingPage: React.FC = () => {
   // still belong on the session gate below.
   const isAnonymous = !token && needsLogin;
   const canQuery = Boolean(token) || isAnonymous;
-  const turnstile = useTurnstile('public_booking_create');
+  const { setContainer: setTurnstileContainer, ...turnstile } = useTurnstile('public_booking_create');
   const { t: tAuth } = useTranslation('auth');
   const awaitingTurnstile = isAnonymous && turnstile.enabled && !turnstile.token && !turnstile.error;
 
@@ -679,7 +679,7 @@ const PortalBookingPage: React.FC = () => {
                 <FormControlLabel sx={{ mt: 1, minHeight: 44 }} control={<Checkbox checked={cleaningPreference} onChange={(event) => setCleaningPreference(event.target.checked)} />} label={t('book.dailyCleaning')} />
                 <SmokingPreferenceField value={smokingPreference} onChange={setSmokingPreference} disabled={isSubmitting} />
                 {isAnonymous && turnstile.enabled ? (
-                  <Box ref={turnstile.setContainer} sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }} />
+                  <Box ref={setTurnstileContainer} sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }} />
                 ) : null}
               </>
             }
@@ -719,7 +719,7 @@ const PortalBookingPage: React.FC = () => {
               onRequests={setSpecialRequests}
               onCleaning={setCleaningPreference}
               onSmokingPreference={setSmokingPreference}
-              turnstileSlot={isAnonymous && turnstile.enabled ? <Box ref={turnstile.setContainer} sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }} /> : null}
+              turnstileSlot={isAnonymous && turnstile.enabled ? <Box ref={setTurnstileContainer} sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }} /> : null}
               onBack={() => { setSinglePartyState(null); setSelectedOffer(null); setQuote(null); setEligibleVoucherIds(new Set()); setComplimentaryDates([]); }}
             />
           )}

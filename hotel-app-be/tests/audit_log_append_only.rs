@@ -376,11 +376,10 @@ async fn every_audit_partition_carries_the_row_and_truncate_guards() {
 
 #[tokio::test]
 async fn restore_trigger_switch_also_opens_the_cloned_partition_guards() {
-    // A data-transfer restore clears the tables it rewrites with the user
-    // triggers switched off (`ALTER TABLE ... DISABLE TRIGGER USER`), not
-    // through the escape hatch. PostgreSQL applies that switch to the row
-    // triggers it cloned onto every partition, so the restore can still clear
-    // audit_logs, and switching back on closes every partition again.
+    // Wave-2 security hardening keeps `public.audit_logs` strictly append-only
+    // even during a data-transfer restore: `set_transfer_triggers` and
+    // `clear_transfer_tables` skip `audit_logs`, and `transfer_import_ddl`
+    // refuses `triggers_off` on `public.audit_logs` with SQLSTATE 42501.
     let Some((pool, _guard)) = setup_pg_pool().await else {
         return;
     };
@@ -403,43 +402,90 @@ async fn restore_trigger_switch_also_opens_the_cloned_partition_guards() {
         false,
     )
     .await
-    .expect("switch the audit_logs user triggers off");
-    let cleared =
+    .expect("set_transfer_triggers must skip immutable public.audit_logs cleanly");
+
+    sqlx::query("SAVEPOINT probe_parent")
+        .execute(&mut *tx)
+        .await
+        .expect("set probe_parent savepoint");
+    let parent_delete =
         sqlx::query("DELETE FROM public.audit_logs WHERE action = 'append_only_partition_probe'")
             .execute(&mut *tx)
-            .await
-            .expect("clear the probe rows with the user triggers off")
-            .rows_affected();
-    DataTransferRepository::set_transfer_triggers(&mut tx, std::slice::from_ref(&audit_logs), true)
+            .await;
+    sqlx::query("ROLLBACK TO SAVEPOINT probe_parent")
+        .execute(&mut *tx)
         .await
-        .expect("switch the audit_logs user triggers back on");
+        .expect("roll back to probe_parent savepoint");
 
-    sqlx::query(SEED_PROBE_ROWS)
+    sqlx::query("SAVEPOINT probe_partition")
         .execute(&mut *tx)
         .await
-        .expect("insert the probe audit rows again");
-    sqlx::query("SAVEPOINT probe")
-        .execute(&mut *tx)
-        .await
-        .expect("set the probe savepoint");
-    let reenabled = sqlx::query(
+        .expect("set probe_partition savepoint");
+    let partition_delete = sqlx::query(
         "DELETE FROM public.audit_logs_2097_03 WHERE action = 'append_only_partition_probe'",
     )
     .execute(&mut *tx)
     .await;
-    sqlx::query("ROLLBACK TO SAVEPOINT probe")
+    sqlx::query("ROLLBACK TO SAVEPOINT probe_partition")
         .execute(&mut *tx)
         .await
-        .expect("roll back to the probe savepoint");
+        .expect("roll back to probe_partition savepoint");
+
+    sqlx::query("SAVEPOINT probe_ddl")
+        .execute(&mut *tx)
+        .await
+        .expect("set probe_ddl savepoint");
+    let ddl_reject = sqlx::query(
+        "SELECT public.transfer_import_ddl('public', 'audit_logs', 'triggers_off', NULL)",
+    )
+    .execute(&mut *tx)
+    .await;
+    sqlx::query("ROLLBACK TO SAVEPOINT probe_ddl")
+        .execute(&mut *tx)
+        .await
+        .expect("roll back to probe_ddl savepoint");
+
+    DataTransferRepository::clear_transfer_tables(&mut tx, std::slice::from_ref(&audit_logs))
+        .await
+        .expect("clear_transfer_tables must skip immutable public.audit_logs cleanly");
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM public.audit_logs WHERE action = 'append_only_partition_probe'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("count remaining probe rows");
+
+    DataTransferRepository::set_transfer_triggers(&mut tx, std::slice::from_ref(&audit_logs), true)
+        .await
+        .expect("re-enabling transfer triggers must skip immutable public.audit_logs cleanly");
+
     tx.rollback()
         .await
         .expect("roll back the probe transaction");
 
-    assert_eq!(
-        cleared, 2,
-        "the restore path must still clear partitioned audit rows"
+    let parent_err = parent_delete.expect_err("parent audit_logs delete must remain blocked");
+    assert!(
+        parent_err.to_string().contains(GUARD_MESSAGE),
+        "{parent_err}"
     );
-    let error =
-        reenabled.expect_err("switching the triggers back on must close the partitions again");
-    assert!(error.to_string().contains(GUARD_MESSAGE), "{error}");
+    let partition_err =
+        partition_delete.expect_err("partition audit_logs delete must remain blocked");
+    assert!(
+        partition_err.to_string().contains(GUARD_MESSAGE),
+        "{partition_err}"
+    );
+    let ddl_err =
+        ddl_reject.expect_err("transfer_import_ddl must reject triggers_off on audit_logs");
+    assert_eq!(
+        ddl_err
+            .as_database_error()
+            .and_then(|db| db.code())
+            .as_deref(),
+        Some("42501"),
+        "expected SQLSTATE 42501, got {ddl_err}"
+    );
+    assert_eq!(
+        remaining, 2,
+        "clear_transfer_tables must preserve append-only audit rows"
+    );
 }

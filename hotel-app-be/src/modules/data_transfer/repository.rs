@@ -523,6 +523,9 @@ impl DataTransferRepository {
         tables: &[TransferTable],
     ) -> Result<(), ApiError> {
         for table in tables {
+            if table.table.schema == "public" && table.table.name == "audit_logs" {
+                continue;
+            }
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "DELETE FROM {}",
                 table.source()

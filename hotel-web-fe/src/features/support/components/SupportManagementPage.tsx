@@ -18,7 +18,7 @@ import {
   Typography,
 } from '@mui/material';
 import { Refresh as RefreshIcon, Search as SearchIcon } from '@mui/icons-material';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
 import { getQueryErrorMessage } from '../../../api/queryConfig';
 import { useTranslation } from '../../../i18n/useTranslation';
@@ -97,7 +97,7 @@ export default function SupportManagementPage() {
   const deferredSearch = useDeferredValue(params.search);
   const queryParams = useMemo(() => ({ ...params, search: deferredSearch }), [deferredSearch, params]);
 
-  useEffect(() => {
+  useResetOnChange([routedSearch, routedQueue], () => {
     if (!routedSearch && !routedQueue) return;
     setParams(current => ({
       ...current,
@@ -107,7 +107,7 @@ export default function SupportManagementPage() {
       search: routedSearch || current.search,
       page: 1,
     }));
-  }, [routedSearch, routedQueue]);
+  });
 
   const canWrite = hasPermission('support:write') || hasPermission('support:manage');
   const canAssign = hasPermission('support:assign') || hasPermission('support:manage');

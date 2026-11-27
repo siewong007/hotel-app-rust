@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Button, Snackbar, Typography } from '@mui/material';
 import { useAuth } from '../../auth/AuthContext';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useTranslation } from '../../i18n';
 import { useNavigate } from '../../router/compat';
 import {
@@ -29,41 +30,43 @@ export const StaffAlertToaster: React.FC = () => {
   const query = useStaffNotifications(isStaff, false);
   const markRead = useMarkStaffNotificationRead();
 
-  const seenIdsRef = React.useRef<Set<number> | null>(null);
-  const lastUserIdRef = React.useRef<string | number | undefined>(undefined);
+  const [prevUserId, setPrevUserId] = React.useState<string | number | undefined>(user?.id);
+  const [seenIds, setSeenIds] = React.useState<Set<number> | null>(null);
   const [queue, setQueue] = React.useState<StaffNotificationItem[]>([]);
 
-  React.useEffect(() => {
-    const uid = user?.id;
-    if (lastUserIdRef.current !== uid) {
-      lastUserIdRef.current = uid;
-      seenIdsRef.current = null;
-      setQueue([]);
-    }
-  }, [user?.id]);
+  const items = query.data?.items ?? [];
+  const hasData = Boolean(query.data);
+  const itemsKey = hasData ? items.map((item) => item.id).join(',') : '';
 
-  React.useEffect(() => {
-    if (!isStaff || !query.data) return;
-    const items = query.data.items ?? [];
-    if (seenIdsRef.current === null) {
-      seenIdsRef.current = new Set(items.map((item) => item.id));
+  useResetOnChange([user?.id, isStaff, hasData, itemsKey], () => {
+    if (prevUserId !== user?.id) {
+      setPrevUserId(user?.id);
+      setQueue([]);
+      setSeenIds(isStaff && hasData ? new Set(items.map((item) => item.id)) : null);
+      return;
+    }
+    if (!isStaff || !hasData) return;
+    if (seenIds === null) {
+      setSeenIds(new Set(items.map((item) => item.id)));
       return;
     }
 
+    const unseen = items.filter((item) => !seenIds.has(item.id));
+    if (unseen.length === 0) return;
+
+    const nextSeen = new Set(seenIds);
     const fresh: StaffNotificationItem[] = [];
-    for (const item of items) {
-      if (!seenIdsRef.current.has(item.id)) {
-        seenIdsRef.current.add(item.id);
-        if (item.read_at === null && resolveActionPending(item)) {
-          fresh.push(item);
-        }
+    for (const item of unseen) {
+      nextSeen.add(item.id);
+      if (item.read_at === null && resolveActionPending(item)) {
+        fresh.push(item);
       }
     }
-
+    setSeenIds(nextSeen);
     if (fresh.length > 0) {
       setQueue((prev) => [...prev, ...fresh]);
     }
-  }, [isStaff, query.data]);
+  });
 
   const current = queue[0] ?? null;
   if (!isStaff || !current) return null;

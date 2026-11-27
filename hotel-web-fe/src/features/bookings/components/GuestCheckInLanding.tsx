@@ -22,7 +22,7 @@ export const GuestCheckInLanding: React.FC = () => {
   const { t } = useTranslation('guestPortal');
   const { t: tAuth } = useTranslation('auth');
   const navigate = useNavigate();
-  const turnstile = useTurnstile('guest_portal_verify');
+  const { setContainer: setTurnstileContainer, ...turnstile } = useTurnstile('guest_portal_verify');
   const awaitingTurnstile = turnstile.enabled && !turnstile.token && !turnstile.error;
   const [bookingNumber, setBookingNumber] = useState('');
   const [name, setName] = useState('');
@@ -129,7 +129,7 @@ export const GuestCheckInLanding: React.FC = () => {
 
           {turnstile.enabled && (
             <Box
-              ref={turnstile.setContainer}
+              ref={setTurnstileContainer}
               sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }}
             />
           )}

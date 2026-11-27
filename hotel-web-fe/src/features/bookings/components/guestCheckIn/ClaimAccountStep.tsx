@@ -46,7 +46,7 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
   const { t: tAuth } = useTranslation('auth');
   const { locale: legalLocale } = useLegalLocale();
   const consent = useConsent(REGISTRATION_CONSENTS);
-  const turnstile = useTurnstile('claim_account');
+  const { setContainer: setTurnstileContainer, ...turnstile } = useTurnstile('claim_account');
   const awaitingTurnstile = turnstile.enabled && !turnstile.token && !turnstile.error;
 
   const [username, setUsername] = useState('');
@@ -216,7 +216,7 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
 
       {turnstile.enabled && (
         <Box
-          ref={turnstile.setContainer}
+          ref={setTurnstileContainer}
           sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }}
         />
       )}

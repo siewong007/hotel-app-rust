@@ -2393,11 +2393,17 @@ async fn import_structured_backup(
                     .entry((name.clone(), relationship_problem_reason(&column, &parent)))
                     .or_default() += 1;
             } else {
+                let row_conflict =
+                    if table.table.schema == "public" && table.table.name == "audit_logs" {
+                        ConflictPolicy::Skip
+                    } else {
+                        on_conflict
+                    };
                 match DataTransferRepository::insert_transfer_row(
                     &mut tx,
                     table,
                     &object,
-                    on_conflict,
+                    row_conflict,
                 )
                 .await
                 {

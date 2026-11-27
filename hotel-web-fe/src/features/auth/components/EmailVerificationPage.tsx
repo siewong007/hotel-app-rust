@@ -23,9 +23,7 @@ const EmailVerificationPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
-  const initialTokenRef = useRef<string | null>(searchParams.get('token'));
-
-  const token = initialTokenRef.current;
+  const [token] = useState<string | null>(() => searchParams.get('token'));
 
   useEffect(() => {
     if (searchParams.has('token')) {
