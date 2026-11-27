@@ -3456,3 +3456,115 @@ async fn postgres_v1_patch_0036_applies_and_skips_idempotently() {
     pool.close().await;
     databases.cleanup().await;
 }
+
+const PATCH_0037: &str =
+    include_str!("../database/postgres/patches/0037_sync_invoice_paid_from_ledger.sql");
+
+#[tokio::test]
+async fn postgres_v1_patch_0037_applies_and_backfills_paid_invoices() {
+    let Some(database_url) = database_url_or_skip() else {
+        return;
+    };
+    let mut databases = DisposableDatabases::connect(&database_url).await;
+    let database = databases.create("patch_0037").await;
+    let pool = install_v1(&database).await;
+
+    let first_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&first_run);
+    let revisions = revision_snapshot(&pool).await;
+    assert!(
+        revisions
+            .iter()
+            .any(|(version, name, _, _)| *version == 37 && name == "sync-invoice-paid-from-ledger"),
+        "patch 0037 must record its revision: {revisions:?}"
+    );
+
+    let second_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&second_run);
+    assert_eq!(revision_snapshot(&pool).await, revisions);
+
+    // A leftover issued stub for a ledger that is already paid must be
+    // flipped by a direct re-run of the backfill body.
+    let actor_id: i64 = 937_001;
+    let booking_id: i64 = 937_101;
+    let guest_id: i64 = 937_201;
+    let room_id: i64 = 937_301;
+    let room_type_id: i64 = 937_401;
+    let ledger_id: i64 = 937_501;
+    sqlx::query(
+        "INSERT INTO users (id, username, email, full_name, user_type, is_active, is_verified)          OVERRIDING SYSTEM VALUE VALUES ($1, 'p37user', 'p37@hotel.local', 'P37', 'staff', true, true)",
+    )
+    .bind(actor_id)
+    .execute(&pool)
+    .await
+    .expect("seed actor");
+    sqlx::query(
+        "INSERT INTO room_types (id, code, name, base_price, max_occupancy)          OVERRIDING SYSTEM VALUE VALUES ($1, 'P37T', 'P37 Type', 95, 2)",
+    )
+    .bind(room_type_id)
+    .execute(&pool)
+    .await
+    .expect("seed room type");
+    sqlx::query(
+        "INSERT INTO rooms (id, room_number, room_type_id, status)          OVERRIDING SYSTEM VALUE VALUES ($1, 'P3701', $2, 'available')",
+    )
+    .bind(room_id)
+    .bind(room_type_id)
+    .execute(&pool)
+    .await
+    .expect("seed room");
+    sqlx::query(
+        "INSERT INTO guests (id, nick_name)          OVERRIDING SYSTEM VALUE VALUES ($1, 'P37 Guest')",
+    )
+    .bind(guest_id)
+    .execute(&pool)
+    .await
+    .expect("seed guest");
+    sqlx::query(
+        "INSERT INTO bookings (id, booking_number, guest_id, guest_name, room_id,             check_in_date, check_out_date, adults, children, room_rate, subtotal,             total_amount, status, payment_status)          OVERRIDING SYSTEM VALUE VALUES          ($1, 'BK-P37-001', $2, 'P37 Guest', $3, DATE '2031-07-01', DATE '2031-07-02',           1, 0, 95, 95, 95, 'checked_out', 'unpaid')",
+    )
+    .bind(booking_id)
+    .bind(guest_id)
+    .bind(room_id)
+    .execute(&pool)
+    .await
+    .expect("seed booking");
+    sqlx::query(
+        "INSERT INTO invoices (invoice_number, booking_id, bill_to_guest_id, billing_name,             issue_date, subtotal, total_amount, paid_amount, currency, line_items, status)          VALUES ('INV-P37-0001', $1, $2, 'P37 Co', DATE '2031-07-02', 95, 95, 0, 'MYR', '[]'::jsonb, 'issued')",
+    )
+    .bind(booking_id)
+    .bind(guest_id)
+    .execute(&pool)
+    .await
+    .expect("seed issued invoice stub");
+    sqlx::query(
+        "INSERT INTO customer_ledgers             (id, company_name, description, expense_type, amount, status, paid_amount,              invoice_number, booking_id, post_type, folio_type)          OVERRIDING SYSTEM VALUE VALUES          ($1, 'P37 Co', 'p37 backfill', 'miscellaneous', 95, 'paid', 95,           'INV-P37-0001', $2, 'room_charge', 'city_ledger')",
+    )
+    .bind(ledger_id)
+    .bind(booking_id)
+    .execute(&pool)
+    .await
+    .expect("seed paid ledger");
+
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0037)))
+        .execute(&pool)
+        .await
+        .expect("running patch 0037 body must backfill the issued stub");
+
+    let (paid_amount, status): (rust_decimal::Decimal, String) = sqlx::query_as(
+        "SELECT paid_amount, status FROM invoices WHERE invoice_number = 'INV-P37-0001'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("invoice still exists");
+    assert_eq!(paid_amount, rust_decimal::Decimal::new(9500, 2));
+    assert_eq!(status, "paid");
+
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0037)))
+        .execute(&pool)
+        .await
+        .expect("re-running patch 0037 body must be a no-op");
+
+    pool.close().await;
+    databases.cleanup().await;
+}

@@ -181,10 +181,10 @@ describe('BookingsService current-and-upcoming stay window', () => {
     const days =
       (parseLocalDate(check_in_to).getTime() - parseLocalDate(check_in_from).getTime()) / 86_400_000;
 
-    // 731 = yesterday .. today+730. Production's furthest check-in was 145 days
-    // out, so this leaves a wide margin; shrinking it would start hiding a
-    // room's "next reservation".
-    expect(Math.round(days)).toBe(731);
+    // 181 = yesterday .. today+180. Production's furthest check-in was 145 days
+    // out; 180 days still covers that with a margin, without fetching two years
+    // of upcoming stays (which contributed to frontend OOM on the 2GB VPS).
+    expect(Math.round(days)).toBe(181);
   });
 
   it('sends both bounds, because one bound alone is not an overlap test', async () => {
