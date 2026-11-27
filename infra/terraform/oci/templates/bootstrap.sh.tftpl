@@ -61,7 +61,7 @@ fi
 systemctl enable --now docker.service
 
 python3 -m venv /opt/oci-cli
-/opt/oci-cli/bin/pip install --disable-pip-version-check --no-cache-dir oci-cli
+/opt/oci-cli/bin/pip install --disable-pip-version-check --no-cache-dir oci-cli==3.97.1
 OCI_CLI=/opt/oci-cli/bin/oci
 
 install -d -m 0700 /etc/hotel-app/secrets
@@ -92,6 +92,7 @@ fetch_vault_secret "$POSTGRES_PASSWORD_SECRET_OCID" /etc/hotel-app/secrets/postg
 fetch_vault_secret "$JWT_SECRET_OCID" /etc/hotel-app/secrets/jwt-secret
 
 if [[ -z "$FRONTEND_ORIGIN" ]]; then
+  echo "FRONTEND_ORIGIN must be explicitly set (HTTPS recommended) rather than defaulting to cleartext public IP HTTP" >&2
   PUBLIC_IP=""
   for _ in $(seq 1 240); do
     PUBLIC_IP=$(curl -fsS -H 'Authorization: Bearer Oracle' http://169.254.169.254/opc/v2/vnics/ 2>/dev/null | jq -r '.[0].publicIp // empty')
@@ -104,11 +105,11 @@ if [[ -z "$FRONTEND_ORIGIN" ]]; then
     exit 1
   fi
 
-  FRONTEND_ORIGIN="http://$PUBLIC_IP"
+  FRONTEND_ORIGIN="https://$PUBLIC_IP"
 fi
 
 if [[ -z "$API_URL" ]]; then
-  API_URL="$FRONTEND_ORIGIN:3030"
+  API_URL="$FRONTEND_ORIGIN"
 fi
 
 if [[ -z "$ALLOWED_ORIGINS" ]]; then
@@ -123,7 +124,9 @@ export FRONTEND_ORIGIN API_URL ALLOWED_ORIGINS PASSKEY_RP_ID TRUST_PROXY_HEADERS
 python3 <<'PY'
 from pathlib import Path
 from urllib.parse import quote
+import base64
 import os
+import secrets
 
 postgres_password = Path('/etc/hotel-app/secrets/postgres-password').read_text(encoding='utf-8').strip()
 jwt_secret = Path('/etc/hotel-app/secrets/jwt-secret').read_text(encoding='utf-8').strip()
@@ -135,21 +138,28 @@ if len(jwt_secret) < 32 or '\n' in jwt_secret:
 def dotenv(value: str) -> str:
     return "'" + value.replace('\\', '\\\\').replace("'", "\\'") + "'"
 
-database_url = 'postgres://hotel_admin:' + quote(postgres_password, safe='') + '@postgres:5432/hotel_management'
+# Configure least-privilege runtime role (`hotel_app`) alongside `hotel_admin` bootstrap creds.
+hotel_app_password = secrets.token_urlsafe(32)
+totp_encryption_key = base64.b64encode(secrets.token_bytes(32)).decode('ascii')
+database_url = 'postgres://hotel_app:' + quote(hotel_app_password, safe='') + '@postgres:5432/hotel_management'
 values = {
+    'IMAGE_TAG': 'bootstrap',
+    'SALIMINN_ROOT': '/opt/saliminn',
     'POSTGRES_USER': 'hotel_admin',
     'POSTGRES_PASSWORD': postgres_password,
+    'HOTEL_APP_PASSWORD': hotel_app_password,
     'POSTGRES_DB': 'hotel_management',
     'DATABASE_URL': database_url,
     'JWT_SECRET': jwt_secret,
+    'TOTP_ENCRYPTION_KEY': totp_encryption_key,
     'BACKEND_PORT': '3030',
     'FRONTEND_PORT': '80',
     'ALLOWED_ORIGINS': os.environ['ALLOWED_ORIGINS'],
     'VITE_API_URL': os.environ['API_URL'],
     'PASSKEY_RP_ID': os.environ['PASSKEY_RP_ID'],
     'TRUST_PROXY_HEADERS': os.environ['TRUST_PROXY_HEADERS'],
-    'RUST_LOG': 'info',
-    'ENVIRONMENT': 'development',
+    'RUST_LOG': 'warn',
+    'ENVIRONMENT': 'production',
 }
 Path('/etc/hotel-app/runtime.env').write_text(
     ''.join(f'{key}={dotenv(value)}\n' for key, value in values.items()),
@@ -168,10 +178,26 @@ git -C /opt/hotel-app checkout "$REPOSITORY_REF"
 
 COMPOSE_FILE_ARGS="-f deploy/docker-compose.prod.yml"
 
-docker volume create hotel-app-private-uploads >/dev/null
-docker volume create hotel-app-public-uploads >/dev/null
-docker run --rm -v hotel-app-private-uploads:/data alpine:3.22 sh -c 'chown 1000:1000 /data && chmod 0750 /data'
-docker run --rm -v hotel-app-public-uploads:/data alpine:3.22 sh -c 'chown 1000:1000 /data && chmod 0755 /data'
+install -d -m 0755 /opt/saliminn
+install -d -m 0755 -o 1000 -g 1000 /opt/saliminn/data/uploads /opt/saliminn/logs
+install -d -m 0750 -o 1000 -g 1000 /opt/saliminn/data/private_uploads
+install -d -m 0755 /opt/saliminn/initdb
+install -m 0644 /opt/hotel-app/hotel-app-be/database/postgres/migrations/0001_v1_baseline.sql /opt/saliminn/initdb/01-schema.sql
+install -m 0644 /opt/hotel-app/hotel-app-be/database/postgres/seed.sql /opt/saliminn/initdb/02-seed.sql
+install -m 0644 /opt/hotel-app/deploy/db-least-privilege.sql /opt/saliminn/db-least-privilege.sql
+cat > /opt/saliminn/initdb/03-least-privilege.sh <<'INITSH'
+#!/usr/bin/env bash
+set -euo pipefail
+psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -v hotel_app_password="$HOTEL_APP_PASSWORD" \
+  -f /opt/saliminn-db-least-privilege.sql
+INITSH
+chmod 0755 /opt/saliminn/initdb/03-least-privilege.sh
+install -m 0644 /opt/hotel-app/deploy/db-least-privilege.sql /opt/saliminn/initdb/00-db-least-privilege.sql || true
+sed -i 's|/opt/saliminn-db-least-privilege.sql|/docker-entrypoint-initdb.d/00-db-least-privilege.sql|' /opt/saliminn/initdb/03-least-privilege.sh
+
+docker build -t saliminn-backend:bootstrap -f /opt/hotel-app/hotel-app-be/Dockerfile /opt/hotel-app/hotel-app-be
+docker build -t saliminn-frontend:bootstrap --build-arg VITE_API_URL="$API_URL" -f /opt/hotel-app/hotel-web-fe/Dockerfile /opt/hotel-app/hotel-web-fe
 
 printf '%s' '${pre_compose_script_b64}' | base64 --decode > /usr/local/sbin/hotel-app-pre-compose
 printf '%s' '${post_compose_script_b64}' | base64 --decode > /usr/local/sbin/hotel-app-post-compose
@@ -179,7 +205,7 @@ chmod 0700 /usr/local/sbin/hotel-app-pre-compose /usr/local/sbin/hotel-app-post-
 
 cat > /etc/systemd/system/hotel-app-compose.service <<EOF
 [Unit]
-Description=Hotel App Docker Compose development stack
+Description=Hotel App Docker Compose production stack
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -189,7 +215,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/hotel-app
 ExecStartPre=/usr/local/sbin/hotel-app-pre-compose
-ExecStart=/usr/bin/docker compose --env-file /etc/hotel-app/runtime.env $COMPOSE_FILE_ARGS up -d --build
+ExecStart=/usr/bin/docker compose --env-file /etc/hotel-app/runtime.env $COMPOSE_FILE_ARGS up -d
 ExecStartPost=/usr/local/sbin/hotel-app-post-compose
 ExecStop=/usr/bin/docker compose --env-file /etc/hotel-app/runtime.env $COMPOSE_FILE_ARGS down
 TimeoutStartSec=infinity

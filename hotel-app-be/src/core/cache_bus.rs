@@ -47,49 +47,62 @@ pub fn spawn_listener(pool: DbPool) {
         loop {
             match sqlx::postgres::PgListener::connect_with(&pool).await {
                 Ok(mut listener) => {
-                    let ready = listener.listen(CACHE_CHANNEL).await.is_ok()
-                        && listener.listen(DATA_CHANNEL).await.is_ok();
-                    if ready {
-                        // `recv` alone cannot distinguish silence from a
-                        // half-open connection (no traffic looks identical to
-                        // a dead peer until TCP gives up, ~hours by default).
-                        // Probe quiet connections; reconnect only when the
-                        // probe itself fails or stalls.
-                        loop {
-                            match timeout(Duration::from_secs(60), listener.recv()).await {
-                                Ok(Ok(note)) => dispatch(note.channel(), note.payload()),
-                                Ok(Err(_)) => {
-                                    // Release the LISTEN registrations before
-                                    // the connection returns to the pool.
-                                    let _ = timeout(
-                                        Duration::from_secs(2),
-                                        listener.execute("UNLISTEN *"),
-                                    )
-                                    .await;
-                                    break;
-                                }
-                                Err(_) => {
-                                    let alive = timeout(
-                                        Duration::from_secs(5),
-                                        listener.execute("SELECT 1"),
-                                    )
-                                    .await
-                                    .map(|result| result.is_ok())
-                                    .unwrap_or(false);
-                                    if !alive {
-                                        log::warn!("cache listener connection dead; reconnecting");
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    run_listener_loop(&mut listener).await;
                 }
                 Err(e) => log::warn!("cache listener connect failed: {e}"),
             }
             sleep(Duration::from_secs(5)).await;
         }
     });
+}
+
+/// Spawn the reconnecting LISTEN loop over a dedicated non-pooled PostgreSQL
+/// connection so request-pool slots are never pinned for process lifetime.
+pub fn spawn_listener_url(database_url: String) {
+    tokio::spawn(async move {
+        loop {
+            match sqlx::postgres::PgListener::connect(&database_url).await {
+                Ok(mut listener) => {
+                    run_listener_loop(&mut listener).await;
+                }
+                Err(e) => log::warn!("cache listener connect failed: {e}"),
+            }
+            sleep(Duration::from_secs(5)).await;
+        }
+    });
+}
+
+async fn run_listener_loop(listener: &mut sqlx::postgres::PgListener) {
+    let ready =
+        listener.listen(CACHE_CHANNEL).await.is_ok() && listener.listen(DATA_CHANNEL).await.is_ok();
+    if ready {
+        // `recv` alone cannot distinguish silence from a
+        // half-open connection (no traffic looks identical to
+        // a dead peer until TCP gives up, ~hours by default).
+        // Probe quiet connections; reconnect only when the
+        // probe itself fails or stalls.
+        loop {
+            match timeout(Duration::from_secs(60), listener.recv()).await {
+                Ok(Ok(note)) => dispatch(note.channel(), note.payload()),
+                Ok(Err(_)) => {
+                    // Release the LISTEN registrations before
+                    // any pooled connection returns to the pool.
+                    let _ = timeout(Duration::from_secs(2), listener.execute("UNLISTEN *")).await;
+                    break;
+                }
+                Err(_) => {
+                    let alive = timeout(Duration::from_secs(5), listener.execute("SELECT 1"))
+                        .await
+                        .map(|result| result.is_ok())
+                        .unwrap_or(false);
+                    if !alive {
+                        log::warn!("cache listener connection dead; reconnecting");
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn dispatch(channel: &str, payload: &str) {
@@ -100,9 +113,21 @@ fn dispatch(channel: &str, payload: &str) {
             } else if let Some(key) = payload.strip_prefix("settings:") {
                 if key == "*" {
                     crate::core::settings_cache::clear_all();
+                    crate::core::db::clear_timezone_cache();
                 } else {
                     crate::core::settings_cache::clear_key(key);
+                    if key == "timezone" {
+                        crate::core::db::clear_timezone_cache();
+                    }
                 }
+            } else if payload == "sessions:*" {
+                crate::core::auth::AuthService::clear_session_cache();
+            } else if let Some(uid_str) = payload.strip_prefix("sessions:u:") {
+                if let Ok(user_id) = uid_str.parse::<i64>() {
+                    crate::core::auth::AuthService::clear_session_cache_for_user(user_id);
+                }
+            } else if let Some(sid) = payload.strip_prefix("sessions:s:") {
+                crate::core::auth::AuthService::clear_session_cache_for_session(sid);
             }
         }
         DATA_CHANNEL => {

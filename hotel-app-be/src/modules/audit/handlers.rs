@@ -9,9 +9,7 @@ use axum::{
 
 use crate::core::db::DbPool;
 use crate::core::error::ApiError;
-use crate::models::{
-    AuditCategoryCounts, AuditLogExportJson, AuditLogQuery, AuditLogResponse, DbStatementsQuery,
-};
+use crate::models::{AuditCategoryCounts, AuditLogQuery, AuditLogResponse, DbStatementsQuery};
 use crate::services::audit as audit_service;
 
 /// GET /audit-logs
@@ -46,6 +44,8 @@ pub async fn export_audit_logs_csv(
     Ok(axum::response::Response::builder()
         .status(axum::http::StatusCode::OK)
         .header("Content-Type", "text/csv; charset=utf-8")
+        .header("Cache-Control", "private, no-store")
+        .header("Pragma", "no-cache")
         .header(
             "Content-Disposition",
             format!("attachment; filename=\"{}\"", filename),
@@ -59,10 +59,18 @@ pub async fn export_audit_logs_json(
     State(pool): State<DbPool>,
     Extension(user_id): Extension<i64>,
     Query(params): Query<AuditLogQuery>,
-) -> Result<Json<AuditLogExportJson>, ApiError> {
-    Ok(Json(
-        audit_service::export_audit_logs_json(&pool, user_id, params).await?,
-    ))
+) -> Result<axum::response::Response, ApiError> {
+    use axum::response::IntoResponse;
+
+    let payload = audit_service::export_audit_logs_json(&pool, user_id, params).await?;
+    Ok((
+        [
+            (axum::http::header::CACHE_CONTROL, "private, no-store"),
+            (axum::http::header::PRAGMA, "no-cache"),
+        ],
+        Json(payload),
+    )
+        .into_response())
 }
 
 /// GET /audit-logs/users

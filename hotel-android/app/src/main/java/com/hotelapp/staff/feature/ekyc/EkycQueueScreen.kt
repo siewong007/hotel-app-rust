@@ -1,6 +1,7 @@
 package com.hotelapp.staff.feature.ekyc
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Badge
@@ -49,6 +52,7 @@ import com.hotelapp.staff.core.design.HotelSearchBar
 import com.hotelapp.staff.core.design.HotelSnackbarHost
 import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.HotelTooltipIconButton
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.ListCardSkeleton
 import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
@@ -80,16 +84,23 @@ fun EkycQueueScreen(
         }
     }
 
-    val statusFilters = remember(state.metrics, colors) {
+    val showCounts = state.searchQuery.isBlank()
+    val statusFilters = remember(state.metrics, showCounts, colors) {
         listOf(
-            FilterOption("all", "All", count = state.metrics.totalSubmitted.toInt()),
-            FilterOption("pending_manual_review", "Pending Review", count = state.metrics.pendingReview.toInt(), dotColor = colors.warning.fg),
+            FilterOption("all", "All", count = if (showCounts) state.metrics.totalSubmitted.toInt() else null),
+            FilterOption("pending_manual_review", "Pending Review", dotColor = colors.warning.fg),
             FilterOption("submitted", "Submitted", dotColor = colors.warning.fg),
-            FilterOption("in_review", "In Review", count = state.metrics.underManualReview.toInt(), dotColor = colors.info.fg),
-            FilterOption("additional_information_required", "Resubmission", count = state.metrics.resubmissionRequired.toInt(), dotColor = colors.warning.fg),
+            FilterOption("in_review", "In Review", dotColor = colors.info.fg),
+            FilterOption("on_hold", "On Hold", dotColor = colors.warning.fg),
+            FilterOption(
+                "additional_information_required",
+                "Resubmission",
+                count = if (showCounts) state.metrics.resubmissionRequired.toInt() else null,
+                dotColor = colors.warning.fg,
+            ),
             FilterOption("escalated", "Escalated", dotColor = colors.danger.fg),
-            FilterOption("approved", "Approved", count = state.metrics.approved.toInt(), dotColor = colors.success.fg),
-            FilterOption("rejected", "Rejected", count = state.metrics.rejected.toInt(), dotColor = colors.neutral.fg),
+            FilterOption("approved", "Approved", count = if (showCounts) state.metrics.approved.toInt() else null, dotColor = colors.success.fg),
+            FilterOption("rejected", "Rejected", count = if (showCounts) state.metrics.rejected.toInt() else null, dotColor = colors.neutral.fg),
         )
     }
 
@@ -144,6 +155,21 @@ fun EkycQueueScreen(
                 selected = state.statusFilter,
                 onSelect = viewModel::setStatusFilter,
             )
+            if (state.metrics.totalSubmitted > 0 && state.metrics.pendingReview > 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "${state.metrics.pendingReview} awaiting review · ${state.metrics.nearingSla} nearing SLA",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textMuted,
+                )
+            }
+            if (state.error != null && state.items.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                InlineAlertBanner(
+                    message = state.error!!,
+                    tone = colors.danger,
+                )
+            }
             Spacer(modifier = Modifier.height(6.dp))
 
             when {
@@ -158,11 +184,18 @@ fun EkycQueueScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     if (state.items.isEmpty()) {
-                        EmptyStateView(
-                            title = "No eKYC applications",
-                            subtitle = "No verification requests match the current filter.",
-                            icon = Icons.Outlined.Badge,
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            EmptyStateView(
+                                title = "No eKYC applications",
+                                subtitle = "No verification requests match the current filter.",
+                                icon = Icons.Outlined.Badge,
+                            )
+                        }
                     } else {
                         LazyColumn(
                             contentPadding = PaddingValues(vertical = 8.dp),
@@ -228,7 +261,7 @@ fun EkycQueueScreen(
                                     }
                                 }
                             }
-                            if (state.items.size < state.total) {
+                            if (state.hasMore && state.items.size < state.total) {
                                 item(key = "ekyc_load_more") {
                                     if (state.isLoadingMore) {
                                         androidx.compose.foundation.layout.Box(
@@ -261,9 +294,34 @@ fun EkycQueueScreen(
             isMutating = state.isMutating,
             error = state.sheetError,
             reasonCodes = state.reasonCodes,
+            isLoadingReasonCodes = state.isLoadingReasonCodes,
+            reasonCodesError = state.reasonCodesError,
+            onRetryReasonCodes = viewModel::retryLoadReasonCodes,
+            onRefresh = viewModel::refreshSelectedDetail,
+            activeDocumentKind = state.activeDocumentKind,
+            activeDocumentBytes = state.activeDocumentBytes,
+            isLoadingDocument = state.isLoadingDocument,
+            documentError = state.documentError,
+            onOpenDocument = viewModel::openDocument,
+            onDismissDocument = viewModel::dismissDocument,
+            revealedFields = state.revealedFields,
+            isRevealing = state.isRevealing,
+            revealError = state.revealError,
+            onRevealField = viewModel::revealSensitiveField,
+            onClearRevealError = viewModel::clearRevealError,
             onDismiss = viewModel::dismissDetail,
-            onAction = { id, ver, action, code, reason, msg, selfCheckin ->
-                viewModel.applyAction(id, ver, action, code, reason, msg, selfCheckin)
+            onAction = { id, ver, action, code, reason, msg, selfCheckin, idempotencyKey, onSuccess ->
+                viewModel.applyAction(
+                    id = id,
+                    expectedVersion = ver,
+                    action = action,
+                    reasonCode = code,
+                    reason = reason,
+                    customerMessage = msg,
+                    selfCheckinEnabled = selfCheckin,
+                    idempotencyKey = idempotencyKey,
+                    onSuccess = onSuccess,
+                )
             },
         )
     }

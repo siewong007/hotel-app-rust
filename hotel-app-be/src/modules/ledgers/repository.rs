@@ -221,7 +221,7 @@ pub async fn list_customer_ledgers(
 
     let (count_sql, data_sql) = {
         let search_clause = if search.is_some() {
-            "AND ($8::text IS NULL OR (CAST(id AS TEXT) ILIKE $8 ESCAPE '\\' OR company_name ILIKE $8 ESCAPE '\\' OR description ILIKE $8 ESCAPE '\\' OR COALESCE(invoice_number,'') ILIKE $8 ESCAPE '\\' OR COALESCE(folio_number,'') ILIKE $8 ESCAPE '\\' OR COALESCE(contact_person,'') ILIKE $8 ESCAPE '\\' OR EXISTS (SELECT 1 FROM bookings b WHERE b.id = customer_ledgers.booking_id AND b.booking_number ILIKE $8 ESCAPE '\\')))"
+            "AND ($8::text IS NULL OR (CAST(id AS TEXT) ILIKE $8 ESCAPE '\\' OR company_name ILIKE $8 ESCAPE '\\' OR description ILIKE $8 ESCAPE '\\' OR invoice_number ILIKE $8 ESCAPE '\\' OR folio_number ILIKE $8 ESCAPE '\\' OR contact_person ILIKE $8 ESCAPE '\\' OR EXISTS (SELECT 1 FROM bookings b WHERE b.id = customer_ledgers.booking_id AND b.booking_number ILIKE $8 ESCAPE '\\')))"
         } else {
             "AND ($8::text IS NULL OR TRUE)"
         };
@@ -543,12 +543,19 @@ pub async fn update_customer_ledger(
     user_id: i64,
     request: CustomerLedgerUpdateRequest,
 ) -> Result<CustomerLedger, ApiError> {
-    let current_row =
-        sqlx::query("SELECT status, amount, paid_amount FROM customer_ledgers WHERE id = $1")
-            .bind(ledger_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    let current_row = sqlx::query(
+        "SELECT status, amount, paid_amount, COALESCE(is_reversal, false) AS is_reversal \
+         FROM customer_ledgers WHERE id = $1 FOR UPDATE",
+    )
+    .bind(ledger_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let Some(current_row) = current_row else {
         return Err(ApiError::NotFound("Customer ledger not found".to_string()));
@@ -559,45 +566,66 @@ pub async fn update_customer_ledger(
         .map_err(|e| ApiError::Database(e.to_string()))?;
     let current_amount = get_decimal(&current_row, "amount");
     let current_paid = get_decimal(&current_row, "paid_amount");
+    let is_reversal: bool = current_row.try_get("is_reversal").unwrap_or(false);
 
-    // Only `void_ledger` may TRANSITION status to 'void' - that path stamps
-    // void_at/void_by/void_reason. This generic update is gated by
-    // `ledgers:update` at the route layer (not `ledgers:void`), so letting a
-    // pending/other row flip to status='void' through here would produce an
-    // unattributable void. An already-void row echoing status='void' back
-    // unchanged (e.g. editing notes on a voided ledger) is not a transition
-    // and must be allowed through.
-    if request.status.as_deref() == Some("void") && current_status != "void" {
+    if current_status == "void" || is_reversal {
+        return Err(ApiError::BadRequest(
+            "Cannot modify a voided or reversal ledger entry".to_string(),
+        ));
+    }
+
+    if request.status.as_deref() == Some("void") {
         return Err(ApiError::BadRequest(
             "Cannot set status to 'void' via update; use the void endpoint instead".to_string(),
         ));
     }
 
-    // 'paid' must be EARNED by money actually recorded, not typed in. This
-    // update writes the `status` column alone - it inserts no
-    // customer_ledger_payments row and never touches paid_amount, so a
-    // hand-set 'paid' left `balance_due` (GENERATED as amount - paid_amount)
-    // positive. The UI badge is balance-first (`ui_status_clause` keys 'paid'
-    // off `balance_due <= 0`) and so ignored the typed-in value entirely,
-    // while the stored column still, invisibly: made `delete_customer_ledger`
-    // refuse the row forever ("Cannot delete a paid ledger entry"), and
-    // reported it as settled to anything filtering on raw `status`.
-    // `record_ledger_payment` derives 'paid' from this same comparison, so a
-    // genuinely settled row reaches it without help.
-    //
-    // Only the TRANSITION is blocked, matching the void guard above: rows
-    // already carrying a hand-set 'paid' (written before this guard existed)
-    // must stay editable, or changing their notes would be impossible.
+    let validated_amount = match request.amount {
+        Some(amount) => {
+            let decimal_amount = Decimal::from_f64_retain(amount)
+                .filter(|v| *v > Decimal::ZERO)
+                .ok_or_else(|| {
+                    ApiError::BadRequest("Amount must be a positive number".to_string())
+                })?;
+            if decimal_amount < current_paid {
+                return Err(ApiError::BadRequest(format!(
+                    "Cannot reduce ledger amount below already paid amount ({current_paid})"
+                )));
+            }
+            Some(decimal_amount)
+        }
+        None => None,
+    };
+
+    let target_amount = validated_amount.unwrap_or(current_amount);
+
     if request.status.as_deref() == Some("paid")
         && current_status != "paid"
-        && current_paid < current_amount
+        && current_paid < target_amount
     {
-        let outstanding = current_amount - current_paid;
+        let outstanding = target_amount - current_paid;
         return Err(ApiError::BadRequest(format!(
             "Cannot set status to 'paid' while {outstanding} is still outstanding; \
              record a payment for the full balance instead"
         )));
     }
+
+    let effective_status: Option<String> = if request.status.is_some() {
+        request.status.clone()
+    } else if validated_amount.is_some() {
+        let computed = if current_paid >= target_amount {
+            "paid"
+        } else if current_paid > Decimal::ZERO {
+            "partial"
+        } else if current_status == "paid" {
+            "pending"
+        } else {
+            current_status.as_str()
+        };
+        (computed != current_status).then(|| computed.to_string())
+    } else {
+        None
+    };
 
     if let Some(post_type) = request.post_type.as_deref()
         && !VALID_POST_TYPES.contains(&post_type)
@@ -609,9 +637,6 @@ pub async fn update_customer_ledger(
 
     let mut updates = Vec::new();
     let mut param_index = 1;
-    // Placeholder numbers for the three inputs of `net_amount`, so the derived
-    // clause below can reference the NEW value of any input this request
-    // changes without binding that value a second time.
     let mut amount_param: Option<i32> = None;
     let mut tax_amount_param: Option<i32> = None;
     let mut service_charge_param: Option<i32> = None;
@@ -664,7 +689,7 @@ pub async fn update_customer_ledger(
         updates.push(format!("expense_type = ${}", param_index));
         param_index += 1;
     }
-    if request.amount.is_some() {
+    if validated_amount.is_some() {
         amount_param = Some(param_index);
         updates.push(format!("amount = ${}", param_index));
         param_index += 1;
@@ -673,7 +698,7 @@ pub async fn update_customer_ledger(
         updates.push(format!("currency = ${}", param_index));
         param_index += 1;
     }
-    if request.status.is_some() {
+    if effective_status.is_some() {
         updates.push(format!("status = ${}", param_index));
         param_index += 1;
     }
@@ -724,25 +749,10 @@ pub async fn update_customer_ledger(
         param_index += 1;
     }
 
-    // Checked BEFORE the derived/unconditional pushes below: those always add
-    // entries, so any check placed after them can never fire and an all-`None`
-    // request would silently no-op instead of erroring. `updates` must still
-    // hold only caller-supplied fields at this point.
     if updates.is_empty() {
         return Err(ApiError::BadRequest("No fields to update".to_string()));
     }
 
-    // `net_amount` is populated only by the `generate_folio_number` BEFORE
-    // INSERT trigger (and only when it is NULL); nothing recomputes it on
-    // UPDATE. Whenever this request changes one of its three inputs, recompute
-    // it in the same statement so the stored total cannot drift away from
-    // amount/tax_amount/service_charge.
-    //
-    // SQL evaluates every SET expression against the OLD row, so a bare column
-    // name below reads the pre-update value — exactly what is wanted for an
-    // input this request is NOT changing. For an input it IS changing, the
-    // field's own placeholder is reused, so no extra bind is added and the
-    // bind order stays in step with the clause order.
     if amount_param.is_some() || tax_amount_param.is_some() || service_charge_param.is_some() {
         let input_expr = |param: Option<i32>, column: &str| match param {
             Some(index) => format!("${}", index),
@@ -810,21 +820,13 @@ pub async fn update_customer_ledger(
     if let Some(ref v) = request.expense_type {
         query_builder = query_builder.bind(v);
     }
-    if let Some(amount) = request.amount {
-        let decimal_amount = Decimal::from_f64_retain(amount)
-            .filter(|v| *v > Decimal::ZERO)
-            .ok_or_else(|| ApiError::BadRequest("Amount must be a positive number".to_string()))?;
-        if decimal_amount < current_paid {
-            return Err(ApiError::BadRequest(format!(
-                "Cannot reduce ledger amount below already paid amount ({current_paid})"
-            )));
-        }
+    if let Some(decimal_amount) = validated_amount {
         query_builder = query_builder.bind(decimal_amount);
     }
     if let Some(ref v) = request.currency {
         query_builder = query_builder.bind(v);
     }
-    if let Some(ref v) = request.status {
+    if let Some(ref v) = effective_status {
         query_builder = query_builder.bind(v);
     }
     if let Some(ref v) = request.invoice_date {
@@ -876,11 +878,14 @@ pub async fn update_customer_ledger(
     query_builder = query_builder.bind(ledger_id);
 
     let row = query_builder
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let ledger = row_to_customer_ledger(&row);
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(ledger)
 }
@@ -1270,6 +1275,12 @@ async fn insert_locked_ledger_payment_tx(
     }
 
     ensure_payable(ledger)?;
+    let effective_business_date = match values.payment_date {
+        Some(date) => date,
+        None => hotel_today(&mut **tx).await.map_err(ApiError::from)?,
+    };
+    crate::modules::payments::repository::ensure_business_date_open_tx(tx, effective_business_date)
+        .await?;
     let outstanding = ledger.amount - ledger.paid_amount;
     if values.amount > outstanding {
         return Err(ApiError::BadRequest(
@@ -1684,13 +1695,13 @@ pub async fn get_ledger_payments(
     ledger_id: i64,
 ) -> Result<Vec<CustomerLedgerPayment>, ApiError> {
     // Check if ledger exists
-    let exists = sqlx::query(CHECK_LEDGER_EXISTS_QUERY)
+    let exists: bool = sqlx::query_scalar(CHECK_LEDGER_EXISTS_QUERY)
         .bind(ledger_id)
-        .fetch_optional(pool)
+        .fetch_one(pool)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    if exists.is_none() {
+    if !exists {
         return Err(ApiError::NotFound("Customer ledger not found".to_string()));
     }
 
@@ -1965,9 +1976,11 @@ async fn ensure_ledger_payment_is_mutable_tx(
     tx: &mut DbTransaction<'_>,
     ledger_id: i64,
     payment_id: i64,
-) -> Result<(), ApiError> {
+) -> Result<Option<NaiveDate>, ApiError> {
     let sql = format!(
-        "SELECT idempotency_key FROM customer_ledger_payments WHERE id = {} AND ledger_id = {}",
+        "SELECT idempotency_key, \
+         ((COALESCE(payment_date, created_at) AT TIME ZONE COALESCE(NULLIF(TRIM((SELECT value FROM system_settings WHERE key = 'timezone')), ''), 'UTC'))::date) AS payment_day \
+         FROM customer_ledger_payments WHERE id = {} AND ledger_id = {}",
         crate::param!(1),
         crate::param!(2),
     );
@@ -1984,7 +1997,7 @@ async fn ensure_ledger_payment_is_mutable_tx(
             "Idempotent ledger payments cannot be updated or deleted".to_string(),
         ));
     }
-    Ok(())
+    Ok(row.try_get("payment_day")?)
 }
 
 pub async fn update_ledger_payment(
@@ -1998,10 +2011,17 @@ pub async fn update_ledger_payment(
     // ledger cannot read a stale total/paid_amount and lose a contribution.
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
-    ensure_ledger_payment_is_mutable_tx(&mut tx, ledger_id, payment_id).await?;
+    let existing_payment_day =
+        ensure_ledger_payment_is_mutable_tx(&mut tx, ledger_id, payment_id).await?;
 
     let payment_date_ts = chrono::NaiveDate::parse_from_str(&request.payment_date, "%Y-%m-%d")
         .map_err(|_| ApiError::BadRequest("Invalid date. Use YYYY-MM-DD".to_string()))?;
+    if let Some(existing_day) = existing_payment_day {
+        crate::modules::payments::repository::ensure_business_date_open_tx(&mut tx, existing_day)
+            .await?;
+    }
+    crate::modules::payments::repository::ensure_business_date_open_tx(&mut tx, payment_date_ts)
+        .await?;
 
     // Lock the ledger row now; its amount is used both for the over-payment
     // guard below and for the final status recompute.
@@ -2118,7 +2138,12 @@ pub async fn delete_ledger_payment(
     // the same ledger cannot read a stale paid_amount.
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
-    ensure_ledger_payment_is_mutable_tx(&mut tx, ledger_id, payment_id).await?;
+    let existing_payment_day =
+        ensure_ledger_payment_is_mutable_tx(&mut tx, ledger_id, payment_id).await?;
+    if let Some(existing_day) = existing_payment_day {
+        crate::modules::payments::repository::ensure_business_date_open_tx(&mut tx, existing_day)
+            .await?;
+    }
 
     let total_amount: Decimal = sqlx::query_scalar(
         "SELECT COALESCE(amount, 0) FROM customer_ledgers WHERE id = $1 FOR UPDATE",

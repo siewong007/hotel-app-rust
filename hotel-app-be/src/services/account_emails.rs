@@ -57,6 +57,14 @@ struct VerificationRecipient {
 /// because a mail could not be composed — the account is already committed, and
 /// the guest can ask for another link.
 pub async fn send_email_verification(pool: &DbPool, user_id: i64) -> Result<(), ApiError> {
+    send_email_verification_inner(pool, user_id, None).await
+}
+
+async fn send_email_verification_inner(
+    pool: &DbPool,
+    user_id: i64,
+    cooldown_secs: Option<i64>,
+) -> Result<(), ApiError> {
     let recipient = sqlx::query_as::<_, VerificationRecipient>(
         "SELECT u.guest_id, u.email, u.full_name, g.language_preference AS guest_locale \
          FROM users u LEFT JOIN guests g ON g.id = u.guest_id \
@@ -95,9 +103,22 @@ pub async fn send_email_verification(pool: &DbPool, user_id: i64) -> Result<(), 
     let locale = Locale::resolve([recipient.guest_locale.as_deref(), Some(&hotel_default)]);
 
     // Minted last, so a token only ever exists alongside a queued mail.
-    let token = AuthService::create_email_verification_token(pool, user_id)
-        .await
-        .map_err(|error| ApiError::Database(error.to_string()))?;
+    let token = match cooldown_secs {
+        Some(secs) => {
+            match AuthService::create_email_verification_token_if_cooldown_elapsed(
+                pool, user_id, secs,
+            )
+            .await
+            .map_err(|error| ApiError::Database(error.to_string()))?
+            {
+                Some(token) => token,
+                None => return Ok(()),
+            }
+        }
+        None => AuthService::create_email_verification_token(pool, user_id)
+            .await
+            .map_err(|error| ApiError::Database(error.to_string()))?,
+    };
     let verify_url = email_layout::absolute_url(&format!("/verify-email?token={token}"));
 
     let (subject, body_html, body_text) = verification_mail(
@@ -137,6 +158,14 @@ pub async fn send_email_verification(pool: &DbPool, user_id: i64) -> Result<(), 
 pub async fn try_send_email_verification(pool: &DbPool, user_id: i64) {
     if let Err(error) = send_email_verification(pool, user_id).await {
         log::error!("Failed to queue verification email for user {user_id}: {error}");
+    }
+}
+
+/// Best-effort resend wrapper enforcing a 60-second cooldown before
+/// overwriting an existing unexpired verification token.
+pub async fn try_resend_email_verification(pool: &DbPool, user_id: i64) {
+    if let Err(error) = send_email_verification_inner(pool, user_id, Some(60)).await {
+        log::error!("Failed to queue verification email resend for user {user_id}: {error}");
     }
 }
 

@@ -17,6 +17,7 @@ pub struct AppConfig {
     pub allowed_origins: AllowedOrigins,
     pub backend_port: u16,
     pub desktop_mode: bool,
+    pub desktop_client_token: Option<String>,
     pub environment: Environment,
     pub google_client_id: Option<String>,
     pub hotel_log_dir: Option<PathBuf>,
@@ -129,13 +130,31 @@ pub struct TurnstileConfig {
     /// Cloudflare's verification endpoint. Overridable so tests can point at a
     /// local stub without reaching the network.
     pub verify_url: String,
+    /// Expected Turnstile widget hostnames (lowercase). Derived from
+    /// `ALLOWED_ORIGINS` when `TURNSTILE_ALLOWED_HOSTNAMES` is unset.
+    pub allowed_hostnames: Vec<String>,
 }
 
 impl TurnstileConfig {
     pub const DEFAULT_VERIFY_URL: &'static str =
         "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-    fn from_env() -> Result<Self, String> {
+    fn from_env(allowed_origins: &AllowedOrigins) -> Result<Self, String> {
+        let explicit_hostnames = env_opt("TURNSTILE_ALLOWED_HOSTNAMES")
+            .map(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_ascii_lowercase())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let allowed_hostnames = if !explicit_hostnames.is_empty() {
+            explicit_hostnames
+        } else {
+            hostnames_from_origins(allowed_origins)
+        };
+
         let config = Self {
             enabled: env_bool("TURNSTILE_ENABLED", false)?,
             site_key: env_opt("TURNSTILE_SITE_KEY"),
@@ -143,6 +162,7 @@ impl TurnstileConfig {
             verify_url: env_or_string("TURNSTILE_VERIFY_URL", Self::DEFAULT_VERIFY_URL)?
                 .trim()
                 .to_string(),
+            allowed_hostnames,
         };
         if config.enabled && config.keys_are_identical() {
             return Err(
@@ -229,14 +249,18 @@ impl AppConfig {
         let jwt_secret = required_env("JWT_SECRET")?;
         validate_jwt_secret(&jwt_secret)?;
 
+        let allowed_origins = parse_allowed_origins(&env_or_string(
+            "ALLOWED_ORIGINS",
+            "http://localhost:3000,http://localhost:5173",
+        )?)?;
+        let turnstile = TurnstileConfig::from_env(&allowed_origins)?;
+
         let config = Self {
             database: DatabaseConfig::from_env()?,
-            allowed_origins: parse_allowed_origins(&env_or_string(
-                "ALLOWED_ORIGINS",
-                "http://localhost:3000,http://localhost:5173",
-            )?)?,
+            allowed_origins,
             backend_port: env_or_parse("BACKEND_PORT", 3030)?,
             desktop_mode,
+            desktop_client_token: env_opt("DESKTOP_CLIENT_TOKEN"),
             environment: Environment::from_env()?,
             google_client_id: env_opt("GOOGLE_CLIENT_ID"),
             hotel_log_dir: std::env::var("HOTEL_LOG_DIR").ok().map(PathBuf::from),
@@ -265,7 +289,7 @@ impl AppConfig {
                 account_name: env_or_nonempty("HOTEL_BANK_ACCOUNT_NAME", "Salim Inn")?,
                 account_number: env_or_nonempty("HOTEL_BANK_ACCOUNT_NUMBER", "511270052595")?,
             },
-            turnstile: TurnstileConfig::from_env()?,
+            turnstile,
         };
         config.validate_security()?;
         Ok(config)
@@ -520,6 +544,25 @@ fn parse_allowed_origins(value: &str) -> Result<AllowedOrigins, String> {
     Ok(AllowedOrigins::List(origins))
 }
 
+fn hostnames_from_origins(allowed_origins: &AllowedOrigins) -> Vec<String> {
+    let AllowedOrigins::List(origins) = allowed_origins else {
+        return Vec::new();
+    };
+    let mut hosts = Vec::new();
+    for origin in origins {
+        if let Ok(raw) = origin.to_str()
+            && let Ok(parsed) = reqwest::Url::parse(raw.trim())
+            && let Some(host) = parsed.host_str()
+        {
+            let lower = host.to_ascii_lowercase();
+            if !hosts.contains(&lower) {
+                hosts.push(lower);
+            }
+        }
+    }
+    hosts
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -532,6 +575,7 @@ mod tests {
             site_key: site.map(str::to_string),
             secret_key: secret.map(str::to_string),
             verify_url: TurnstileConfig::DEFAULT_VERIFY_URL.to_string(),
+            allowed_hostnames: Vec::new(),
         }
     }
 
@@ -613,6 +657,7 @@ mod tests {
             )]),
             backend_port: 3030,
             desktop_mode: false,
+            desktop_client_token: None,
             environment: Environment::Production,
             google_client_id: None,
             hotel_log_dir: None,

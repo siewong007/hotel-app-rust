@@ -23,8 +23,9 @@ class PermissionCheckerTest {
     }
 
     @Test
-    fun `super admin bypasses permission list`() {
-        assertTrue(PermissionChecker.hasPermission(emptyList(), isSuperAdmin = true, "bookings:delete"))
-        assertTrue(PermissionChecker.hasAnyPermission(emptyList(), isSuperAdmin = true, "rooms:read", "rooms:write"))
+    fun `super admin flag does not bypass missing explicit permission grants`() {
+        assertFalse(PermissionChecker.hasPermission(emptyList(), isSuperAdmin = true, "bookings:delete"))
+        assertFalse(PermissionChecker.hasAnyPermission(emptyList(), isSuperAdmin = true, "rooms:read", "rooms:write"))
+        assertTrue(PermissionChecker.hasPermission(listOf("bookings:manage"), isSuperAdmin = true, "bookings:delete"))
     }
 }

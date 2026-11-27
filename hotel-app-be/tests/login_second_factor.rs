@@ -86,6 +86,11 @@ async fn cleanup(pool: &PgPool, user_id: i64) {
     ] {
         sqlx::query(sql).bind(user_id).execute(pool).await.unwrap();
     }
+    sqlx::query("DELETE FROM rate_limit_buckets WHERE bucket LIKE $1")
+        .bind(format!("totp_used:{user_id}:%"))
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM audit_logs WHERE details->>'username' = $1")
         .bind(username(user_id))
         .execute(pool)
@@ -524,7 +529,7 @@ async fn passwordless_account_password_login_is_401_not_500() {
     );
     match login(&pool, user_id, None).await {
         Err(ApiError::Unauthorized(message)) => {
-            assert_eq!(message, auth_service::GOOGLE_SIGN_IN_ONLY_MESSAGE)
+            assert_eq!(message, "Invalid credentials")
         }
         other => panic!("expected 401, got {:?}", other.map(|_| ())),
     }

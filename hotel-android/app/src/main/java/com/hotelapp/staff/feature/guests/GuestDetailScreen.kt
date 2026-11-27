@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -67,6 +69,7 @@ import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.HotelTooltipIconButton
 import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.KeyValueRow
+import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
 import com.hotelapp.staff.core.design.copyToClipboard
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
@@ -96,19 +99,26 @@ fun GuestDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    fun showToast(message: String) {
+        scope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
     fun copyAndNotify(label: String, value: String) {
         if (copyToClipboard(context, label, value)) {
             haptics.click()
-            scope.launch {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                snackbarHostState.showSnackbar("Copied $label")
-            }
+            showToast("Copied $label")
         }
     }
+
+    OnResumeRefreshEffect { viewModel.refresh(silent = true) }
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = colors.surfaceApp,
+        contentWindowInsets = if (onBack == null) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         snackbarHost = { HotelSnackbarHost(snackbarHostState) },
         topBar = {
             Column {
@@ -168,6 +178,15 @@ fun GuestDetailScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        state.refreshError?.let { refreshErr ->
+                            item {
+                                InlineAlertBanner(
+                                    message = refreshErr,
+                                    tone = colors.danger,
+                                )
+                            }
+                        }
+
                         if (g.isBlacklisted == true) {
                             item {
                                 InlineAlertBanner(
@@ -253,8 +272,13 @@ fun GuestDetailScreen(
                                         label = "eKYC: ${StatusFormatter.humanize(p.ekycSummary.status)}",
                                         tone = StatusFormatter.ekycTone(p.ekycSummary.status, colors),
                                     )
-                                    if (!g.vipStatus.isNullOrBlank() && g.vipStatus != "none") {
-                                        StatusPill("VIP ${StatusFormatter.humanize(g.vipStatus)}", colors.warning)
+                                    if (!g.vipStatus.isNullOrBlank() && !g.vipStatus.equals("none", ignoreCase = true)) {
+                                        val vipLabel = if (g.vipStatus.equals("vip", ignoreCase = true)) {
+                                            "VIP"
+                                        } else {
+                                            "VIP ${StatusFormatter.humanize(g.vipStatus)}"
+                                        }
+                                        StatusPill(vipLabel, colors.warning)
                                     }
                                     g.tags?.forEach { tag ->
                                         if (tag.isNotBlank()) {
@@ -278,6 +302,9 @@ fun GuestDetailScreen(
                                                         context.startActivity(
                                                             Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phone, null)),
                                                         )
+                                                    }.onFailure {
+                                                        haptics.reject()
+                                                        showToast("No phone dialer app available on this device.")
                                                     }
                                                 },
                                             )
@@ -296,6 +323,9 @@ fun GuestDetailScreen(
                                                         context.startActivity(
                                                             Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", email, null)),
                                                         )
+                                                    }.onFailure {
+                                                        haptics.reject()
+                                                        showToast("No email app available on this device.")
                                                     }
                                                 },
                                             )
@@ -311,9 +341,9 @@ fun GuestDetailScreen(
                                 Spacer(modifier = Modifier.height(10.dp))
                                 HorizontalDivider(color = colors.borderSubtle)
                                 Spacer(modifier = Modifier.height(8.dp))
-                                g.phone?.let { KeyValueRow("Phone", it) }
-                                g.email?.let { KeyValueRow("Email", it) }
-                                g.nationality?.let { KeyValueRow("Nationality", it) }
+                                g.phone?.takeIf { it.isNotBlank() }?.let { KeyValueRow("Phone", it) }
+                                g.email?.takeIf { it.isNotBlank() }?.let { KeyValueRow("Email", it) }
+                                g.nationality?.takeIf { it.isNotBlank() }?.let { KeyValueRow("Nationality", it) }
                                 val location = listOfNotNull(
                                     g.city?.takeIf { it.isNotBlank() },
                                     g.country?.takeIf { it.isNotBlank() },
@@ -323,7 +353,39 @@ fun GuestDetailScreen(
                                 }
                                 g.companyName?.takeIf { it.isNotBlank() }?.let { KeyValueRow("Company", it) }
                                 KeyValueRow("Guest Type", StatusFormatter.humanize(g.guestType))
-                                g.tourismType?.let { KeyValueRow("Tourism Type", StatusFormatter.humanize(it)) }
+                                g.tourismType?.takeIf { it.isNotBlank() }?.let { KeyValueRow("Tourism Type", StatusFormatter.humanize(it)) }
+                            }
+                        }
+
+                        p.sensitive?.let { sens ->
+                            item {
+                                val dob = sens.dateOfBirth?.takeIf { it.isNotBlank() }
+                                val idType = sens.idType?.takeIf { it.isNotBlank() }
+                                val idNumber = sens.idNumber?.takeIf { it.isNotBlank() }
+                                val idExpiry = sens.idExpiry?.takeIf { it.isNotBlank() }
+                                val idCountry = sens.idCountry?.takeIf { it.isNotBlank() }
+                                val hasAnySensitive = listOfNotNull(dob, idType, idNumber, idExpiry, idCountry).isNotEmpty()
+                                HotelCard {
+                                    Text(
+                                        text = "Sensitive Identification",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = colors.textPrimary,
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    if (!hasAnySensitive) {
+                                        Text(
+                                            text = "No sensitive identification recorded.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.textSecondary,
+                                        )
+                                    } else {
+                                        dob?.let { KeyValueRow("Date of Birth", DateFormatter.formatDate(it)) }
+                                        idType?.let { KeyValueRow("ID Type", StatusFormatter.humanize(it)) }
+                                        idNumber?.let { KeyValueRow("ID Number", it) }
+                                        idExpiry?.let { KeyValueRow("ID Expiry", DateFormatter.formatDate(it)) }
+                                        idCountry?.let { KeyValueRow("Issuing Country", it) }
+                                    }
+                                }
                             }
                         }
 

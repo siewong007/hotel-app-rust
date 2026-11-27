@@ -1236,8 +1236,26 @@ mod staff_group_create_tests {
         let rooms: Vec<i64> = created.bookings.iter().map(|b| b.room_id).collect();
         assert_eq!(rooms, ROOMS.to_vec());
 
-        // Combined receipt: one row per room, each with its own invoice, and
-        // group totals that add up. Calling it again reuses the invoices.
+        // Combined receipt: GET is strictly read-only (404 with 0 invoices created
+        // before issuance), POST issues one invoice per room, and subsequent GET
+        // reuses the issued invoices with group totals that add up.
+        let unissued = hotel_app_be::modules::payments::group_receipt::group_receipt_read_only(
+            &pool,
+            created.group.id,
+        )
+        .await;
+        assert!(matches!(unissued, Err(ApiError::NotFound(_))));
+        let invoice_count_before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM invoices WHERE booking_id = ANY($1)")
+                .bind(created.bookings.iter().map(|b| b.id).collect::<Vec<_>>())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            invoice_count_before, 0,
+            "GET receipt must not mint invoices"
+        );
+
         let receipt = hotel_app_be::modules::payments::group_receipt::group_receipt(
             &pool,
             ACTOR,
@@ -1257,13 +1275,12 @@ mod staff_group_create_tests {
             .collect();
         numbers.dedup();
         assert_eq!(numbers.len(), 3, "each room keeps its own invoice");
-        let again = hotel_app_be::modules::payments::group_receipt::group_receipt(
+        let again = hotel_app_be::modules::payments::group_receipt::group_receipt_read_only(
             &pool,
-            ACTOR,
             created.group.id,
         )
         .await
-        .expect("group receipt again");
+        .expect("group receipt read-only after issuance");
         let again_numbers: Vec<_> = again
             .rooms
             .iter()
@@ -1271,7 +1288,8 @@ mod staff_group_create_tests {
             .collect();
         assert_eq!(again_numbers, numbers, "receipt is idempotent");
         let missing =
-            hotel_app_be::modules::payments::group_receipt::group_receipt(&pool, ACTOR, -1).await;
+            hotel_app_be::modules::payments::group_receipt::group_receipt_read_only(&pool, -1)
+                .await;
         assert!(matches!(missing, Err(ApiError::NotFound(_))));
 
         // One desk payment for the whole group settles every room and the

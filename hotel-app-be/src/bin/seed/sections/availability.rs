@@ -33,11 +33,11 @@ SELECT 802400 + n,
        (SELECT today+60 FROM staging_ref),
        (SELECT today+61 FROM staging_ref),
        1, 0,
-       800501, 90.00, 90.00, 7.20, 97.20, 'USD',
+       800501, 90.00, 90.00, 7.20, 97.20, 'MYR',
        'confirmed', 'unpaid',
        'website', 'Direct Website',
        (SELECT id FROM booking_channels WHERE name='Direct Website'),
-       800003, CURRENT_TIMESTAMP - interval '12 hours'
+       800003, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '12 hours'
 FROM generate_series(1, 6) AS n
 JOIN public.guests g ON g.id = 801060 + n;
 
@@ -57,11 +57,11 @@ SELECT 802410 + n,
        (SELECT today+62 FROM staging_ref),
        (SELECT today+63 FROM staging_ref),
        1, 0,
-       800501, 90.00, 90.00, 7.20, 97.20, 'USD',
+       800501, 90.00, 90.00, 7.20, 97.20, 'MYR',
        'confirmed', 'unpaid',
        'website', 'Direct Website',
        (SELECT id FROM booking_channels WHERE name='Direct Website'),
-       800003, CURRENT_TIMESTAMP - interval '12 hours'
+       800003, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '12 hours'
 FROM generate_series(1, 5) AS n
 JOIN public.guests g ON g.id = 801070 + n;
 "#;

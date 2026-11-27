@@ -40,6 +40,25 @@ describe('GuestPortalService', () => {
       });
       expect(result).toEqual(response);
     });
+
+    it('includes trimmed email and cf-turnstile-response header when provided', async () => {
+      const response = { token: 'tok2', expires_at: '2026-07-27T00:00:00Z', booking_id: '6' };
+      post.mockReturnValue(mockJsonResponse(response));
+
+      const result = await GuestPortalService.verify(
+        { booking_number: 'BK-2', name: 'Jane Doe', email: ' jane@example.com ' },
+        'ts-token-123',
+      );
+
+      expect(post).toHaveBeenCalledWith('guest-portal/verify', {
+        json: { booking_number: 'BK-2', name: 'Jane Doe', email: 'jane@example.com' },
+        headers: {
+          'x-skip-api-notification': 'true',
+          'cf-turnstile-response': 'ts-token-123',
+        },
+      });
+      expect(result).toEqual(response);
+    });
   });
 
   describe('getBooking', () => {

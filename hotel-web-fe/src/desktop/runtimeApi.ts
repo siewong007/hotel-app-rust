@@ -3,6 +3,16 @@ import { getAccessToken } from '../auth/tokenStore';
 const RUNTIME_API_BASE_URL_KEY = 'hotelRuntimeApiBaseUrl';
 const TAURI_MODES = new Set(['tauri', 'desktop']);
 let runtimeApiBaseUrl: string | null = null;
+let desktopClientToken: string | null = null;
+
+export function setDesktopClientToken(token: string | null | undefined): void {
+  const normalized = token?.trim();
+  desktopClientToken = normalized ? normalized : null;
+}
+
+export function getDesktopClientToken(): string | null {
+  return desktopClientToken;
+}
 
 type TauriCoreApi = {
   invoke: <T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -46,6 +56,7 @@ export interface DesktopAppStatus {
   backend_url: string;
   data_directory: string;
   version: string;
+  desktop_client_token?: string | null;
   postgres?: {
     running?: boolean;
     initialized?: boolean;
@@ -173,7 +184,15 @@ export async function checkForUpdates(): Promise<DesktopUpdateInfo> {
  */
 export async function installUpdate(): Promise<{ installed: boolean; version: string }> {
   const { invoke } = await getTauriCoreApi();
-  return invoke('install_update');
+  return invoke('install_update', { accessToken: getAccessToken() });
+}
+
+/**
+ * Open the desktop application's logs folder for offline troubleshooting.
+ */
+export async function openLogsFolder(): Promise<void> {
+  const { invoke } = await getTauriCoreApi();
+  return invoke('open_logs_folder');
 }
 
 /**
@@ -182,7 +201,7 @@ export async function installUpdate(): Promise<{ installed: boolean; version: st
  */
 export async function restartApp(): Promise<void> {
   const { invoke } = await getTauriCoreApi();
-  return invoke('restart_app');
+  return invoke('restart_app', { accessToken: getAccessToken() });
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +353,7 @@ export async function getDesktopStatus(): Promise<DesktopAppStatus> {
   if (status.backend_url) {
     setRuntimeApiBaseUrl(status.backend_url);
   }
+  setDesktopClientToken(status.desktop_client_token);
 
   return status;
 }

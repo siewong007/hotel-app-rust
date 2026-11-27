@@ -47,23 +47,13 @@ jobs:
     # Signing/notarization inputs mapped at job level — `secrets` is not a
     # legal context in step `if:` conditions. Every OS-level signing step
     # below gates on `env.* != ''`, so absent cert secrets mean unsigned
-    # .app/.dmg artifacts (today's default). The updater key is different:
-    # TAURI_SIGNING_PRIVATE_KEY is REQUIRED for the bundle step — with
-    # createUpdaterArtifacts on, `tauri build` hard-fails without it.
+    # Signing secrets are injected strictly on the individual steps that use
+    # them (not at job level) so third-party build scripts (bun ci, brew,
+    # PostgreSQL configure/make, cargo build.rs) cannot read signing material.
+    # The updater key (TAURI_SIGNING_PRIVATE_KEY) is scoped to the full-bundle
+    # step below.
     env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      # API-key notarization alternative to APPLE_ID+APPLE_PASSWORD: the P8
-      # key material is decoded to a file by a step below (APPLE_API_KEY_PATH
-      # is a path, so it comes through GITHUB_ENV, not a secret mapping).
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      DO_NOT_INJECT_JOB_SECRETS: "true"
 
     defaults:
       run:
@@ -123,6 +113,7 @@ jobs:
       - name: Build PostgreSQL 19 Beta 2
         env:
           POSTGRES_VERSION: 19beta2
+          POSTGRES_SHA256: f1fb4373f4b0f4db896964f3e5b01658ff0acebd595da7558436ccf0d63b82b2
         run: |
           # PostgreSQL 16+ enables ICU by default, but Homebrew's icu4c is
           # keg-only and not on the default PKG_CONFIG_PATH — configure fails
@@ -137,8 +128,7 @@ jobs:
           export CPPFLAGS="-I${LZ4_PREFIX}/include -I${OPENSSL_PREFIX}/include ${CPPFLAGS:-}"
           export LDFLAGS="-L${LZ4_PREFIX}/lib -L${OPENSSL_PREFIX}/lib ${LDFLAGS:-}"
           curl --fail --location --remote-name "https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.bz2"
-          curl --fail --location --remote-name "https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.bz2.sha256"
-          shasum --algorithm 256 --check "postgresql-${POSTGRES_VERSION}.tar.bz2.sha256"
+          printf '%s  postgresql-%s.tar.bz2\n' "$POSTGRES_SHA256" "$POSTGRES_VERSION" | shasum --algorithm 256 --check -
           tar -xjf "postgresql-${POSTGRES_VERSION}.tar.bz2"
           cd "postgresql-${POSTGRES_VERSION}"
           # @19-suffixed datadir/libdir are load-bearing (lessons 2026-07-26m):
@@ -174,8 +164,16 @@ jobs:
       # keychain, never the certificate itself. Bundle condition included so
       # binary-only dispatches skip the whole pre-sign pipeline.
       - name: Import Apple signing certificate
-        if: ${{ (github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag') && env.APPLE_CERTIFICATE != '' }}
+        if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "APPLE_CERTIFICATE not set; skipping keychain import (unsigned bundle)."
+            exit 0
+          fi
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
@@ -184,22 +182,28 @@ jobs:
           rm -f "$RUNNER_TEMP/certificate.p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
 
-      # The sidecar binary doesn't exist until cargo build + copy run inside
-      # desktop:prepare (tauri's beforeBuildCommand) — produce it now so the
-      # sign step has the Mach-Os to sign. The prepare re-run inside
-      # `bun run build` is a cache hit; copy-backend-sidecar.mjs may re-copy
-      # the cargo output over src-tauri/binaries/, which is why the sign
-      # script signs BOTH locations. Pre-sign only feeds the bundler, so
-      # binary-only dispatches skip it.
       - name: Build backend sidecar (pre-sign)
-        if: ${{ (github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag') && env.APPLE_SIGNING_IDENTITY != '' }}
+        if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
+          if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "APPLE_SIGNING_IDENTITY not set; skipping pre-sign sidecar build."
+            exit 0
+          fi
           bun scripts/build-backend-sidecar.mjs
           bun scripts/copy-backend-sidecar.mjs
 
       - name: Sign bundled resources
-        if: ${{ (github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag') && env.APPLE_SIGNING_IDENTITY != '' }}
-        run: bash scripts/sign-macos-resources.sh
+        if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "APPLE_SIGNING_IDENTITY not set; skipping bundled resource signing."
+            exit 0
+          fi
+          bash scripts/sign-macos-resources.sh
 
       - name: Build desktop app (binary only)
         if: ${{ github.event.inputs.full_bundle != 'true' && github.ref_type != 'tag' }}
@@ -208,59 +212,55 @@ jobs:
       - name: Build desktop app (full bundle)
         if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
         env:
-          # Updater artifact signing (createUpdaterArtifacts: true). Absent →
-          # tauri build HARD-FAILS here (sign_updaters requires the key once
-          # pubkey is configured) — updater-enabled builds always need this
-          # secret; there is no unsigned-manifest path.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Arms the SystemHealthPage update card in the FE bundle. Reaches
-          # build-frontend.mjs via beforeBuildCommand → desktop:prepare; that
-          # script forwards VITE_* to `vite build` and hashes it into the
-          # bundle cache key.
           VITE_DESKTOP_UPDATER_ENABLED: "true"
         run: |
-          # Scrub APPLE_* env before `bun run build`: tauri-cli/tauri-bundler
-          # read them via var_os — presence, not non-emptiness — so the empty
-          # strings the job env exports for absent secrets would break the
-          # build (`codesign -s ""`, keychain import of an empty p12, or
-          # notarytool with empty creds — notarization runs unconditionally
-          # inside the signed branch, no --ci gate). The cert pair and all
-          # notarization vars are unset unconditionally: this workflow owns
-          # the keychain import, and the dedicated notarize-macos step is the
-          # single notarization path. APPLE_SIGNING_IDENTITY is kept when
-          # provisioned to pin the identity we just imported: left unset, the
-          # bundler falls back to `security find-identity`, which could pick
-          # an identity outside our build.keychain.
-          unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
-                APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
-                APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8 APPLE_API_KEY_PATH
           if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then unset APPLE_SIGNING_IDENTITY; fi
           bun run build
 
-      # API-key auth path for notarytool: the P8 material lives in a secret
-      # and is decoded to a file whose path goes through GITHUB_ENV
-      # (APPLE_API_KEY_PATH). Skipped when the secret is absent; the
-      # APPLE_ID+password path in the script needs no file.
       - name: Write App Store Connect API key
-        if: ${{ (github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag') && env.APPLE_API_KEY_P8 != '' }}
+        if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: |
+          if [ -z "${APPLE_API_KEY_P8:-}" ]; then
+            echo "APPLE_API_KEY_P8 not set; skipping P8 key write."
+            exit 0
+          fi
           echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
 
-      # Runs only on bundle-producing builds with a COMPLETE credential set —
-      # the gate mirrors what notarize-macos.sh requires: all three APPLE_ID
-      # vars, or all three API-key vars (APPLE_API_KEY_P8 ⇒ the p8 file was
-      # written by the step above). Unsigned default (no secrets) skips.
       - name: Notarize macOS bundle
-        if: ${{ (github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag') && ((env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != '') || (env.APPLE_API_KEY != '' && env.APPLE_API_ISSUER != '' && env.APPLE_API_KEY_P8 != '')) }}
+        if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
-          bash scripts/notarize-macos.sh
-          # Remove the temp p8 the write step created — the RUNNER_TEMP guard
-          # keeps a maintainer-supplied APPLE_API_KEY_PATH from being deleted.
-          if [[ "${APPLE_API_KEY_PATH:-}" == "$RUNNER_TEMP/"* ]]; then
-            rm -f "$APPLE_API_KEY_PATH"
+          has_apple_id=false
+          has_api_key=false
+          if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+            has_apple_id=true
           fi
+          if [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+            has_api_key=true
+          fi
+          if [ "$has_apple_id" = false ] && [ "$has_api_key" = false ]; then
+            echo "No macOS notarization credentials configured; skipping notarization."
+            exit 0
+          fi
+          bash scripts/notarize-macos.sh
+
+      - name: Clean up ephemeral Apple signing credentials
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/AuthKey.p8"
+          security delete-keychain build.keychain >/dev/null 2>&1 || true
 
       # OS-level signing is conditional: with the APPLE_* secrets provisioned
       # the .app is signed during `tauri build` (bundled resources pre-signed
@@ -348,10 +348,10 @@ jobs:
         working-directory: ${{ runner.temp }}
         env:
           POSTGRES_VERSION: 19beta2
+          POSTGRES_SHA256: f1fb4373f4b0f4db896964f3e5b01658ff0acebd595da7558436ccf0d63b82b2
         run: |
           curl --fail --location --remote-name "https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.bz2"
-          curl --fail --location --remote-name "https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.bz2.sha256"
-          sha256sum --check "postgresql-${POSTGRES_VERSION}.tar.bz2.sha256"
+          printf '%s  postgresql-%s.tar.bz2\n' "$POSTGRES_SHA256" "$POSTGRES_VERSION" | sha256sum --check -
           tar -xjf "postgresql-${POSTGRES_VERSION}.tar.bz2"
           cd "postgresql-${POSTGRES_VERSION}"
           PG_PREFIX="${RUNNER_TEMP}/postgresql-${POSTGRES_VERSION}"
@@ -559,15 +559,6 @@ jobs:
     # and needs the same prefix if the tree must be re-provisioned.
     env:
       POSTGRES_PREFIX: C:\hotel-pg19
-      # Signing inputs are mapped at JOB level, not step level: `secrets`/`vars`
-      # are legal here, and a value the PFX-import step writes to GITHUB_ENV
-      # overrides job env (a step-level `env:` on the bundle step would shadow
-      # it instead). Two supported paths, both absent-proof:
-      #   WINDOWS_CERT_PFX_BASE64+PASSWORD — import into CurrentUser\My (hosted)
-      #   WINDOWS_CERT_THUMBPRINT         — cert already in the store (self-hosted)
-      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-      WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
       WINDOWS_SIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGN_TIMESTAMP_URL }}
 
     defaults:
@@ -614,18 +605,24 @@ jobs:
       # pkgconfiglite: lets meson locate the vcpkg-built dependencies.
       - name: Install build tools
         run: |
-          choco install -y winflexbison3 nasm pkgconfiglite protoc
-          python -m pip install --upgrade meson ninja
+          choco install -y winflexbison3 --version=2.5.24.20210105
+          choco install -y nasm --version=3.2.0
+          choco install -y pkgconfiglite --version=0.28
+          choco install -y protoc --version=36.2.0
+          python -m pip install meson==1.12.1 ninja==1.13.2
 
       # vcpkg provides OpenSSL/lz4/zlib/ICU for the PostgreSQL meson build.
-      # windows-latest ships vcpkg at VCPKG_INSTALLATION_ROOT; bootstrap a fresh
-      # copy if the image ever drops it.
+      # Unconditionally bootstrap from the pinned commit so a runner image change
+      # to VCPKG_INSTALLATION_ROOT cannot silently alter dependency versions.
       - name: Install PostgreSQL dependencies (vcpkg)
         run: |
-          $vcpkg = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkg -or -not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) {
-            $vcpkg = Join-Path $env:RUNNER_TEMP 'vcpkg'
-            git clone --depth 1 https://github.com/microsoft/vcpkg $vcpkg
+          $vcpkg = Join-Path $env:RUNNER_TEMP 'vcpkg'
+          if (-not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) {
+            if (Test-Path $vcpkg) { Remove-Item -Recurse -Force $vcpkg }
+            git init $vcpkg
+            git -C $vcpkg remote add origin https://github.com/microsoft/vcpkg
+            git -C $vcpkg fetch --depth 1 origin e6d62cc9ce8f8d9687df14521118f2ec3c10ee6a
+            git -C $vcpkg checkout FETCH_HEAD
             & (Join-Path $vcpkg 'bootstrap-vcpkg.bat')
           }
           & (Join-Path $vcpkg 'vcpkg.exe') install --triplet x64-windows openssl lz4 zlib icu
@@ -637,11 +634,11 @@ jobs:
         working-directory: ${{ runner.temp }}
         env:
           POSTGRES_VERSION: 19beta2
+          POSTGRES_SHA256: f1fb4373f4b0f4db896964f3e5b01658ff0acebd595da7558436ccf0d63b82b2
         run: |
           $tarball = "postgresql-$env:POSTGRES_VERSION.tar.bz2"
           curl.exe --fail --location --remote-name "https://ftp.postgresql.org/pub/source/v$env:POSTGRES_VERSION/$tarball"
-          curl.exe --fail --location --remote-name "https://ftp.postgresql.org/pub/source/v$env:POSTGRES_VERSION/$tarball.sha256"
-          $expected = (Get-Content "$tarball.sha256").Split(' ')[0].Trim().ToLower()
+          $expected = $env:POSTGRES_SHA256.Trim().ToLower()
           $actual = (Get-FileHash $tarball -Algorithm SHA256).Hash.ToLower()
           if ($actual -ne $expected) { throw "sha256 mismatch for ${tarball}: $actual != $expected" }
           tar -xjf $tarball
@@ -692,14 +689,16 @@ jobs:
         if: ${{ github.event.inputs.full_bundle != 'true' && github.ref_type != 'tag' }}
         run: bun run build:no-bundle
 
-      # PFX path for hosted runners: decode the base64 PFX into a temp file,
-      # import into CurrentUser\My, then hand the resolved thumbprint to the
-      # bundle step via GITHUB_ENV (overrides the job-env thumbprint secret,
-      # which may be empty — the imported cert is guaranteed to be in the
-      # store). Secrets absent → step skipped → unsigned, the default.
       - name: Import code-signing certificate
-        if: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' }}
+        if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CERT_PFX_BASE64)) {
+            Write-Host "WINDOWS_CERT_PFX_BASE64 not set; skipping PFX import."
+            exit 0
+          }
           $pfx = Join-Path $env:RUNNER_TEMP 'hotel-codesign.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
           $pwd = ConvertTo-SecureString $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
@@ -708,30 +707,24 @@ jobs:
           "WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Certificate imported (thumbprint resolved; expires $($cert.NotAfter.ToString('yyyy-MM-dd')))"
 
-      # NSIS is the always-on Windows installer; MSI joins it on tag releases
-      # (WiX toolchain download adds build time, so validation builds skip it).
-      # Signing is conditional: WINDOWS_CERT_THUMBPRINT reaches this step from
-      # job env (self-hosted store secret) or from the PFX import above via
-      # GITHUB_ENV (hosted runners) — either way Tauri signs exe + installers
-      # via signtool. Absent → unsigned artifacts, by design.
       - name: Build desktop app (NSIS / MSI)
         if: ${{ github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag' }}
         env:
+          WINDOWS_CERT_THUMBPRINT_SECRET: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Arms the SystemHealthPage update card in the FE bundle — same
-          # VITE_* forwarding path as the macOS/Linux steps.
           VITE_DESKTOP_UPDATER_ENABLED: "true"
         run: |
           $bundles = 'nsis'
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $bundles = 'nsis,msi' }
           $buildArgs = @('--bundles', $bundles)
-          if ($env:WINDOWS_CERT_THUMBPRINT) {
+          $thumbprint = if ($env:WINDOWS_CERT_THUMBPRINT) { $env:WINDOWS_CERT_THUMBPRINT } else { $env:WINDOWS_CERT_THUMBPRINT_SECRET }
+          if ($thumbprint) {
             $timestampUrl = if ($env:WINDOWS_SIGN_TIMESTAMP_URL) { $env:WINDOWS_SIGN_TIMESTAMP_URL } else { 'http://timestamp.digicert.com' }
             $config = @{
               bundle = @{
                 windows = @{
-                  certificateThumbprint = $env:WINDOWS_CERT_THUMBPRINT
+                  certificateThumbprint = $thumbprint
                   digestAlgorithm       = 'sha256'
                   timestampUrl          = $timestampUrl
                 }
@@ -744,6 +737,15 @@ jobs:
           }
           & bun scripts/tauri-build.mjs @buildArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Clean up ephemeral Windows signing certificate
+        if: always() && (github.event.inputs.full_bundle == 'true' || github.ref_type == 'tag')
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'hotel-codesign.pfx'
+          if (Test-Path $pfx) { Remove-Item $pfx -Force }
+          if ($env:WINDOWS_CERT_THUMBPRINT) {
+            Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $env:WINDOWS_CERT_THUMBPRINT } | Remove-Item -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Package portable archive
         run: bun run package:portable

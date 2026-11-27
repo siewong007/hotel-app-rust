@@ -11,6 +11,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions-minor-patch:
         patterns: ["*"]
@@ -30,6 +32,8 @@ updates:
     directory: /hotel-app-be
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       backend-cargo-minor-patch:
         patterns: ["*"]
@@ -49,6 +53,8 @@ updates:
     directory: /hotel-desktop/src-tauri
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       desktop-cargo-minor-patch:
         patterns: ["*"]
@@ -58,6 +64,8 @@ updates:
     directory: /hotel-desktop
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       desktop-bun-minor-patch:
         patterns: ["*"]
@@ -67,6 +75,8 @@ updates:
     directory: /hotel-web-fe
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       frontend-bun-minor-patch:
         patterns: ["*"]
@@ -89,6 +99,8 @@ updates:
     directory: /hotel-app-be
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       backend-images-minor-patch:
         patterns: ["*"]
@@ -107,6 +119,8 @@ updates:
     directory: /hotel-web-fe
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       frontend-images-minor-patch:
         patterns: ["*"]

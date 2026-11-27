@@ -1,5 +1,8 @@
 package com.hotelapp.staff.feature.bookings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,6 +21,7 @@ import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -30,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hotelapp.staff.core.design.FilterChipRow
@@ -39,16 +44,22 @@ import com.hotelapp.staff.core.design.HotelModalSheetContainer
 import com.hotelapp.staff.core.design.HotelOutlinedButton
 import com.hotelapp.staff.core.design.HotelPrimaryButton
 import com.hotelapp.staff.core.design.HotelTheme
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.KeyValueRow
 import com.hotelapp.staff.core.design.StatusPill
 import com.hotelapp.staff.core.design.hotelTextFieldColors
 import com.hotelapp.staff.core.format.DateFormatter
 import com.hotelapp.staff.core.format.MoneyFormatter
+import com.hotelapp.staff.core.format.MoneyInputParser
 import com.hotelapp.staff.core.format.StatusFormatter
+import com.hotelapp.staff.data.dto.BookingGroupDetailDto
 import com.hotelapp.staff.data.dto.BookingPaymentRecordDto
+import com.hotelapp.staff.data.dto.BookingWithDetailsDto
 import com.hotelapp.staff.data.dto.InvoiceDto
 import com.hotelapp.staff.data.dto.PaymentWorkflowSummaryDto
+import com.hotelapp.staff.data.dto.SettlementLockState
 import java.math.BigDecimal
+import java.util.UUID
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -60,18 +71,22 @@ fun PaymentHistoryCard(
     isLoadingInvoice: Boolean,
     onRecordPayment: () -> Unit,
     onOpenInvoice: () -> Unit,
+    isGroupBooking: Boolean = false,
+    canReadPayment: Boolean = true,
 ) {
     val colors = HotelTheme.colors
     HotelCard {
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = "Payments & Invoice",
                 style = MaterialTheme.typography.titleMedium,
                 color = colors.textPrimary,
+                modifier = Modifier.padding(end = 8.dp),
             )
             summary?.nextAction?.takeIf { it.isNotBlank() }?.let { action ->
                 StatusPill(
@@ -83,12 +98,9 @@ fun PaymentHistoryCard(
 
         if (summary != null && summary.warnings.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 summary.warnings.forEach { warning ->
-                    StatusPill(label = warning, tone = colors.warning)
+                    InlineAlertBanner(message = warning, tone = colors.warning)
                 }
             }
         }
@@ -100,22 +112,24 @@ fun PaymentHistoryCard(
         ) {
             if (canCreatePayment) {
                 HotelPrimaryButton(
-                    text = "Record Payment",
+                    text = if (isGroupBooking) "Pay Group" else "Record Payment",
                     icon = Icons.Outlined.Payments,
                     onClick = onRecordPayment,
                     modifier = Modifier.weight(1f),
                 )
             }
-            HotelOutlinedButton(
-                text = "Invoice PDF",
-                icon = Icons.AutoMirrored.Outlined.ReceiptLong,
-                isLoading = isLoadingInvoice,
-                onClick = onOpenInvoice,
-                modifier = Modifier.weight(1f),
-            )
+            if (canReadPayment) {
+                HotelOutlinedButton(
+                    text = "Invoice PDF",
+                    icon = Icons.AutoMirrored.Outlined.ReceiptLong,
+                    isLoading = isLoadingInvoice,
+                    onClick = onOpenInvoice,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
 
-        if (payments.isNotEmpty()) {
+        if (canReadPayment && payments.isNotEmpty()) {
             Spacer(modifier = Modifier.height(12.dp))
             HorizontalDivider(color = colors.borderSubtle)
             Spacer(modifier = Modifier.height(8.dp))
@@ -154,13 +168,16 @@ fun PaymentHistoryCard(
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
+                        val isVoided = row.voidedAt != null ||
+                            row.paymentStatus.equals("void", ignoreCase = true) ||
+                            row.paymentStatus.equals("voided", ignoreCase = true)
                         Text(
                             text = MoneyFormatter.format(row.totalAmount, currency),
                             style = MaterialTheme.typography.labelLarge,
-                            color = if (row.voidedAt != null) colors.textMuted else colors.textPrimary,
+                            color = if (isVoided) colors.textMuted else colors.textPrimary,
                         )
-                        val statusLabel = if (row.voidedAt != null) "Voided" else StatusFormatter.humanize(row.paymentStatus ?: "completed")
-                        val tone = if (row.voidedAt != null) colors.danger else StatusFormatter.paymentTone(row.paymentStatus ?: "paid", colors)
+                        val statusLabel = if (isVoided) "Voided" else StatusFormatter.humanize(row.paymentStatus ?: "completed")
+                        val tone = if (isVoided) colors.danger else StatusFormatter.paymentTone(row.paymentStatus ?: "paid", colors)
                         StatusPill(label = statusLabel, tone = tone)
                     }
                 }
@@ -179,21 +196,86 @@ fun PaymentHistoryCard(
 
 @Composable
 fun RecordPaymentSheet(
+    booking: BookingWithDetailsDto,
     defaultAmount: BigDecimal?,
     currency: String,
     isSubmitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (amountText: String, method: String, reference: String, notes: String) -> Unit,
+    onSubmit: (
+        amountText: String,
+        method: String,
+        paymentType: String,
+        reference: String,
+        notes: String,
+        idempotencyKey: String,
+    ) -> Unit,
+    groupDetail: BookingGroupDetailDto? = null,
+    errorMessage: String? = null,
 ) {
     val colors = HotelTheme.colors
-    var amount by remember {
+    val submissionKey = remember(booking.id) { UUID.randomUUID().toString() }
+    val hasGroup = !booking.groupNumber.isNullOrBlank()
+    var paymentType by remember(booking.id) { mutableStateOf("booking") }
+    val isGroupRoomCharge = hasGroup && paymentType == "booking"
+
+    val lockState = remember(
+        booking.source,
+        booking.bookingChannelId,
+        booking.bookingChannelName,
+        booking.bookingChannelType,
+        booking.bookingChannelSettlementMethods,
+        booking.channelPayoutRecorded,
+        isGroupRoomCharge,
+        paymentType,
+    ) {
+        booking.settlementLockState(
+            allowDeskRemainder = !isGroupRoomCharge,
+            paymentType = paymentType,
+        )
+    }
+
+    val methodOptions = remember(lockState) {
+        when (lockState) {
+            is SettlementLockState.Restricted -> lockState.methods.map { FilterOption(it, StatusFormatter.humanize(it)) }
+            is SettlementLockState.Blocked -> emptyList()
+            SettlementLockState.Open -> listOf(
+                FilterOption("cash", "Cash"),
+                FilterOption("card", "Card"),
+                FilterOption("bank_transfer", "Bank Transfer"),
+                FilterOption("duitnow", "DuitNow QR"),
+                FilterOption("online_banking", "Online Banking"),
+            )
+        }
+    }
+
+    val activeGroupRooms = remember(groupDetail) {
+        groupDetail?.rooms?.filter { !it.status.equals("voided", ignoreCase = true) }.orEmpty()
+    }
+    val unpaidGroupRooms = remember(activeGroupRooms) {
+        activeGroupRooms.filter {
+            !it.paymentStatus.equals("paid", ignoreCase = true) &&
+                !it.paymentStatus.equals("paid_rate", ignoreCase = true)
+        }
+    }
+    val isGroupAlreadySettled = isGroupRoomCharge && (
+        groupDetail?.group?.paymentStatus.equals("paid", ignoreCase = true) ||
+            (groupDetail != null && unpaidGroupRooms.isEmpty())
+        )
+
+    var amount by remember(booking.id) {
         mutableStateOf(defaultAmount?.takeIf { it > BigDecimal.ZERO }?.toPlainString() ?: "")
     }
-    var method by remember { mutableStateOf("cash") }
+    var method by remember(methodOptions) {
+        mutableStateOf(methodOptions.firstOrNull()?.value ?: "cash")
+    }
     var reference by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
+    val parsedAmount = MoneyInputParser.parsePositiveAmount(amount)
 
-    HotelModalSheetContainer(onDismiss = { if (!isSubmitting) onDismiss() }) {
+    HotelModalSheetContainer(
+        dismissible = !isSubmitting,
+        onDismiss = { if (!isSubmitting) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -203,42 +285,103 @@ fun RecordPaymentSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Record Booking Payment",
+                text = if (isGroupRoomCharge) "Pay Group Balance" else "Record Payment",
                 style = MaterialTheme.typography.titleLarge,
                 color = colors.textPrimary,
             )
-            OutlinedTextField(
-                value = amount,
-                onValueChange = { amount = it },
-                label = { Text("Amount ($currency)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                trailingIcon = if (defaultAmount != null && defaultAmount > BigDecimal.ZERO) {
-                    {
-                        TextButton(onClick = { amount = defaultAmount.toPlainString() }) {
-                            Text("Balance", color = colors.primaryOnSurface)
-                        }
-                    }
-                } else null,
-                shape = RoundedCornerShape(12.dp),
-                colors = hotelTextFieldColors(),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text("Payment Method", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+            Text("Payment Category", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             FilterChipRow(
                 options = listOf(
-                    FilterOption("cash", "Cash"),
-                    FilterOption("card", "Card"),
-                    FilterOption("bank_transfer", "Bank Transfer"),
-                    FilterOption("duitnow", "DuitNow QR"),
-                    FilterOption("online_banking", "Online Banking"),
+                    FilterOption("booking", if (hasGroup) "Group Room Charge" else "Room Charge"),
+                    FilterOption("deposit", "Keycard Deposit"),
+                    FilterOption("service", "Service / Extra"),
+                    FilterOption("damage", "Damage Fee"),
                 ),
-                selected = method,
-                onSelect = { method = it },
+                selected = paymentType,
+                onSelect = { if (!isSubmitting) paymentType = it },
             )
+
+            if (isGroupRoomCharge) {
+                if (groupDetail != null) {
+                    val g = groupDetail.group
+                    val grpCur = g.currency.ifBlank { currency }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.surfaceSunken)
+                            .border(1.dp, colors.borderSubtle, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        KeyValueRow("Group #", "${g.groupNumber} (${activeGroupRooms.size} rooms)")
+                        KeyValueRow("Group Total", MoneyFormatter.format(g.totalAmount, grpCur))
+                        KeyValueRow("Unpaid Rooms", "${unpaidGroupRooms.size} remaining")
+                        activeGroupRooms.take(5).forEach { member ->
+                            KeyValueRow(
+                                label = "Rm ${member.roomNumber ?: member.roomId}",
+                                value = "${StatusFormatter.humanize(member.paymentStatus)} · ${MoneyFormatter.format(member.totalAmount, grpCur)}",
+                            )
+                        }
+                    }
+                    if (isGroupAlreadySettled) {
+                        InlineAlertBanner(
+                            message = "This group booking has no remaining unpaid rooms.",
+                            tone = colors.success,
+                        )
+                    }
+                } else {
+                    InlineAlertBanner(
+                        message = "Group booking: paying room charges settles the remaining balance across all unpaid rooms in this group.",
+                        tone = colors.info,
+                    )
+                }
+            }
+
+            if (lockState is SettlementLockState.Blocked) {
+                InlineAlertBanner(message = lockState.reason, tone = colors.danger)
+            }
+            AnimatedVisibility(visible = !errorMessage.isNullOrBlank()) {
+                InlineAlertBanner(message = errorMessage.orEmpty(), tone = colors.danger)
+            }
+
+            if (!isGroupRoomCharge) {
+                val showBalanceShortcut = paymentType == "booking" && defaultAmount != null && defaultAmount > BigDecimal.ZERO
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    enabled = !isSubmitting && lockState !is SettlementLockState.Blocked,
+                    label = { Text("Amount ($currency)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    trailingIcon = if (showBalanceShortcut) {
+                        {
+                            TextButton(
+                                enabled = !isSubmitting,
+                                onClick = { amount = defaultAmount!!.toPlainString() },
+                            ) {
+                                Text("Balance", color = colors.primaryOnSurface)
+                            }
+                        }
+                    } else null,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = hotelTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            if (methodOptions.isNotEmpty()) {
+                Text("Payment Method", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                FilterChipRow(
+                    options = methodOptions,
+                    selected = method,
+                    onSelect = { if (!isSubmitting) method = it },
+                )
+            }
             OutlinedTextField(
                 value = reference,
                 onValueChange = { reference = it },
+                enabled = !isSubmitting,
                 label = { Text("Transaction Reference (optional)") },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
@@ -248,6 +391,7 @@ fun RecordPaymentSheet(
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it },
+                enabled = !isSubmitting,
                 label = { Text("Notes (optional)") },
                 minLines = 2,
                 shape = RoundedCornerShape(12.dp),
@@ -255,10 +399,14 @@ fun RecordPaymentSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
             HotelPrimaryButton(
-                text = if (isSubmitting) "Recording..." else "Save Payment",
+                text = if (isSubmitting) "Recording..." else if (isGroupRoomCharge) "Pay Group Balance" else "Save Payment",
                 isLoading = isSubmitting,
-                enabled = (amount.trim().toDoubleOrNull() ?: 0.0) > 0.0,
-                onClick = { onSubmit(amount, method, reference, notes) },
+                enabled = !isSubmitting &&
+                    lockState !is SettlementLockState.Blocked &&
+                    methodOptions.isNotEmpty() &&
+                    !isGroupAlreadySettled &&
+                    (isGroupRoomCharge || parsedAmount != null),
+                onClick = { onSubmit(amount, method, paymentType, reference, notes, submissionKey) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -274,11 +422,15 @@ fun InvoicePreviewSheet(
     onGenerateOfficial: () -> Unit,
     onPrint: () -> Unit,
     onSharePdf: () -> Unit,
+    errorMessage: String? = null,
 ) {
     val colors = HotelTheme.colors
     val cur = invoice.currency.ifBlank { "MYR" }
 
-    HotelModalSheetContainer(onDismiss = onDismiss) {
+    HotelModalSheetContainer(
+        dismissible = !isLoading,
+        onDismiss = { if (!isLoading) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -310,10 +462,20 @@ fun InvoicePreviewSheet(
                 )
             }
 
+            AnimatedVisibility(visible = !errorMessage.isNullOrBlank()) {
+                InlineAlertBanner(message = errorMessage.orEmpty(), tone = colors.danger)
+            }
+
             HorizontalDivider(color = colors.borderSubtle)
             KeyValueRow("Issue Date", DateFormatter.formatDate(invoice.issueDate))
             invoice.dueDate?.let { KeyValueRow("Due Date", DateFormatter.formatDate(it)) }
-            invoice.roomNumber?.let { KeyValueRow("Room", "$it (${invoice.roomType.orEmpty()})".trim()) }
+            invoice.roomNumber?.takeIf { it.isNotBlank() }?.let { roomNum ->
+                val roomLabel = listOfNotNull(
+                    roomNum,
+                    invoice.roomType?.takeIf { it.isNotBlank() }?.let { "($it)" },
+                ).joinToString(" ")
+                KeyValueRow("Room", roomLabel)
+            }
             val dates = DateFormatter.formatDateRange(invoice.checkInDate, invoice.checkOutDate)
             if (dates.isNotBlank()) KeyValueRow("Stay Dates", dates)
             invoice.numberOfNights?.let { KeyValueRow("Nights", it.toString()) }
@@ -351,7 +513,7 @@ fun InvoicePreviewSheet(
                 )
             }
 
-            if (canCreateInvoice && (invoice.id <= 0L || invoice.status.equals("draft", ignoreCase = true))) {
+            if (canCreateInvoice && (invoice.id <= 0L || invoice.invoiceNumber.isBlank())) {
                 HotelOutlinedButton(
                     text = if (isLoading) "Generating..." else "Generate Official Invoice",
                     isLoading = isLoading,
@@ -361,4 +523,137 @@ fun InvoicePreviewSheet(
             }
         }
     }
+}
+
+@Composable
+fun DepositActionDialog(
+    isForfeit: Boolean,
+    heldDeposit: BigDecimal,
+    currency: String,
+    isSubmitting: Boolean,
+    errorMessage: String?,
+    onConfirm: (amount: BigDecimal, method: String, reasonOrNote: String, reference: String) -> Unit,
+    onDismiss: () -> Unit,
+    refundMethodOptions: List<String> = emptyList(),
+) {
+    val colors = HotelTheme.colors
+    val methodChips = remember(refundMethodOptions) {
+        val list = if (refundMethodOptions.isNotEmpty()) {
+            refundMethodOptions
+        } else {
+            listOf("cash", "card", "bank_transfer", "duitnow", "online_banking")
+        }
+        list.distinct().map { FilterOption(it, StatusFormatter.humanize(it)) }
+    }
+    var amountText by remember(heldDeposit) {
+        mutableStateOf(heldDeposit.stripTrailingZeros().toPlainString())
+    }
+    var method by remember(methodChips) {
+        mutableStateOf(methodChips.firstOrNull()?.value ?: "cash")
+    }
+    var reasonOrNote by remember { mutableStateOf("") }
+    var reference by remember { mutableStateOf("") }
+
+    val parsedAmount = MoneyInputParser.parsePositiveAmount(amountText, maxAmount = heldDeposit)
+    val trimmedNoteLen = reasonOrNote.trim().length
+    val reasonValid = trimmedNoteLen in 3..500
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        shape = RoundedCornerShape(20.dp),
+        containerColor = colors.surfaceOverlay,
+        title = {
+            Text(
+                text = if (isForfeit) "Forfeit Held Deposit" else "Refund Keycard Deposit",
+                color = colors.textPrimary,
+                style = MaterialTheme.typography.titleLarge,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Remaining held deposit: ${MoneyFormatter.format(heldDeposit, currency)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textSecondary,
+                )
+                if (!errorMessage.isNullOrBlank()) {
+                    InlineAlertBanner(message = errorMessage, tone = colors.danger)
+                }
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    enabled = !isSubmitting,
+                    label = { Text("Amount ($currency, max ${heldDeposit.toPlainString()})") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    trailingIcon = {
+                        TextButton(
+                            enabled = !isSubmitting,
+                            onClick = { amountText = heldDeposit.stripTrailingZeros().toPlainString() },
+                        ) {
+                            Text("Full", color = colors.primaryOnSurface)
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = hotelTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (!isForfeit) {
+                    FilterChipRow(
+                        options = methodChips,
+                        selected = method,
+                        onSelect = { if (!isSubmitting) method = it },
+                    )
+                    OutlinedTextField(
+                        value = reference,
+                        onValueChange = { reference = it },
+                        enabled = !isSubmitting,
+                        label = { Text("Receipt / Reference (optional)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = hotelTextFieldColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                OutlinedTextField(
+                    value = reasonOrNote,
+                    onValueChange = { reasonOrNote = it },
+                    enabled = !isSubmitting,
+                    label = { Text(if (isForfeit) "Forfeit Reason (3-500 chars)" else "Refund Note (3-500 chars)") },
+                    minLines = 2,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = hotelTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (reasonOrNote.isNotEmpty() && !reasonValid) {
+                    Text(
+                        text = "Enter 3 to 500 characters.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.warning.fg,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            HotelPrimaryButton(
+                text = if (isSubmitting) "Processing..." else if (isForfeit) "Forfeit Deposit" else "Refund Deposit",
+                isLoading = isSubmitting,
+                enabled = !isSubmitting && parsedAmount != null && reasonValid,
+                containerColor = if (isForfeit) colors.danger.fg else colors.primaryMain,
+                contentColor = colors.primaryContrastText,
+                onClick = {
+                    val amt = parsedAmount ?: return@HotelPrimaryButton
+                    onConfirm(amt, method, reasonOrNote, reference)
+                },
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                Text("Cancel", color = colors.textSecondary)
+            }
+        },
+    )
 }

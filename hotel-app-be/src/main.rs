@@ -168,20 +168,16 @@ async fn main() {
     }
 
     // Initialize database pool
-    // Six leader-locked schedulers and the cache-bus LISTENER each pin a
-    // pooled connection for life. Below ~10 connections the remainder cannot
-    // serve requests — every acquire hits the timeout, healthcheck included —
-    // so refuse to boot into guaranteed starvation.
-    if config.database.max_connections < 10 {
+    // Leader-locked schedulers multiplex onto 1 non-pooled connection and the
+    // cache-bus LISTENER uses 1 non-pooled connection. Keep at least 4 pooled
+    // connections so concurrent requests and schedulers never starve.
+    if config.database.max_connections < 4 {
         log::error!(
-            "✗ DATABASE_MAX_CONNECTIONS={} leaves under 3 connections for \
-             requests after 7 are pinned by schedulers and the cache-bus \
-             listener",
+            "✗ DATABASE_MAX_CONNECTIONS={} is too small to serve concurrent requests reliably",
             config.database.max_connections
         );
         eprintln!(
-            "FATAL: DATABASE_MAX_CONNECTIONS={} cannot serve requests; \
-             schedulers and the cache-bus listener pin 7 for life — set at least 10",
+            "FATAL: DATABASE_MAX_CONNECTIONS={} cannot serve requests reliably — set at least 4",
             config.database.max_connections
         );
         std::process::exit(1);
@@ -332,84 +328,97 @@ async fn main() {
 
     // Start the background night-audit scheduler. Inert unless the
     // `night_audit_auto_enabled` setting is turned on; runs for the process
-    // lifetime and never blocks startup.
-    core::leader::spawn_exclusive(
-        "night_audit",
-        core::leader::LOCK_NIGHT_AUDIT,
+    // lifetime and never blocks startup. Multiplexed over ONE dedicated
+    // non-pooled advisory-lock connection so request pool capacity stays intact.
+    core::leader::spawn_exclusive_multiplexed(
+        config.database.url.clone(),
         pool.clone(),
-        |p| async move { modules::night_audit::scheduler::run(p).await },
-    );
-
-    // Automatically expire receipt requests that remain unanswered for 24 hours.
-    core::leader::spawn_exclusive(
-        "receipts",
-        core::leader::LOCK_RECEIPTS,
-        pool.clone(),
-        |p| async move { modules::payments::receipt_scheduler::run(p).await },
-    );
-
-    // Releases stale unpaid ONLINE holds after `unpaid_hold_release_hours`
-    // (ships at 24; 0 switches it off). Front-desk holds are never touched.
-    // The same loop holds rooms for today's arrivals once a day at
-    // `new_reservation_visible_time` (`rooms::arrival_holds`), so it pins no
-    // extra pooled connection.
-    core::leader::spawn_exclusive(
-        "unpaid_hold",
-        core::leader::LOCK_UNPAID_HOLD,
-        pool.clone(),
-        |p| async move { modules::bookings::unpaid_hold_scheduler::run(p).await },
-    );
-
-    // Start the durable email delivery worker. Inert when SMTP_* env vars are
-    // absent; otherwise leases due outbox rows and sends with retry/backoff.
-    core::leader::spawn_exclusive(
-        "comms_worker",
-        core::leader::LOCK_COMMS_WORKER,
-        pool.clone(),
-        |p| async move { modules::communications::worker::run(p).await },
-    );
-
-    // Start the communications scheduler: due-campaign fan-out into the
-    // outbox and the daily birthday-voucher job (opt-in via settings).
-    core::leader::spawn_exclusive(
-        "comms_scheduler",
-        core::leader::LOCK_COMMS_SCHED,
-        pool.clone(),
-        |p| async move { modules::communications::scheduler::run(p).await },
-    );
-
-    // Housekeeping loop, one lock and one pinned connection for both jobs:
-    // * prune stale rate-limit buckets every 10 minutes. Fixed windows leave
-    //   one row per bucket per window; two hours of retention covers the
-    //   longest configured window (15 min) with headroom.
-    // * hourly session retention: hard-delete signed-in sessions that expired
-    //   or were revoked more than `session_purge_*_days` ago, and revoke idle
-    //   ones when `session_idle_days` is set (see `session_retention`).
-    core::leader::spawn_exclusive(
-        "maintenance",
-        core::leader::LOCK_MAINTENANCE,
-        pool.clone(),
-        |p| async move {
-            const PRUNE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
-            let mut last_session_sweep: Option<std::time::Instant> = None;
-            loop {
-                if let Err(e) = sqlx::query(
-                    "DELETE FROM rate_limit_buckets WHERE window_start < CURRENT_TIMESTAMP - interval '2 hours'",
-                )
-                .execute(&p)
-                .await
-                {
-                    log::warn!("rate-limit bucket prune failed: {e}");
-                }
-                if last_session_sweep.is_none_or(|at| {
-                    at.elapsed() >= modules::auth::session_retention::PURGE_INTERVAL
-                }) {
-                    modules::auth::session_retention::run_once(&p).await;
-                    last_session_sweep = Some(std::time::Instant::now());
-                }
-                tokio::time::sleep(PRUNE_INTERVAL).await;
-            }
-        },
+        vec![
+            core::leader::LeaderTask::new(
+                "night_audit",
+                core::leader::LOCK_NIGHT_AUDIT,
+                |p| async move { modules::night_audit::scheduler::run(p).await },
+            ),
+            core::leader::LeaderTask::new(
+                "receipts",
+                core::leader::LOCK_RECEIPTS,
+                |p| async move { modules::payments::receipt_scheduler::run(p).await },
+            ),
+            // Releases stale unpaid ONLINE holds after `unpaid_hold_release_hours`
+            // (ships at 24; 0 switches it off). Front-desk holds are never touched.
+            // The same loop holds rooms for today's arrivals once a day at
+            // `new_reservation_visible_time` (`rooms::arrival_holds`).
+            core::leader::LeaderTask::new(
+                "unpaid_hold",
+                core::leader::LOCK_UNPAID_HOLD,
+                |p| async move { modules::bookings::unpaid_hold_scheduler::run(p).await },
+            ),
+            // Start the durable email delivery worker. Inert when SMTP_* env vars are
+            // absent; otherwise leases due outbox rows and sends with retry/backoff.
+            core::leader::LeaderTask::new(
+                "comms_worker",
+                core::leader::LOCK_COMMS_WORKER,
+                |p| async move { modules::communications::worker::run(p).await },
+            ),
+            // Start the communications scheduler: due-campaign fan-out into the
+            // outbox and the daily birthday-voucher job (opt-in via settings).
+            core::leader::LeaderTask::new(
+                "comms_scheduler",
+                core::leader::LOCK_COMMS_SCHED,
+                |p| async move { modules::communications::scheduler::run(p).await },
+            ),
+            // Housekeeping loop:
+            // * prune stale rate-limit buckets every 10 minutes
+            // * hourly session retention + expired auth challenges + 30d idempotency key cleanup
+            core::leader::LeaderTask::new(
+                "maintenance",
+                core::leader::LOCK_MAINTENANCE,
+                |p| async move {
+                    const PRUNE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
+                    let mut last_hourly_sweep: Option<std::time::Instant> = None;
+                    loop {
+                        if let Err(e) = sqlx::query(
+                            "DELETE FROM rate_limit_buckets WHERE window_start < CURRENT_TIMESTAMP - interval '2 hours'",
+                        )
+                        .execute(&p)
+                        .await
+                        {
+                            log::warn!("rate-limit bucket prune failed: {e}");
+                        }
+                        if last_hourly_sweep.is_none_or(|at| {
+                            at.elapsed() >= modules::auth::session_retention::PURGE_INTERVAL
+                        }) {
+                            modules::auth::session_retention::run_once(&p).await;
+                            for (label, stmt) in [
+                                ("passkey challenges", "SELECT cleanup_expired_challenges()"),
+                                (
+                                    "two-factor challenges",
+                                    "DELETE FROM two_factor_challenges WHERE expires_at < CURRENT_TIMESTAMP",
+                                ),
+                                (
+                                    "ekyc idempotency keys",
+                                    "DELETE FROM ekyc_idempotency_keys WHERE created_at < CURRENT_TIMESTAMP - interval '30 days'",
+                                ),
+                                (
+                                    "support action idempotency keys",
+                                    "DELETE FROM support_action_idempotency_keys WHERE created_at < CURRENT_TIMESTAMP - interval '30 days'",
+                                ),
+                                (
+                                    "support guest request idempotency keys",
+                                    "DELETE FROM support_guest_request_idempotency_keys WHERE created_at < CURRENT_TIMESTAMP - interval '30 days'",
+                                ),
+                            ] {
+                                if let Err(e) = sqlx::query(stmt).execute(&p).await {
+                                    log::warn!("hourly cleanup ({label}) failed: {e}");
+                                }
+                            }
+                            last_hourly_sweep = Some(std::time::Instant::now());
+                        }
+                        tokio::time::sleep(PRUNE_INTERVAL).await;
+                    }
+                },
+            ),
+        ],
     );
 
     // Drop staged backup uploads abandoned for >24h — crashed uploads and
@@ -424,11 +433,11 @@ async fn main() {
     // listener rebroadcasts remote events through.
     let app = create_router(pool.clone());
 
-    // LISTEN for cross-replica cache invalidation and data-change fan-out so
-    // a mutation served by another replica converges this one's local caches
-    // and staff websockets immediately. Spawned after router construction so
-    // no remote notification arrives before the fan-out sender exists.
-    core::cache_bus::spawn_listener(pool);
+    // LISTEN for cross-replica cache invalidation and data-change fan-out on a
+    // dedicated non-pooled connection so a mutation on another replica
+    // converges local caches and staff websockets immediately without pinning
+    // a request pool slot.
+    core::cache_bus::spawn_listener_url(config.database.url.clone());
 
     // Determine bind address and port
     let preferred_port: u16 = config.backend_port;

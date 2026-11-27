@@ -47,7 +47,7 @@ was folded into the baseline and the catalog republished from empty. Since
 then it has grown again, one converge-style patch at a time. A fresh install
 records revision 1 plus one row per manifest entry. The manifest is the only
 list; read it rather than repeating it (`grep -vc '^#' patches/manifest.tsv`
-counts the entries). As of `2026-11-26` it runs from version 2 to 33 (`0033_security_audit_hardening.sql`).
+counts the entries). As of `2026-11-27` it runs from version 2 to 36 (`0036_wave2_security_hardening.sql`).
 A database that still records the pre-fold 1.2+ lineage aborts on a
 checksum-mismatch guard; the one-time lineage reset runbook is in
 `docs/guides/deployment.md`. An empty catalog is also valid state: the
@@ -125,21 +125,24 @@ Rerun semantics: the binary opens one transaction, takes an advisory lock,
 guards on the recorded V1 revision and the environment (refuses production),
 wipes every seed-owned row (child-first) inside the fixed id band
 **800000-899999** (plus generated-id children and marker-tagged `job_runs`),
-restarts the housekeeping-task id sequence at the band floor, inserts the
-selected sections, then resyncs the band's identity sequences past the
-inserted ids. The restart is what makes a fresh database's first run match
+restarts the generated-id sequences (`housekeeping_tasks_id_seq`, `room_history_id_seq`)
+at the band floor, inserts the selected sections, resyncs all identity sequences
+via transactional `ALTER SEQUENCE ... RESTART WITH`, and runs `verify.rs`
+post-seed relational/currency/sequence checks before committing (`--skip-verify`
+opts out). The restart is what makes a fresh database's first run match
 every rerun: `update_room_status()` gives each room it marks dirty or
-reserved-dirty a housekeeping task whose id comes from that sequence, so those
-rows get the same in-band ids (800001 up) every time. Every run therefore
-yields the same in-band rows, ids included, and the same printed summary — a
-reset of the staging dataset, never an append. CI applies it twice to a fresh
-database and fails on any difference in the summary or in any table's in-band
-ids; a section that starts generating rows in another table needs that
-table's sequence added to `RESTART_GENERATED_IDS_SQL` in `src/bin/seed/engine.rs`.
-Wall-clock values (`created_at` defaults, UUIDv7 columns such as
-`bookings.uuid`) and the ids of out-of-band child rows such as `room_history`
-still change between runs. It never touches bootstrap rows or ids outside the
-band.
+reserved-dirty a housekeeping task whose id comes from that sequence and logs
+room transitions into `room_history`, so those rows get the same in-band ids
+(800001 up) every time. Every run therefore yields the same in-band rows, ids
+included, and the same printed summary — a reset of the staging dataset, never
+an append. CI applies it twice to a fresh database (after `apply-patches.sh`)
+and fails on any difference in the summary or in any table's in-band ids; a
+section that starts generating rows in another table needs that table's sequence
+added to `RESTART_GENERATED_IDS_SQL` in `src/bin/seed/engine.rs`. Every seeded
+timestamp derives from `staging_ref.today` (no wall-clock drift), currency fields
+match `system_settings.currency` (`MYR`), and UUIDv7 identity columns such as
+`bookings.uuid` still change between runs. It never touches bootstrap rows or
+ids outside the band.
 Explicit-id inserts use `OVERRIDING SYSTEM VALUE`, and nothing calls `random()`.
 
 Scenarios (`cargo run --bin seed -- --list` prints this registry from
@@ -150,12 +153,15 @@ canonical order, whatever order the flags were given in.
 | Scenario | Seeds |
 |---|---|
 | `basic` | Working hotel: staff, inventory, rates, guests, today's front-desk bookings |
+| `channels` | Custom booking channels alongside dynamic pricing and commission rules |
 | `availability` | Inventory grid: allocations, room-status spread, sold-out and one-left dates |
 | `booking-lifecycle` | Every booking status, comp stays, anonymous bookings |
+| `booking-groups` | Multi-room booking groups in active/paid, active/unpaid-hold, and voided states |
 | `frontdesk` | Arrivals, departures, in-house, housekeeping board, maintenance |
 | `payments` | Every payment state, invoices, city ledgers, refund/partial/retry/receipt fixtures |
 | `webhooks` | Pending PayPal payments with deterministic order ids (`PAYID-STGORDER…`) for webhook replay. No webhook store exists, so only the targets are seeded. |
 | `authentication` | Users for every role, locked/inactive/unverified accounts, a 2FA-enabled user, portal sessions |
+| `support` | Guest support inbox across all statuses with guest/staff/system messages and events |
 | `audit` | Booking and room-status history, audit markers, night-audit runs, job history |
 | `notifications` | Staff notifications with read markers, email delivery states, the suppression list |
 | `edge-cases` | Adjacent, one-night and long stays, max occupancy, aging hold, sold-out date, retry-after-failure, anonymous flows |
@@ -163,7 +169,9 @@ canonical order, whatever order the flags were given in.
 | `marketing` | Promotions in every status, vouchers and redemptions, segments, email campaigns |
 | `loyalty` | Members, tiers, points ledger, reward catalog, redemptions, complimentary credits |
 | `guest-access` | Anonymous bookings with access tokens, guest-portal sessions, user–guest links |
-| `full` | Everything. Bare `seed` and `--all` mean `full`. |
+| `ekyc` *(opt-in)* | Synthetic dev eKYC applications (`STG-SYNTH-*`), notes, and decision history across review states (excluded from `full`/`--all`) |
+| `scale` *(opt-in)* | High-volume benchmark dataset in `850000-899999`: 1k guests, 2.5k bookings/payments, 500 invoices, 400 ledgers, 1k HK tasks, 2k audits (excluded from `full`/`--all`) |
+| `full` | Everything standard. Bare `seed` and `--all` mean `full` (excludes opt-in `ekyc` and `scale`). |
 
 Safety (`guard.rs`): every run refuses when `APP_ENV`/`ENVIRONMENT` resolves to
 production (`APP_ENV` wins, as in the app's own config). `--reset` on its own
@@ -217,13 +225,11 @@ Deliberately not seeded:
 - Payroll/HR tables (none exist; only `teams`/`team_members`).
 - `cancelled`/`expired` booking statuses (the model uses `voided`, and the
   unpaid-hold scheduler handles expiry).
-- Multi-room reservations (each room is its own `bookings` row; groups link
-  them through `bookings.booking_group_id` → `booking_groups`).
 - Overlapping same-room bookings. The exclusion constraint makes them
   impossible, so overlap rejection is tested through the API instead.
-- Passkeys, eKYC evidence, and `two_factor_challenges` rows. Credentials
-  cannot be fabricated meaningfully, and fake identity-verification records
-  must not exist.
+- Passkeys, default eKYC evidence, and `two_factor_challenges` rows. Credentials
+  cannot be fabricated meaningfully, and eKYC records are strictly opt-in via
+  `--scenario ekyc` using synthetic `STG-SYNTH-*` fixtures.
 
 `audit_logs` is append-only, so seeded audit rows are id-guarded inserts that
 survive reruns. They always attribute the bootstrap admin; the nominal actor

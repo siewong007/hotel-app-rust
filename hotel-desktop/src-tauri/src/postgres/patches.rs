@@ -531,7 +531,11 @@ async fn apply_patch(
         .arg(format!("--set=patch_version={}", patch.entry.version))
         .arg(format!("--set=patch_name={}", patch.entry.name))
         .arg(format!("--set=patch_checksum={}", patch.entry.checksum))
-        .env("PGPASSWORD", &connection.password)
+        .env("PGPASSWORD", &connection.password);
+    if !connection.password.is_empty() {
+        command.env("PGREQUIREAUTH", "scram-sha-256");
+    }
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

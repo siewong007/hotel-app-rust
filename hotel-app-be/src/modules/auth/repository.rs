@@ -205,7 +205,7 @@ impl AuthRepository {
         max_attempts: i32,
         locked_until: DateTime<Utc>,
     ) -> Result<(i32, bool), ApiError> {
-        sqlx::query_as(
+        let (attempts, is_locked): (i32, bool) = sqlx::query_as(
             "UPDATE users SET \
                  failed_login_attempts = failed_login_attempts + 1, \
                  is_locked = (failed_login_attempts + 1 >= $1), \
@@ -218,7 +218,11 @@ impl AuthRepository {
         .bind(user_id)
         .fetch_one(pool)
         .await
-        .map_err(ApiError::from)
+        .map_err(ApiError::from)?;
+        if is_locked {
+            crate::core::auth::AuthService::invalidate_session_cache_for_user(pool, user_id).await;
+        }
+        Ok((attempts, is_locked))
     }
 
     pub async fn two_factor_state(
@@ -359,6 +363,7 @@ impl AuthRepository {
         language_preference: &str,
     ) -> Result<(Guest, User), ApiError> {
         let full_name = format!("{} {}", req.first_name, req.last_name);
+        let user_uuid = crate::core::db::generate_uuid();
         let guest_query = r#"
                 INSERT INTO guests (
                     first_name, last_name, nick_name, email, phone, address_line_1,
@@ -376,7 +381,11 @@ impl AuthRepository {
                           NULL::DATE AS last_stay_date
             "#;
 
-        let guest: Guest = sqlx::query_as(guest_query)
+        sqlx::query("SAVEPOINT register_guest_insert")
+            .execute(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+        let first_attempt: Result<Guest, sqlx::Error> = sqlx::query_as(guest_query)
             .bind(&req.first_name)
             .bind(&req.last_name)
             .bind(&full_name)
@@ -385,17 +394,43 @@ impl AuthRepository {
             .bind(&req.address_line1)
             .bind(language_preference)
             .fetch_one(&mut **tx)
-            .await
-            .map_err(|error| {
-                if is_guest_name_unique_violation(&error) {
-                    ApiError::Conflict(
-                        "A guest profile with this name already exists. Please sign in with your existing account or contact the hotel for help."
-                            .to_string(),
-                    )
-                } else {
-                    ApiError::from(error)
-                }
-            })?;
+            .await;
+
+        let guest: Guest = match first_attempt {
+            Ok(guest) => {
+                sqlx::query("RELEASE SAVEPOINT register_guest_insert")
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(ApiError::from)?;
+                guest
+            }
+            Err(error) if is_guest_name_unique_violation(&error) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT register_guest_insert")
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(ApiError::from)?;
+                let suffix = &user_uuid[..6];
+                let base: String = full_name.chars().take(245).collect();
+                let disambiguated_name = format!("{base} ({suffix})");
+                let retry = sqlx::query_as(guest_query)
+                    .bind(&req.first_name)
+                    .bind(&req.last_name)
+                    .bind(&disambiguated_name)
+                    .bind(&req.email)
+                    .bind(&req.phone)
+                    .bind(&req.address_line1)
+                    .bind(language_preference)
+                    .fetch_one(&mut **tx)
+                    .await
+                    .map_err(ApiError::from)?;
+                sqlx::query("RELEASE SAVEPOINT register_guest_insert")
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(ApiError::from)?;
+                retry
+            }
+            Err(error) => return Err(ApiError::from(error)),
+        };
 
         // The users table historically requires an email. Keep that internal
         // contract without exposing a fake address or triggering verification
@@ -405,7 +440,6 @@ impl AuthRepository {
             .clone()
             .unwrap_or_else(|| format!("{}@no-email.invalid", req.username));
         let is_verified = req.email.is_none();
-        let user_uuid = crate::core::db::generate_uuid();
         let user_query = r#"
                 INSERT INTO users (
                     uuid, username, email, password_hash, full_name, phone,
@@ -644,9 +678,11 @@ impl AuthRepository {
                 .await
                 .map_err(ApiError::from)?;
             // If an unverified password account previously held this email
-            // (pre-account-takeover setup), strip its password/2FA state and
-            // revoke prior sessions before linking the verified Google subject.
+            // (pre-account-takeover setup), strip its password/2FA/passkey/challenge
+            // and unbooked PII state, and revoke prior sessions before linking
+            // the verified Google subject.
             let was_verified = user.is_verified;
+            let display_name = google_display_name(identity);
             let linked = sqlx::query_as::<_, User>(
                 "UPDATE users \
                  SET google_subject = $1, \
@@ -655,6 +691,10 @@ impl AuthRepository {
                      two_factor_enabled = CASE WHEN $3 THEN two_factor_enabled ELSE false END, \
                      two_factor_secret = CASE WHEN $3 THEN two_factor_secret ELSE NULL END, \
                      two_factor_recovery_codes = CASE WHEN $3 THEN two_factor_recovery_codes ELSE NULL END, \
+                     full_name = CASE WHEN $3 THEN full_name ELSE $4 END, \
+                     phone = CASE WHEN $3 THEN phone ELSE NULL END, \
+                     email_verification_token = CASE WHEN $3 THEN email_verification_token ELSE NULL END, \
+                     email_token_expires_at = CASE WHEN $3 THEN email_token_expires_at ELSE NULL END, \
                      updated_at = CURRENT_TIMESTAMP \
                  WHERE id = $2 AND google_subject IS NULL \
                  RETURNING id, username, email, google_subject, full_name, phone, is_active, is_verified, user_type, two_factor_enabled, two_factor_secret, two_factor_recovery_codes, created_at, updated_at",
@@ -662,6 +702,7 @@ impl AuthRepository {
             .bind(&identity.subject)
             .bind(user.id)
             .bind(was_verified)
+            .bind(&display_name)
             .fetch_one(&mut *tx)
             .await;
 
@@ -685,6 +726,39 @@ impl AuthRepository {
                              WHERE guest_id = (SELECT guest_id FROM users WHERE id = $1)",
                         )
                         .bind(linked_user.id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(ApiError::from)?;
+                        sqlx::query(
+                            "UPDATE passkeys SET is_active = false WHERE user_id = $1 AND is_active = true",
+                        )
+                        .bind(linked_user.id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(ApiError::from)?;
+                        sqlx::query("DELETE FROM passkey_challenges WHERE user_id = $1")
+                            .bind(linked_user.id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(ApiError::from)?;
+                        sqlx::query("DELETE FROM two_factor_challenges WHERE user_id = $1")
+                            .bind(linked_user.id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(ApiError::from)?;
+                        sqlx::query(
+                            "UPDATE guests \
+                             SET phone = NULL, \
+                                 address_line_1 = NULL, \
+                                 first_name = COALESCE($2, first_name), \
+                                 last_name = COALESCE($3, last_name), \
+                                 updated_at = CURRENT_TIMESTAMP \
+                             WHERE id = (SELECT guest_id FROM users WHERE id = $1) \
+                               AND NOT EXISTS (SELECT 1 FROM bookings WHERE guest_id = guests.id)",
+                        )
+                        .bind(linked_user.id)
+                        .bind(identity.given_name.as_deref())
+                        .bind(identity.family_name.as_deref())
                         .execute(&mut *tx)
                         .await
                         .map_err(ApiError::from)?;
@@ -721,6 +795,10 @@ impl AuthRepository {
             };
 
             tx.commit().await.map_err(ApiError::from)?;
+            if !was_verified {
+                crate::core::auth::AuthService::invalidate_session_cache_for_user(pool, linked.id)
+                    .await;
+            }
             return Ok(existing_google_user(linked));
         }
 
@@ -933,6 +1011,33 @@ impl AuthRepository {
             guest_id: Some(guest_id),
         })
     }
+
+    /// Record a Google ID token digest in `consumed_oauth_tokens`, returning
+    /// `Ok(true)` only on the first sighting before its expiry.
+    pub async fn consume_oauth_token(
+        pool: &DbPool,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, ApiError> {
+        let _ =
+            sqlx::query("DELETE FROM consumed_oauth_tokens WHERE expires_at < CURRENT_TIMESTAMP")
+                .execute(pool)
+                .await;
+
+        let inserted = sqlx::query_scalar::<_, String>(
+            "INSERT INTO consumed_oauth_tokens (token_hash, expires_at) \
+             VALUES ($1, $2) \
+             ON CONFLICT (token_hash) DO NOTHING \
+             RETURNING token_hash",
+        )
+        .bind(token_hash)
+        .bind(expires_at)
+        .fetch_optional(pool)
+        .await
+        .map_err(ApiError::from)?;
+
+        Ok(inserted.is_some())
+    }
 }
 
 fn ensure_active_google_guest(user: &User) -> Result<(), ApiError> {
@@ -1054,6 +1159,7 @@ mod tests {
             email_verified: true,
             given_name: Some("Aisha".to_string()),
             family_name: Some("Rahman".to_string()),
+            expiry: i64::MAX,
         };
         let second = GoogleIdentity {
             subject: "google-subject-two".to_string(),
@@ -1061,6 +1167,7 @@ mod tests {
             email_verified: true,
             given_name: Some("Aisha".to_string()),
             family_name: Some("Rahman".to_string()),
+            expiry: i64::MAX,
         };
 
         assert_ne!(

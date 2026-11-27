@@ -178,6 +178,8 @@ pub const SENSITIVE_TABLES: &[&str] = &[
     "staff_notification_reads",
     "email_campaigns",
     "online_inventory_allocations",
+    // system configuration (gated behind sensitive/settings checks)
+    "system_settings",
 ];
 
 /// Whether a qualified (`public.guests`) or bare (`guests`) table name is in
@@ -219,6 +221,7 @@ pub const EXCLUDED_TABLES: &[(&str, &str)] = &[
     ("public.passkeys", "session_or_token_material"),
     ("public.passkey_challenges", "session_or_token_material"),
     ("public.two_factor_challenges", "session_or_token_material"),
+    ("public.consumed_oauth_tokens", "session_or_token_material"),
     ("public.guest_portal_sessions", "session_or_token_material"),
     (
         "public.payment_retry_capabilities",
@@ -768,8 +771,38 @@ fn stream_export(
     audit_user_id: Option<i64>,
 ) -> futures_core::stream::BoxStream<'static, Result<Bytes, ApiError>> {
     Box::pin(async_stream::try_stream! {
-        let mut tx = pool.begin().await.map_err(ApiError::from)?;
         let header = build_export_header(&pool, &tables, scope).await?;
+        if let Some(user_id) = audit_user_id {
+            crate::repositories::audit::AuditRepository::insert_event(
+                &pool,
+                crate::models::AuditEvent {
+                    user_id: Some(user_id),
+                    action: "data_export_started",
+                    resource_type: "data_transfer",
+                    details: Some(serde_json::json!({
+                        "export_id": header.export_id.to_string(),
+                        "export_type": header.export_type,
+                        "includes_sensitive_data": header.includes_sensitive_data,
+                        "table_count": tables.len(),
+                    })),
+                    ..Default::default()
+                },
+                chrono::Utc::now(),
+            )
+            .await
+            .map_err(|e| {
+                ApiError::Database(format!("Failed to record export start audit: {e}"))
+            })?;
+        }
+        let mut tx = pool.begin().await.map_err(ApiError::from)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::from)?;
+        sqlx::query("SET LOCAL statement_timeout = '120s'")
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::from)?;
         yield Bytes::from(export_doc_prefix(&header)?);
 
         let mut entity_rows: BTreeMap<String, u64> = BTreeMap::new();
@@ -954,9 +987,11 @@ pub(crate) fn expand_full_overwrite_tables(
 
 pub(crate) fn import_error_detail(error: &ApiError) -> String {
     match error {
-        ApiError::BadRequest(message)
-        | ApiError::Conflict(message)
-        | ApiError::Database(message) => message.clone(),
+        ApiError::BadRequest(message) | ApiError::Conflict(message) => message.clone(),
+        ApiError::Database(message) => {
+            log::error!("Data transfer import database error: {message}");
+            "a database error occurred while applying the backup".to_string()
+        }
         _ => error.to_string(),
     }
 }
@@ -1038,8 +1073,8 @@ mod tests {
                 "'{name}' is both transferable and excluded"
             );
         }
-        // The 34 tables outside the business-data set.
-        assert_eq!(EXCLUDED_TABLES.len(), 34);
+        // The 35 tables outside the business-data set.
+        assert_eq!(EXCLUDED_TABLES.len(), 35);
     }
 
     #[test]
@@ -1074,10 +1109,10 @@ mod tests {
         uncarried.sort_unstable();
         assert_eq!(
             uncarried,
-            vec!["public.audit_logs_default"],
-            "the system scope must carry every excluded table except the audit partition child"
+            vec!["public.audit_logs_default", "public.consumed_oauth_tokens",],
+            "the system scope must carry every excluded table except ephemeral OAuth tokens and the audit partition child"
         );
-        assert_eq!(carried.len(), EXCLUDED_TABLES.len() - 1);
+        assert_eq!(carried.len(), EXCLUDED_TABLES.len() - 2);
     }
 
     #[test]

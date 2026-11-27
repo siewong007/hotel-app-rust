@@ -272,6 +272,10 @@ pub struct UserProfileUpdate {
     pub phone: Option<String>,
     #[validate(length(max = 2048, message = "Avatar URL is too long"))]
     pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub current_password: Option<String>,
+    #[serde(default)]
+    pub totp_code: Option<String>,
 }
 
 /// Input for changing password

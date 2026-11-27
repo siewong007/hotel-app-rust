@@ -154,3 +154,15 @@ data class EkycReasonCodeDto(
     @SerialName("customer_message_template") val customerMessageTemplate: String? = null,
     @SerialName("is_active") val isActive: Boolean = true,
 )
+
+@Serializable
+data class EkycSensitiveRevealRequestDto(
+    val field: String,
+    val reason: String,
+)
+
+@Serializable
+data class EkycSensitiveRevealResponseDto(
+    val field: String,
+    val value: String? = null,
+)

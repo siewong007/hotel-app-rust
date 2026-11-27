@@ -146,6 +146,7 @@ pub async fn public_create_booking_handler(
 ) -> Result<Json<GuestBookingConfirmation>, ApiError> {
     let ip = crate::routes::extract_client_ip(&headers, peer_addr);
     require_public_capacity(&limiters.public_booking_create_ip, ip, "booking attempts").await?;
+    crate::modules::auth::turnstile::verify_request(&headers, ip, "public_booking_create").await?;
     Ok(Json(
         service::create_anonymous(
             &pool,
@@ -364,6 +365,7 @@ pub async fn public_create_group_booking_handler(
 ) -> Result<Json<GroupBookingConfirmation>, ApiError> {
     let ip = crate::routes::extract_client_ip(&headers, peer_addr);
     require_public_capacity(&limiters.public_booking_create_ip, ip, "booking attempts").await?;
+    crate::modules::auth::turnstile::verify_request(&headers, ip, "public_booking_create").await?;
     Ok(Json(
         super::group::create_anonymous(
             &pool,
@@ -453,6 +455,19 @@ pub async fn add_group_room_handler(
     Json(request): Json<super::group::AddGroupRoomRequest>,
 ) -> Result<Json<GroupBookingConfirmation>, ApiError> {
     let guest_id = guest_portal::require_guest_session(&headers, &pool).await?;
+    let ip = crate::routes::extract_client_ip(&headers, peer_addr);
+    let (ip_allowed, ip_retry_after) = limiters
+        .guest_portal_booking_create_ip
+        .check_with_retry(ip)
+        .await;
+    if !ip_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many booking attempts from this connection. Please try again in {ip_retry_after} seconds."
+            ),
+            ip_retry_after,
+        ));
+    }
     let (allowed, retry_after) = limiters
         .guest_portal_booking_create
         .check_with_retry(format!("guest:{guest_id}"))
@@ -463,7 +478,6 @@ pub async fn add_group_room_handler(
             retry_after,
         ));
     }
-    let ip = crate::routes::extract_client_ip(&headers, peer_addr);
     Ok(Json(
         super::group::add_room_for_guest(
             &pool,

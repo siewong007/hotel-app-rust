@@ -95,7 +95,7 @@ const LoginPage: React.FC = () => {
   const { login, loginWithGoogle, completeTwoFactorWithPasskey } = useAuth();
   const { t } = useTranslation('auth');
   const { locale: legalLocale } = useLegalLocale();
-  const turnstile = useTurnstile();
+  const turnstile = useTurnstile('login');
   // The inline widget solves on mount, but a guest can still out-run it -- most
   // easily on the 2FA step, where it remounts and the code is only six digits.
   // Holding the button beats rejecting a submit the guest cannot yet fix; an

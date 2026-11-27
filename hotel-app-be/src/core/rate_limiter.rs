@@ -359,6 +359,8 @@ pub struct RateLimiters {
     pub reauth_user: KeyedRateLimiter,
     /// Per-user gRPC RPC budget: 300 calls per minute.
     pub grpc_user: KeyedRateLimiter,
+    /// Per-email resend-verification budget: 3 attempts per 15 minutes.
+    pub resend_verification_email: KeyedRateLimiter,
 }
 
 impl RateLimiters {
@@ -466,7 +468,16 @@ impl RateLimiters {
                 RateLimitConfig::new(10, 300),
                 pool.clone(),
             ),
-            grpc_user: KeyedRateLimiter::postgres("grpc_user", RateLimitConfig::new(300, 60), pool),
+            grpc_user: KeyedRateLimiter::postgres(
+                "grpc_user",
+                RateLimitConfig::new(300, 60),
+                pool.clone(),
+            ),
+            resend_verification_email: KeyedRateLimiter::postgres(
+                "resend_verification_email",
+                RateLimitConfig::new(3, 900),
+                pool,
+            ),
         }
     }
 }

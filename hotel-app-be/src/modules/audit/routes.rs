@@ -87,7 +87,7 @@ async fn export_audit_logs_json(
     State(pool): State<DbPool>,
     headers: HeaderMap,
     query: Query<models::AuditLogQuery>,
-) -> Result<Json<models::AuditLogExportJson>, ApiError> {
+) -> Result<axum::response::Response, ApiError> {
     let user_id = require_permission_helper(&pool, &headers, "audit:export").await?;
     handlers::export_audit_logs_json(State(pool), Extension(user_id), query).await
 }

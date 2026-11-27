@@ -15,7 +15,6 @@ use crate::modules::communications::service as communications_service;
 use crate::modules::consent::models::{ConsentDocument, ConsentSource};
 use crate::modules::consent::service::{self as consent_service, ConsentContext, ConsentSubject};
 use crate::modules::consent::validation as consent_validation;
-use crate::modules::guests::repository::GuestRepository;
 use crate::modules::passkey::repository::PasskeyRepository;
 use crate::modules::rbac::repository::RbacRepository;
 use crate::modules::settings::repository::SettingsRepository;
@@ -38,9 +37,9 @@ pub const GOOGLE_SIGN_IN_ONLY_MESSAGE: &str = "This account uses Google sign-in"
 /// Re-authenticate an already-authenticated user before a high-value account
 /// change (currently: registering a passkey).
 ///
-/// Accepts the account password, or a TOTP code when 2FA is enabled. An
-/// account with neither is refused rather than waved through — a credential
-/// that can be minted from a bare session is not a second factor.
+/// Accepts the account password (plus a single-use TOTP code when 2FA is
+/// enabled), or a single-use TOTP code on passwordless accounts. An account
+/// with neither factor is refused rather than waved through.
 pub(crate) async fn ensure_step_up(
     pool: &DbPool,
     user_id: i64,
@@ -51,35 +50,53 @@ pub(crate) async fn ensure_step_up(
         .await
         .ok()
         .flatten();
+    let (enabled, stored) = AuthRepository::two_factor_state(pool, user_id).await?;
+    let two_factor_enabled = enabled.unwrap_or(false);
 
-    if let (Some(supplied), Some(hash)) = (password, stored_hash.as_deref())
-        && AuthService::verify_password(supplied, hash)
+    if stored_hash.is_none() && !two_factor_enabled {
+        return Err(ApiError::BadRequest(
+            "Set a password or enable two-factor authentication before performing this action."
+                .to_string(),
+        ));
+    }
+
+    if let Some(hash) = stored_hash.as_deref() {
+        let password_ok = match password.filter(|value| !value.is_empty()) {
+            Some(supplied) => AuthService::verify_password(supplied, hash)
+                .await
+                .unwrap_or(false),
+            None => false,
+        };
+        if !password_ok {
+            return Err(ApiError::Unauthorized(if two_factor_enabled {
+                "Re-enter your password and two-factor code to continue.".to_string()
+            } else {
+                "Re-enter your password to continue.".to_string()
+            }));
+        }
+        if !two_factor_enabled {
+            return Ok(());
+        }
+    }
+
+    // Password factor already cleared (or account is passwordless); consume the
+    // single-use TOTP step only after that check so a wrong password never spends
+    // a valid authenticator code.
+    if let (Some(code), Some(stored_secret)) =
+        (totp_code.filter(|c| !c.is_empty()), stored.as_deref())
+        && let Ok(secret) = AuthService::decrypt_stored_totp_secret(stored_secret)
+        && AuthService::verify_and_consume_totp_code(pool, user_id, &secret, code)
             .await
             .unwrap_or(false)
     {
         return Ok(());
     }
 
-    let (enabled, stored) = AuthRepository::two_factor_state(pool, user_id).await?;
-    let two_factor_enabled = enabled.unwrap_or(false);
-    if two_factor_enabled
-        && let (Some(code), Some(stored_secret)) = (totp_code, stored.as_deref())
-        && let Ok(secret) = AuthService::decrypt_stored_totp_secret(stored_secret)
-        && AuthService::verify_totp_code(&secret, code).unwrap_or(false)
-    {
-        return Ok(());
-    }
-
-    if stored_hash.is_none() && !two_factor_enabled {
-        return Err(ApiError::BadRequest(
-            "Set a password or enable two-factor authentication before registering a passkey."
-                .to_string(),
-        ));
-    }
-
-    Err(ApiError::Unauthorized(
-        "Re-enter your password (or a two-factor code) to register a passkey.".to_string(),
-    ))
+    Err(ApiError::Unauthorized(if stored_hash.is_some() {
+        "Re-enter your password and two-factor code to continue.".to_string()
+    } else {
+        "Enter your two-factor code to continue.".to_string()
+    }))
 }
 
 /// How long the token that carries a verified password into the sign-in
@@ -305,16 +322,13 @@ pub async fn login(
         }
     };
 
-    ensure_not_locked(pool, user.id, &req.username, ip_address, user_agent).await?;
-
-    let Some(password_hash) = AuthRepository::password_hash(pool, user.id).await? else {
+    let password_hash = AuthRepository::password_hash(pool, user.id).await?;
+    let Some(password_hash) = password_hash else {
         // Passwordless account (Google sign-in): run a cost-matched dummy
-        // bcrypt check so response timing matches a normal account before
-        // returning the translated Google sign-in hint.
+        // bcrypt check and return the same generic error as an unknown
+        // identifier so /auth/login cannot enumerate Google-linked emails.
         let _ = AuthService::verify_password(&req.password, DUMMY_PASSWORD_HASH).await;
-        return Err(ApiError::Unauthorized(
-            GOOGLE_SIGN_IN_ONLY_MESSAGE.to_string(),
-        ));
+        return Err(ApiError::Unauthorized("Invalid credentials".to_string()));
     };
 
     let valid = AuthService::verify_password(&req.password, &password_hash)
@@ -322,17 +336,29 @@ pub async fn login(
         .map_err(|_| ApiError::Internal("Password verification failed".to_string()))?;
 
     if !valid {
-        let _remaining = record_failed_login(
-            pool,
-            user.id,
-            &req.username,
-            "Invalid password",
-            ip_address,
-            user_agent,
-        )
-        .await?;
+        let already_locked =
+            ensure_not_locked(pool, user.id, &req.username, ip_address, user_agent)
+                .await
+                .is_err();
+        if !already_locked {
+            // Count the miss, but mask any lockout response with 401 so
+            // unauthenticated password guesses cannot probe account lock state.
+            let _ = record_failed_login(
+                pool,
+                user.id,
+                &req.username,
+                "Invalid password",
+                ip_address,
+                user_agent,
+            )
+            .await;
+        }
         return Err(ApiError::Unauthorized("Invalid credentials".to_string()));
     }
+
+    // Only enforce lockout explicitly AFTER the password verified so
+    // unauthenticated probes cannot learn lock status from HTTP 429.
+    ensure_not_locked(pool, user.id, &req.username, ip_address, user_agent).await?;
 
     // Checked only after the password verifies: reporting an unverified
     // account any earlier would confirm the identifier is registered to
@@ -383,13 +409,16 @@ pub async fn login(
         // 2FA-disable flow uses. Recovery codes must work here: this is the
         // only unauthenticated surface, so without it a user who lost their
         // authenticator is locked out despite holding valid codes.
-        let valid_totp = match AuthService::verify_totp_code(&secret, submitted_code) {
-            Ok(valid) => valid,
-            Err(error) => {
-                log::warn!("TOTP verification errored for user {}: {error}", user.id);
-                false
-            }
-        };
+        let valid_totp =
+            match AuthService::verify_and_consume_totp_code(pool, user.id, &secret, submitted_code)
+                .await
+            {
+                Ok(valid) => valid,
+                Err(error) => {
+                    log::warn!("TOTP verification errored for user {}: {error}", user.id);
+                    false
+                }
+            };
         if !valid_totp {
             let recovery_codes = user.two_factor_recovery_codes.clone().unwrap_or_default();
             // check_recovery_code identifies the matching stored entry
@@ -494,6 +523,14 @@ pub async fn login_with_google(
         crate::core::config::get().google_client_id.as_deref(),
     )
     .await?;
+    let token_hash = AuthService::hash_refresh_token(credential);
+    let expires_at = DateTime::from_timestamp(identity.expiry, 0)
+        .unwrap_or_else(|| Utc::now() + Duration::hours(1));
+    if !AuthRepository::consume_oauth_token(pool, &token_hash, expires_at).await? {
+        return Err(ApiError::Unauthorized(
+            "Google credential has already been used. Please sign in again.".to_string(),
+        ));
+    }
     let consent_context = ConsentContext {
         ip_address: ip_address.map(str::to_string),
         user_agent: user_agent.map(str::to_string),
@@ -776,10 +813,33 @@ pub async fn refresh_token(
     req.validate()
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
-    let (user_id, session_id) = AuthService::validate_refresh_token(pool, &req.refresh_token)
+    let (user_id, session_id) = match AuthService::validate_refresh_token(pool, &req.refresh_token)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?
-        .ok_or_else(|| ApiError::Unauthorized("Invalid or expired refresh token".to_string()))?;
+    {
+        Some(session) => session,
+        None => {
+            if let Ok(Some((reused_user_id, reused_session_id))) =
+                AuthService::revoke_session_if_reused_refresh_token(pool, &req.refresh_token).await
+            {
+                let _ = AuditLog::log_event(
+                    pool,
+                    AuditEvent {
+                        user_id: Some(reused_user_id),
+                        action: "refresh_token_reused",
+                        resource_type: "session",
+                        resource_id: None,
+                        details: Some(json!({ "session_id": reused_session_id })),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            }
+            return Err(ApiError::Unauthorized(
+                "Invalid or expired refresh token".to_string(),
+            ));
+        }
+    };
 
     let user = AuthRepository::find_user_by_id(pool, user_id)
         .await?
@@ -825,6 +885,22 @@ pub async fn refresh_token(
     .await
     .map_err(|e| ApiError::Database(format!("Failed to rotate refresh token: {}", e)))?;
     if !rotated {
+        if let Ok(Some((reused_user_id, reused_session_id))) =
+            AuthService::revoke_session_if_reused_refresh_token(pool, &req.refresh_token).await
+        {
+            let _ = AuditLog::log_event(
+                pool,
+                AuditEvent {
+                    user_id: Some(reused_user_id),
+                    action: "refresh_token_reused",
+                    resource_type: "session",
+                    resource_id: None,
+                    details: Some(json!({ "session_id": reused_session_id })),
+                    ..Default::default()
+                },
+            )
+            .await;
+        }
         return Err(ApiError::Unauthorized(
             "Refresh token was already used or revoked".to_string(),
         ));
@@ -910,17 +986,6 @@ pub async fn register(
     if AuthRepository::username_or_email_exists(pool, &req.username, req.email.as_deref()).await? {
         return Err(ApiError::BadRequest(
             "Username or email already exists".to_string(),
-        ));
-    }
-
-    let full_name = format!("{} {}", req.first_name, req.last_name);
-    if GuestRepository::nick_name_conflict_id(pool, &full_name, None)
-        .await?
-        .is_some()
-    {
-        return Err(ApiError::Conflict(
-            "A guest profile with this name already exists. Please sign in with your existing account or contact the hotel for help."
-                .to_string(),
         ));
     }
 
@@ -1026,7 +1091,7 @@ pub async fn resend_verification(
     // The response is deliberately generic (it must not reveal whether an
     // address is registered), which is exactly why this used to be able to
     // claim "a new email has been sent" while sending nothing.
-    account_emails::try_send_email_verification(pool, user.id).await;
+    account_emails::try_resend_email_verification(pool, user.id).await;
 
     Ok(generic_verification_response())
 }

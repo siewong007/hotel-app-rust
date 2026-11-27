@@ -28,4 +28,22 @@ class ServerUrlNormalizerTest {
     fun `rejects blank input`() {
         assertTrue(ServerUrlNormalizer.normalize("   ", allowCleartext = true).isFailure)
     }
+
+    @Test
+    fun `preserves brackets on IPv6 literal URLs`() {
+        val res = ServerUrlNormalizer.normalize("http://[::1]:3030/", allowCleartext = true)
+        assertEquals("http://[::1]:3030", res.getOrThrow())
+    }
+
+    @Test
+    fun `strips accidental trailing api and health suffixes`() {
+        assertEquals(
+            "https://saliminn.my",
+            ServerUrlNormalizer.normalize("https://saliminn.my/api/", allowCleartext = false).getOrThrow(),
+        )
+        assertEquals(
+            "http://10.0.2.2:3030",
+            ServerUrlNormalizer.normalize("http://10.0.2.2:3030/health", allowCleartext = true).getOrThrow(),
+        )
+    }
 }

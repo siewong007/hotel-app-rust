@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -59,13 +60,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,6 +77,7 @@ import com.hotelapp.staff.BuildConfig
 import com.hotelapp.staff.core.auth.StaffSession
 import com.hotelapp.staff.core.config.ServerConfigStore
 import com.hotelapp.staff.core.design.ConfirmActionDialog
+import com.hotelapp.staff.core.design.EmptyStateView
 import com.hotelapp.staff.core.design.HotelAvatar
 import com.hotelapp.staff.core.design.HotelCard
 import com.hotelapp.staff.core.design.HotelModalSheetContainer
@@ -84,13 +86,16 @@ import com.hotelapp.staff.core.design.HotelSegmentedControl
 import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.ListCardSkeleton
+import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
 import com.hotelapp.staff.core.design.ThemePreference
+import com.hotelapp.staff.core.design.findActivity
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
 import com.hotelapp.staff.core.format.DateFormatter
 import com.hotelapp.staff.core.format.StatusFormatter
 import com.hotelapp.staff.data.dto.UserSessionInfoDto
 import com.hotelapp.staff.data.repository.AuthRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,7 +106,10 @@ data class SessionsUiState(
     val isLoading: Boolean = false,
     val sessions: List<UserSessionInfoDto> = emptyList(),
     val error: String? = null,
+    val revokingSessionId: String? = null,
+    val revokeError: String? = null,
     val revokeNotice: String? = null,
+    val isLoggingOut: Boolean = false,
 )
 
 class MoreViewModel(
@@ -111,6 +119,7 @@ class MoreViewModel(
 
     private val _sessionsState = MutableStateFlow(SessionsUiState())
     val sessionsState: StateFlow<SessionsUiState> = _sessionsState.asStateFlow()
+    private var sessionsJob: Job? = null
 
     fun setTheme(preference: ThemePreference) {
         viewModelScope.launch {
@@ -134,36 +143,62 @@ class MoreViewModel(
         _sessionsState.update { it.copy(revokeNotice = null) }
     }
 
+    fun clearRevokeError() {
+        _sessionsState.update { it.copy(revokeError = null) }
+    }
+
     fun loadSessions() {
-        viewModelScope.launch {
-            _sessionsState.update { it.copy(isLoading = true, error = null) }
+        sessionsJob?.cancel()
+        sessionsJob = viewModelScope.launch {
+            _sessionsState.update { it.copy(isLoading = true, error = null, revokeError = null) }
             authRepository.listSessions()
                 .onSuccess { list ->
                     _sessionsState.update { it.copy(isLoading = false, sessions = list) }
                 }
                 .onFailure { err ->
-                    _sessionsState.update { it.copy(isLoading = false, error = err.message) }
+                    _sessionsState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = err.message ?: "Unable to load signed-in sessions.",
+                        )
+                    }
                 }
         }
     }
 
-    fun revokeSession(id: String) {
+    fun revokeSession(id: String, onSuccess: () -> Unit = {}) {
+        if (_sessionsState.value.revokingSessionId != null) return
+        _sessionsState.update { it.copy(revokingSessionId = id, revokeError = null) }
         viewModelScope.launch {
             authRepository.revokeSession(id)
                 .onSuccess {
-                    _sessionsState.update { it.copy(revokeNotice = "Session revoked.") }
+                    _sessionsState.update {
+                        it.copy(revokingSessionId = null, revokeNotice = "Session revoked.")
+                    }
+                    onSuccess()
                     loadSessions()
                 }
                 .onFailure { err ->
-                    _sessionsState.update { it.copy(error = err.message) }
+                    _sessionsState.update {
+                        it.copy(
+                            revokingSessionId = null,
+                            revokeError = err.message ?: "Unable to revoke session.",
+                        )
+                    }
                 }
         }
     }
 
     fun logout(onComplete: () -> Unit) {
+        if (_sessionsState.value.isLoggingOut) return
+        _sessionsState.update { it.copy(isLoggingOut = true) }
         viewModelScope.launch {
-            authRepository.logout()
-            onComplete()
+            try {
+                authRepository.logout()
+                onComplete()
+            } finally {
+                _sessionsState.update { it.copy(isLoggingOut = false) }
+            }
         }
     }
 }
@@ -183,6 +218,7 @@ fun MoreScreen(
     pendingSyncCount: Int = 0,
     onSyncNow: () -> Unit = {},
     staffNotificationManager: StaffNotificationManager? = null,
+    onBiometricEnabled: () -> Unit = {},
 ) {
     val colors = HotelTheme.colors
     val context = LocalContext.current
@@ -192,12 +228,26 @@ fun MoreScreen(
     var showSessionsSheet by remember { mutableStateOf(false) }
     var revokeTargetSession by remember { mutableStateOf<UserSessionInfoDto?>(null) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
-    val canUseBiometrics = remember(context) { BiometricLockManager.canAuthenticate(context) }
+    var canUseBiometrics by remember(context) {
+        mutableStateOf(BiometricLockManager.canAuthenticate(context))
+    }
+    var hasNotificationPermission by remember(context, staffNotificationManager) {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                staffNotificationManager?.hasNotificationPermission() == true,
+        )
+    }
+    OnResumeRefreshEffect {
+        canUseBiometrics = BiometricLockManager.canAuthenticate(context)
+        hasNotificationPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            staffNotificationManager?.hasNotificationPermission() == true
+    }
+
     val notificationPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
+        hasNotificationPermission = granted
         if (granted) {
             viewModel.setOsNotifications(true)
             onShowMessage("System operational alerts enabled.")
@@ -213,12 +263,14 @@ fun MoreScreen(
     val canReadEkyc = session.hasPermission("ekyc:read")
     val displayName = session.user.fullName?.takeIf { it.isNotBlank() } ?: session.user.username
 
-    LaunchedEffect(sessionsState.revokeNotice) {
+    LaunchedEffect(sessionsState.revokeNotice, showSessionsSheet) {
         val msg = sessionsState.revokeNotice
         if (msg != null) {
             haptics.confirm()
-            onShowMessage(msg)
-            viewModel.clearRevokeNotice()
+            if (!showSessionsSheet) {
+                onShowMessage(msg)
+                viewModel.clearRevokeNotice()
+            }
         }
     }
 
@@ -345,7 +397,51 @@ fun MoreScreen(
                 color = colors.textPrimary,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
             )
+            val canToggleBiometric = canUseBiometrics || config.biometricLockEnabled
+            val onToggleBiometric: (Boolean) -> Unit = { wantEnable ->
+                val act = context.findActivity() as? FragmentActivity
+                if (!wantEnable) {
+                    if (canUseBiometrics && act != null) {
+                        BiometricLockManager.authenticate(
+                            activity = act,
+                            title = "Disable Biometric App Lock",
+                            subtitle = "Verify your identity to disable lock",
+                            onSuccess = {
+                                viewModel.setBiometricLock(false)
+                                onShowMessage("Biometric app lock disabled.")
+                            },
+                            onError = { err -> onShowMessage(err) },
+                        )
+                    } else {
+                        viewModel.setBiometricLock(false)
+                        onShowMessage("Biometric app lock disabled.")
+                    }
+                } else {
+                    if (act != null) {
+                        BiometricLockManager.authenticate(
+                            activity = act,
+                            title = "Enable Biometric App Lock",
+                            subtitle = "Verify your identity to enable lock",
+                            onSuccess = {
+                                onBiometricEnabled()
+                                viewModel.setBiometricLock(true)
+                                onShowMessage("Biometric app lock enabled.")
+                            },
+                            onError = { err -> onShowMessage(err) },
+                        )
+                    } else {
+                        onBiometricEnabled()
+                        viewModel.setBiometricLock(true)
+                    }
+                }
+            }
             ListItem(
+                modifier = Modifier.toggleable(
+                    value = config.biometricLockEnabled,
+                    enabled = canToggleBiometric,
+                    role = Role.Switch,
+                    onValueChange = onToggleBiometric,
+                ),
                 leadingContent = {
                     Icon(Icons.Outlined.Fingerprint, contentDescription = null, tint = colors.primaryOnSurface)
                 },
@@ -354,7 +450,11 @@ fun MoreScreen(
                 },
                 supportingContent = {
                     Text(
-                        text = if (canUseBiometrics) "Require fingerprint or PIN when returning after idle" else "Biometric/PIN not configured on device",
+                        text = when {
+                            canUseBiometrics -> "Require fingerprint or PIN when returning after idle"
+                            config.biometricLockEnabled -> "Device credentials unavailable — tap to turn off lock"
+                            else -> "Biometric/PIN not configured on device"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                     )
@@ -362,28 +462,8 @@ fun MoreScreen(
                 trailingContent = {
                     Switch(
                         checked = config.biometricLockEnabled,
-                        enabled = canUseBiometrics,
-                        onCheckedChange = { wantEnable ->
-                            if (!wantEnable) {
-                                viewModel.setBiometricLock(false)
-                            } else {
-                                val act = context as? FragmentActivity
-                                if (act != null) {
-                                    BiometricLockManager.authenticate(
-                                        activity = act,
-                                        title = "Enable Biometric App Lock",
-                                        subtitle = "Verify your identity to enable lock",
-                                        onSuccess = {
-                                            viewModel.setBiometricLock(true)
-                                            onShowMessage("Biometric app lock enabled.")
-                                        },
-                                        onError = { err -> onShowMessage(err) },
-                                    )
-                                } else {
-                                    viewModel.setBiometricLock(true)
-                                }
-                            }
-                        },
+                        enabled = canToggleBiometric,
+                        onCheckedChange = null,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = colors.primaryContrastText,
                             checkedTrackColor = colors.primaryMain,
@@ -393,7 +473,26 @@ fun MoreScreen(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
             HorizontalDivider(color = colors.borderSubtle, modifier = Modifier.padding(horizontal = 14.dp))
+            val effectiveOsNotifications = config.osNotificationsEnabled && hasNotificationPermission
+            val onToggleOsNotifications: (Boolean) -> Unit = { wantEnable ->
+                if (!wantEnable) {
+                    viewModel.setOsNotifications(false)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    staffNotificationManager?.hasNotificationPermission() != true
+                ) {
+                    notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    hasNotificationPermission = true
+                    viewModel.setOsNotifications(true)
+                    onShowMessage("System operational alerts enabled.")
+                }
+            }
             ListItem(
+                modifier = Modifier.toggleable(
+                    value = effectiveOsNotifications,
+                    role = Role.Switch,
+                    onValueChange = onToggleOsNotifications,
+                ),
                 leadingContent = {
                     Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = colors.primaryOnSurface)
                 },
@@ -402,26 +501,19 @@ fun MoreScreen(
                 },
                 supportingContent = {
                     Text(
-                        text = "Android status-bar alerts for arrivals, payments & repairs",
+                        text = if (config.osNotificationsEnabled && !hasNotificationPermission) {
+                            "Android notification permission is denied — tap to grant"
+                        } else {
+                            "Android status-bar alerts for arrivals, payments & repairs"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                     )
                 },
                 trailingContent = {
                     Switch(
-                        checked = config.osNotificationsEnabled,
-                        onCheckedChange = { wantEnable ->
-                            if (!wantEnable) {
-                                viewModel.setOsNotifications(false)
-                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                staffNotificationManager?.hasNotificationPermission() != true
-                            ) {
-                                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                viewModel.setOsNotifications(true)
-                                onShowMessage("System operational alerts enabled.")
-                            }
-                        },
+                        checked = effectiveOsNotifications,
+                        onCheckedChange = null,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = colors.primaryContrastText,
                             checkedTrackColor = colors.primaryMain,
@@ -526,16 +618,26 @@ fun MoreScreen(
             message = "Sign out from ${config.hotelName} on this device?",
             confirmLabel = "Sign Out",
             isDestructive = true,
+            isSubmitting = sessionsState.isLoggingOut,
             onConfirm = {
-                showLogoutConfirm = false
-                scope.launch { viewModel.logout {} }
+                viewModel.logout { showLogoutConfirm = false }
             },
-            onDismiss = { showLogoutConfirm = false },
+            onDismiss = { if (!sessionsState.isLoggingOut) showLogoutConfirm = false },
         )
     }
 
     if (showSessionsSheet) {
-        HotelModalSheetContainer(onDismiss = { showSessionsSheet = false }) {
+        val isRevokingAny = sessionsState.revokingSessionId != null
+        HotelModalSheetContainer(
+            dismissible = !isRevokingAny,
+            onDismiss = {
+                if (!isRevokingAny) {
+                    viewModel.clearRevokeNotice()
+                    viewModel.clearRevokeError()
+                    showSessionsSheet = false
+                }
+            },
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -552,7 +654,10 @@ fun MoreScreen(
                         style = MaterialTheme.typography.titleLarge,
                         color = colors.textPrimary,
                     )
-                    IconButton(onClick = viewModel::loadSessions) {
+                    IconButton(
+                        onClick = viewModel::loadSessions,
+                        enabled = !sessionsState.isLoading && !isRevokingAny,
+                    ) {
                         Icon(
                             imageVector = Icons.Outlined.Refresh,
                             contentDescription = "Refresh sessions",
@@ -561,59 +666,92 @@ fun MoreScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
+                sessionsState.revokeNotice?.let { notice ->
+                    InlineAlertBanner(
+                        message = notice,
+                        tone = colors.success,
+                        onDismiss = viewModel::clearRevokeNotice,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                sessionsState.revokeError?.let { revErr ->
+                    InlineAlertBanner(
+                        message = revErr,
+                        tone = colors.danger,
+                        onDismiss = viewModel::clearRevokeError,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 when {
-                    sessionsState.isLoading -> ListCardSkeleton(
+                    sessionsState.isLoading && sessionsState.sessions.isEmpty() -> ListCardSkeleton(
                         count = 3,
                         modifier = Modifier.height(260.dp),
                     )
-                    sessionsState.error != null -> InlineAlertBanner(
+                    sessionsState.error != null && sessionsState.sessions.isEmpty() -> InlineAlertBanner(
                         message = sessionsState.error!!,
                         tone = colors.danger,
                     )
-                    else -> LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(bottom = 24.dp),
-                    ) {
-                        items(sessionsState.sessions, key = { it.id }) { s ->
-                            HotelCard(
-                                accentColor = if (s.isCurrent) colors.success.fg else null,
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
+                    sessionsState.sessions.isEmpty() -> EmptyStateView(
+                        title = "No active sessions",
+                        subtitle = "No signed-in devices were found for this staff account.",
+                    )
+                    else -> {
+                        sessionsState.error?.let { refreshErr ->
+                            InlineAlertBanner(
+                                message = refreshErr,
+                                tone = colors.danger,
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(bottom = 24.dp),
+                        ) {
+                            items(sessionsState.sessions, key = { it.id }) { s ->
+                                HotelCard(
+                                    accentColor = if (s.isCurrent) colors.success.fg else null,
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = s.userAgent ?: "Unknown Device",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = colors.textPrimary,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        val meta = listOfNotNull(s.location, s.ipAddress).joinToString(" · ")
-                                        if (meta.isNotEmpty()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = meta,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = colors.textSecondary,
+                                                text = s.userAgent ?: "Unknown Device",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = colors.textPrimary,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            val meta = listOfNotNull(s.location, s.ipAddress).joinToString(" · ")
+                                            if (meta.isNotEmpty()) {
+                                                Text(
+                                                    text = meta,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = colors.textSecondary,
+                                                )
+                                            }
+                                            Text(
+                                                text = "Signed in ${DateFormatter.formatRelativeTimestamp(s.createdAt)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.textMuted,
                                             )
                                         }
-                                        Text(
-                                            text = "Signed in ${DateFormatter.formatRelativeTimestamp(s.createdAt)}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colors.textMuted,
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    if (s.isCurrent) {
-                                        StatusPill(label = "Current", tone = colors.success, leadingDot = true)
-                                    } else {
-                                        HotelOutlinedButton(
-                                            text = "Revoke",
-                                            isDestructive = true,
-                                            onClick = { revokeTargetSession = s },
-                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        if (s.isCurrent) {
+                                            StatusPill(label = "Current", tone = colors.success, leadingDot = true)
+                                        } else {
+                                            HotelOutlinedButton(
+                                                text = if (sessionsState.revokingSessionId == s.id) "Revoking..." else "Revoke",
+                                                isDestructive = true,
+                                                enabled = !isRevokingAny,
+                                                onClick = {
+                                                    viewModel.clearRevokeError()
+                                                    revokeTargetSession = s
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -625,17 +763,25 @@ fun MoreScreen(
     }
 
     revokeTargetSession?.let { target ->
+        val isRevokingTarget = sessionsState.revokingSessionId == target.id
         ConfirmActionDialog(
             title = "Revoke Device Session",
             message = "Sign out \"${target.userAgent ?: "Unknown Device"}\" immediately?",
             confirmLabel = "Revoke",
             isDestructive = true,
+            isSubmitting = isRevokingTarget,
+            errorMessage = sessionsState.revokeError,
             onConfirm = {
-                val id = target.id
-                revokeTargetSession = null
-                viewModel.revokeSession(id)
+                viewModel.revokeSession(target.id) {
+                    revokeTargetSession = null
+                }
             },
-            onDismiss = { revokeTargetSession = null },
+            onDismiss = {
+                if (!isRevokingTarget) {
+                    viewModel.clearRevokeError()
+                    revokeTargetSession = null
+                }
+            },
         )
     }
 }

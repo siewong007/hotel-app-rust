@@ -1,6 +1,8 @@
 package com.hotelapp.staff.core.network
 
 import com.hotelapp.staff.BuildConfig
+import com.hotelapp.staff.core.auth.AuthState
+import com.hotelapp.staff.core.auth.RequestAuthContext
 import com.hotelapp.staff.core.auth.SessionManager
 import com.hotelapp.staff.core.config.ServerConfigStore
 import com.hotelapp.staff.data.dto.RefreshTokenResponseDto
@@ -75,7 +77,7 @@ class TwoFactorExpiredException(
 
 class TwoFactorEnrollmentRequiredException(
     message: String,
-) : ApiException(message, statusCode = 401, code = "two_factor_enrollment_required")
+) : ApiException(message, statusCode = 403, code = "two_factor_enrollment_required")
 
 class RateLimitedException(
     message: String,
@@ -203,6 +205,20 @@ suspend inline fun <T> safeApiCall(crossinline block: suspend () -> T): Result<T
         Result.failure(ApiErrorParser.fromThrowable(t))
     }
 
+suspend inline fun <T> runSuspendCatching(crossinline block: suspend () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (ce: CancellationException) {
+        throw ce
+    } catch (t: Throwable) {
+        Result.failure(t)
+    }
+
+data class RequestSessionTag(
+    val generation: Long,
+    val origin: String,
+)
+
 class BaseUrlInterceptor(
     private val baseUrlProvider: () -> String,
 ) : Interceptor {
@@ -212,7 +228,7 @@ class BaseUrlInterceptor(
             return chain.proceed(original)
         }
         val target = baseUrlProvider().toHttpUrlOrNull()
-            ?: return chain.proceed(original)
+            ?: throw IOException("Invalid configured server URL")
 
         val basePrefix = target.encodedPath.trimEnd('/')
         val reqPath = original.url.encodedPath
@@ -235,6 +251,8 @@ class AuthInterceptor(
     private val timezoneProvider: () -> String? = { sanitizeTimezone(TimeZone.getDefault().id) },
     private val languageProvider: () -> String = { Locale.getDefault().toLanguageTag() },
     private val baseUrlProvider: () -> String = { "" },
+    private val tokenForOriginProvider: ((String) -> String?)? = null,
+    private val requestAuthContextForOriginProvider: ((String) -> RequestAuthContext?)? = null,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
@@ -257,8 +275,11 @@ class AuthInterceptor(
         val skipAuthHeader = path == "/health" ||
             path.endsWith("/auth/login") ||
             path.endsWith("/auth/refresh") ||
+            path.endsWith("/auth/logout") ||
             path.endsWith("/auth/register") ||
-            path.contains("/auth/passkey/login/")
+            path.contains("/auth/passkey/login/") ||
+            path.contains("/auth/passkey/2fa/")
+        val requestOrigin = SessionManager.originOf(original.url)
         val configuredBase = baseUrlProvider().trim()
         val matchesConfiguredOrigin = if (configuredBase.isEmpty()) {
             true
@@ -271,8 +292,22 @@ class AuthInterceptor(
         }
 
         if (!skipAuthHeader && matchesConfiguredOrigin && original.header("Authorization") == null) {
-            accessTokenProvider()?.let { token ->
-                builder.header("Authorization", "Bearer $token")
+            val contextAuth = requestAuthContextForOriginProvider?.invoke(requestOrigin)
+            if (contextAuth != null) {
+                builder.header("Authorization", "Bearer ${contextAuth.token}")
+                builder.tag(
+                    RequestSessionTag::class.java,
+                    RequestSessionTag(contextAuth.generation, contextAuth.origin),
+                )
+            } else {
+                val token = if (tokenForOriginProvider != null) {
+                    tokenForOriginProvider.invoke(requestOrigin)
+                } else {
+                    accessTokenProvider()
+                }
+                token?.let {
+                    builder.header("Authorization", "Bearer $it")
+                }
             }
         }
 
@@ -295,12 +330,120 @@ class AuthInterceptor(
     }
 }
 
-class TokenAuthenticator(
+sealed interface TokenRefreshOutcome {
+    data class Success(val accessToken: String) : TokenRefreshOutcome
+    data object AuthRejected : TokenRefreshOutcome
+    data object TransientFailure : TokenRefreshOutcome
+}
+
+class SingleFlightTokenRefresher(
     private val sessionManager: SessionManager,
-    private val refreshTokenCall: () -> String?,
+    private val refreshClient: OkHttpClient,
+    private val baseUrlProvider: () -> String,
+) {
+    private val lock = Any()
+
+    fun refreshIfStale(
+        failedToken: String?,
+        expectedGeneration: Long? = null,
+        expectedOrigin: String? = null,
+    ): TokenRefreshOutcome {
+        if (failedToken.isNullOrBlank()) return TokenRefreshOutcome.TransientFailure
+        synchronized(lock) {
+            val startGeneration = sessionManager.currentGeneration()
+            if (expectedGeneration != null && expectedGeneration != startGeneration) {
+                return TokenRefreshOutcome.TransientFailure
+            }
+            if (sessionManager.authState.value is AuthState.Unauthenticated) {
+                return TokenRefreshOutcome.TransientFailure
+            }
+            val targetOrigin = SessionManager.normalizeOrigin(baseUrlProvider())
+            if (expectedOrigin != null && targetOrigin != null && !expectedOrigin.equals(targetOrigin, ignoreCase = true)) {
+                return TokenRefreshOutcome.TransientFailure
+            }
+            val latestToken = if (targetOrigin != null) {
+                sessionManager.getAccessTokenForOrigin(targetOrigin)
+            } else {
+                sessionManager.getAccessToken()
+            }
+            if (!latestToken.isNullOrBlank() && latestToken != failedToken) {
+                return TokenRefreshOutcome.Success(latestToken)
+            }
+            val outcome = NetworkFactory.refreshAccessTokenOutcome(refreshClient)
+            val currentOrigin = SessionManager.normalizeOrigin(baseUrlProvider())
+            val endGeneration = sessionManager.currentGeneration()
+            val endState = sessionManager.authState.value
+            if (endGeneration != startGeneration || endState is AuthState.Unauthenticated) {
+                return TokenRefreshOutcome.TransientFailure
+            }
+            if (targetOrigin != null && currentOrigin != targetOrigin) {
+                return if (outcome is TokenRefreshOutcome.Success) {
+                    TokenRefreshOutcome.AuthRejected
+                } else {
+                    TokenRefreshOutcome.TransientFailure
+                }
+            }
+            when (outcome) {
+                is TokenRefreshOutcome.Success -> sessionManager.updateAccessToken(outcome.accessToken, origin = targetOrigin)
+                TokenRefreshOutcome.AuthRejected -> sessionManager.forceUnauthenticated()
+                TokenRefreshOutcome.TransientFailure -> Unit
+            }
+            return outcome
+        }
+    }
+}
+
+class TokenAuthenticator private constructor(
+    private val sessionManager: SessionManager,
+    private val configuredOriginProvider: () -> String?,
+    private val refreshTokenOutcome: (failedToken: String?, expectedGeneration: Long?, expectedOrigin: String?) -> TokenRefreshOutcome,
 ) : Authenticator {
 
-    private val lock = Any()
+    private val fallbackLock = Any()
+
+    constructor(
+        sessionManager: SessionManager,
+        refreshTokenCall: () -> String?,
+    ) : this(
+        sessionManager = sessionManager,
+        configuredOriginProvider = { null },
+        refreshTokenOutcome = legacyRefreshOutcome(sessionManager, refreshTokenCall),
+    )
+
+    companion object {
+        fun fromOutcome(
+            sessionManager: SessionManager,
+            configuredOriginProvider: () -> String? = { null },
+            refreshTokenOutcome: (failedToken: String?, expectedGeneration: Long?, expectedOrigin: String?) -> TokenRefreshOutcome,
+        ): TokenAuthenticator = TokenAuthenticator(
+            sessionManager = sessionManager,
+            configuredOriginProvider = configuredOriginProvider,
+            refreshTokenOutcome = refreshTokenOutcome,
+        )
+
+        private fun legacyRefreshOutcome(
+            sessionManager: SessionManager,
+            refreshTokenCall: () -> String?,
+        ): (String?, Long?, String?) -> TokenRefreshOutcome = { failedToken, expectedGeneration, _ ->
+            if (expectedGeneration != null && expectedGeneration != sessionManager.currentGeneration()) {
+                TokenRefreshOutcome.TransientFailure
+            } else {
+                val latest = sessionManager.getAccessToken()
+                if (!latest.isNullOrBlank() && latest != failedToken) {
+                    TokenRefreshOutcome.Success(latest)
+                } else {
+                    val token = runCatching { refreshTokenCall() }.getOrNull()
+                    if (!token.isNullOrBlank()) {
+                        sessionManager.updateAccessToken(token)
+                        TokenRefreshOutcome.Success(token)
+                    } else {
+                        sessionManager.forceUnauthenticated()
+                        TokenRefreshOutcome.AuthRejected
+                    }
+                }
+            }
+        }
+    }
 
     override fun authenticate(route: Route?, response: Response): Request? {
         val path = response.request.url.encodedPath
@@ -308,7 +451,8 @@ class TokenAuthenticator(
             path.contains("/auth/refresh") ||
             path.contains("/auth/logout") ||
             path.contains("/auth/register") ||
-            path.contains("/auth/passkey/login/")
+            path.contains("/auth/passkey/login/") ||
+            path.contains("/auth/passkey/2fa/")
         ) {
             return null
         }
@@ -320,25 +464,45 @@ class TokenAuthenticator(
         val failedToken = response.request.header("Authorization")
             ?.removePrefix("Bearer ")
             ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
 
-        synchronized(lock) {
-            val latestToken = sessionManager.getAccessToken()
-            if (!latestToken.isNullOrBlank() && latestToken != failedToken) {
-                return response.request.newBuilder()
-                    .header("Authorization", "Bearer $latestToken")
-                    .build()
-            }
-
-            val newToken = runCatching { refreshTokenCall() }.getOrNull()
-            if (!newToken.isNullOrBlank()) {
-                sessionManager.updateAccessToken(newToken)
-                return response.request.newBuilder()
-                    .header("Authorization", "Bearer $newToken")
-                    .build()
-            }
-
-            sessionManager.forceUnauthenticated()
+        val tag = response.request.tag(RequestSessionTag::class.java)
+        val requestOrigin = SessionManager.originOf(response.request.url)
+        val configuredOrigin = configuredOriginProvider()?.let(SessionManager::normalizeOrigin)
+        if (configuredOrigin != null && !requestOrigin.equals(configuredOrigin, ignoreCase = true)) {
             return null
+        }
+        if (tag != null) {
+            if (tag.generation != sessionManager.currentGeneration() ||
+                !tag.origin.equals(requestOrigin, ignoreCase = true)
+            ) {
+                return null
+            }
+        }
+
+        synchronized(fallbackLock) {
+            return when (
+                val outcome = refreshTokenOutcome(
+                    failedToken,
+                    tag?.generation,
+                    tag?.origin ?: configuredOrigin,
+                )
+            ) {
+                is TokenRefreshOutcome.Success -> {
+                    if (tag != null && tag.generation != sessionManager.currentGeneration()) {
+                        return null
+                    }
+                    val postConfiguredOrigin = configuredOriginProvider()?.let(SessionManager::normalizeOrigin)
+                    if (postConfiguredOrigin != null && !requestOrigin.equals(postConfiguredOrigin, ignoreCase = true)) {
+                        return null
+                    }
+                    response.request.newBuilder()
+                        .header("Authorization", "Bearer ${outcome.accessToken}")
+                        .build()
+                }
+                TokenRefreshOutcome.AuthRejected, TokenRefreshOutcome.TransientFailure -> null
+            }
         }
     }
 
@@ -366,8 +530,11 @@ class RealtimeSocketClient(
     private val onUnauthorized: (() -> String?)? = null,
     private val isOnlineProvider: () -> Boolean = { true },
     networkOnlineFlow: StateFlow<Boolean>? = null,
+    private val onUnauthorizedOutcome: ((failedToken: String?) -> TokenRefreshOutcome)? = null,
+    private val elapsedMsProvider: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val socketLock = Any()
 
     private val _domainEvents = MutableSharedFlow<String>(extraBufferCapacity = 32)
     val domainEvents: SharedFlow<String> = _domainEvents.asSharedFlow()
@@ -377,8 +544,11 @@ class RealtimeSocketClient(
 
     private var activeSocket: WebSocket? = null
     private var reconnectJob: Job? = null
+    private var stabilityResetJob: Job? = null
     private var shouldRun = false
     private var backoffSeconds = 2L
+    private var openedAtElapsedMs = 0L
+    private var consecutive401Count = 0
 
     init {
         if (networkOnlineFlow != null) {
@@ -386,15 +556,21 @@ class RealtimeSocketClient(
                 var wasOnline = networkOnlineFlow.value
                 networkOnlineFlow.collect { online ->
                     if (online && !wasOnline) {
-                        backoffSeconds = 2L
-                        reconnectJob?.cancel()
-                        reconnectJob = null
-                        if (shouldRun && activeSocket == null) {
+                        val shouldConnect = synchronized(socketLock) {
+                            backoffSeconds = 2L
+                            consecutive401Count = 0
+                            reconnectJob?.cancel()
+                            reconnectJob = null
+                            shouldRun && activeSocket == null
+                        }
+                        if (shouldConnect) {
                             connectIfEligible()
                         }
                     } else if (!online && wasOnline) {
-                        reconnectJob?.cancel()
-                        reconnectJob = null
+                        synchronized(socketLock) {
+                            reconnectJob?.cancel()
+                            reconnectJob = null
+                        }
                     }
                     wasOnline = online
                 }
@@ -403,98 +579,239 @@ class RealtimeSocketClient(
     }
 
     fun start() {
-        shouldRun = true
+        synchronized(socketLock) {
+            shouldRun = true
+            consecutive401Count = 0
+        }
         connectIfEligible()
     }
 
     fun stop() {
-        shouldRun = false
-        reconnectJob?.cancel()
-        reconnectJob = null
-        activeSocket?.close(1000, "Client stopped")
-        activeSocket = null
-        _connectionState.value = RealtimeConnectionState.DISCONNECTED
+        val toClose = synchronized(socketLock) {
+            shouldRun = false
+            reconnectJob?.cancel()
+            reconnectJob = null
+            stabilityResetJob?.cancel()
+            stabilityResetJob = null
+            openedAtElapsedMs = 0L
+            consecutive401Count = 0
+            val current = activeSocket
+            activeSocket = null
+            _connectionState.value = RealtimeConnectionState.DISCONNECTED
+            current
+        }
+        toClose?.close(1000, "Client stopped")
     }
 
     fun reconnectNow() {
-        activeSocket?.close(1000, "Reconnecting")
-        activeSocket = null
-        backoffSeconds = 2L
-        if (shouldRun) connectIfEligible()
+        val canConnect = sessionManager.authState.value is AuthState.Authenticated ||
+            sessionManager.getAccessToken() != null
+        val toClose = synchronized(socketLock) {
+            reconnectJob?.cancel()
+            reconnectJob = null
+            stabilityResetJob?.cancel()
+            stabilityResetJob = null
+            openedAtElapsedMs = 0L
+            val current = activeSocket
+            activeSocket = null
+            backoffSeconds = 2L
+            consecutive401Count = 0
+            if (canConnect) {
+                shouldRun = true
+            }
+            current
+        }
+        toClose?.close(1000, "Reconnecting")
+        if (canConnect) {
+            connectIfEligible()
+        }
     }
 
     private fun connectIfEligible() {
-        if (!shouldRun) return
-        if (!isOnlineProvider()) return
-        val token = sessionManager.getAccessToken() ?: return
-        if (activeSocket != null) return
+        val token: String
+        val wsUrl: okhttp3.HttpUrl
+        val attemptGeneration: Long
+        synchronized(socketLock) {
+            if (!shouldRun || !isOnlineProvider()) return
+            if (activeSocket != null) return
 
-        val base = baseUrlProvider().toHttpUrlOrNull() ?: return
-        val basePrefix = base.encodedPath.trimEnd('/')
-        val wsUrl = base.newBuilder()
-            .encodedPath("$basePrefix/api/updates/socket")
-            .build()
+            val base = baseUrlProvider().toHttpUrlOrNull() ?: return
+            val origin = SessionManager.originOf(base)
+            attemptGeneration = sessionManager.currentGeneration()
+            token = sessionManager.getAccessTokenForOrigin(origin) ?: return
+            val basePrefix = base.encodedPath.trimEnd('/')
+            wsUrl = base.newBuilder()
+                .encodedPath("$basePrefix/api/updates/socket")
+                .build()
+            _connectionState.value = RealtimeConnectionState.CONNECTING
+        }
 
-        _connectionState.value = RealtimeConnectionState.CONNECTING
         val request = Request.Builder()
             .url(wsUrl)
             .header("Sec-WebSocket-Protocol", "hotel-updates, $token")
             .build()
 
-        activeSocket = client.newWebSocket(
-            request,
-            object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    backoffSeconds = 2L
-                    _connectionState.value = RealtimeConnectionState.CONNECTED
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    val obj = runCatching { HotelJson.decodeFromString<JsonObject>(text) }.getOrNull()
-                    val domain = obj?.get("domain")?.jsonPrimitive?.content
-                    if (!domain.isNullOrBlank()) {
-                        _domainEvents.tryEmit(domain)
-                    }
-                }
-
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    if (activeSocket === webSocket) activeSocket = null
-                    _connectionState.value = RealtimeConnectionState.DISCONNECTED
-                    scheduleReconnect()
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (activeSocket === webSocket) activeSocket = null
-                    _connectionState.value = RealtimeConnectionState.DISCONNECTED
-                    if (response?.code == 401) {
-                        scope.launch {
-                            val refreshed = runCatching { onUnauthorized?.invoke() }.getOrNull()
-                            if (!refreshed.isNullOrBlank()) {
-                                sessionManager.updateAccessToken(refreshed)
-                                scheduleReconnect()
-                            } else {
-                                sessionManager.forceUnauthenticated()
-                                shouldRun = false
+        val attemptToken = token
+        synchronized(socketLock) {
+            if (!shouldRun || activeSocket != null) return
+            if (sessionManager.currentGeneration() != attemptGeneration) return
+            activeSocket = client.newWebSocket(
+                request,
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        synchronized(socketLock) {
+                            if (activeSocket !== webSocket || sessionManager.currentGeneration() != attemptGeneration) return
+                            openedAtElapsedMs = elapsedMsProvider()
+                            _connectionState.value = RealtimeConnectionState.CONNECTED
+                            stabilityResetJob?.cancel()
+                            stabilityResetJob = scope.launch {
+                                delay(STABILITY_RESET_MS)
+                                synchronized(socketLock) {
+                                    if (activeSocket === webSocket && sessionManager.currentGeneration() == attemptGeneration) {
+                                        backoffSeconds = 2L
+                                        consecutive401Count = 0
+                                    }
+                                }
                             }
                         }
-                    } else {
-                        scheduleReconnect()
                     }
-                }
-            },
-        )
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        val isCurrent = synchronized(socketLock) {
+                            activeSocket === webSocket && sessionManager.currentGeneration() == attemptGeneration
+                        }
+                        if (!isCurrent) return
+                        val obj = runCatching { HotelJson.decodeFromString<JsonObject>(text) }.getOrNull()
+                        val domain = obj?.get("domain")?.jsonPrimitive?.content
+                        if (!domain.isNullOrBlank()) {
+                            _domainEvents.tryEmit(domain)
+                        }
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        synchronized(socketLock) {
+                            if (activeSocket !== webSocket) return
+                            activeSocket = null
+                            stabilityResetJob?.cancel()
+                            stabilityResetJob = null
+                            if (openedAtElapsedMs > 0L && elapsedMsProvider() - openedAtElapsedMs >= STABILITY_RESET_MS) {
+                                backoffSeconds = 2L
+                                consecutive401Count = 0
+                            }
+                            openedAtElapsedMs = 0L
+                            _connectionState.value = RealtimeConnectionState.DISCONNECTED
+                            if (sessionManager.currentGeneration() == attemptGeneration) {
+                                scheduleReconnectLocked()
+                            }
+                        }
+                    }
+
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                        synchronized(socketLock) {
+                            if (activeSocket !== webSocket) return
+                            activeSocket = null
+                            stabilityResetJob?.cancel()
+                            stabilityResetJob = null
+                            if (openedAtElapsedMs > 0L && elapsedMsProvider() - openedAtElapsedMs >= STABILITY_RESET_MS) {
+                                backoffSeconds = 2L
+                                consecutive401Count = 0
+                            }
+                            openedAtElapsedMs = 0L
+                            _connectionState.value = RealtimeConnectionState.DISCONNECTED
+                            if (sessionManager.currentGeneration() != attemptGeneration ||
+                                sessionManager.authState.value !is AuthState.Authenticated
+                            ) {
+                                return
+                            }
+                        }
+                        val statusCode = response?.code
+                        when {
+                            statusCode == 401 -> {
+                                val tooMany401s = synchronized(socketLock) {
+                                    consecutive401Count++
+                                    if (consecutive401Count > MAX_CONSECUTIVE_WS_401) {
+                                        shouldRun = false
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                                if (tooMany401s) {
+                                    if (sessionManager.currentGeneration() == attemptGeneration) {
+                                        sessionManager.forceUnauthenticated()
+                                    }
+                                    return
+                                }
+                                scope.launch {
+                                    if (sessionManager.currentGeneration() != attemptGeneration ||
+                                        sessionManager.authState.value !is AuthState.Authenticated
+                                    ) {
+                                        return@launch
+                                    }
+                                    if (onUnauthorizedOutcome != null) {
+                                        when (onUnauthorizedOutcome.invoke(attemptToken)) {
+                                            is TokenRefreshOutcome.Success,
+                                            TokenRefreshOutcome.TransientFailure,
+                                            -> synchronized(socketLock) {
+                                                if (sessionManager.currentGeneration() == attemptGeneration) {
+                                                    scheduleReconnectLocked()
+                                                }
+                                            }
+                                            TokenRefreshOutcome.AuthRejected -> synchronized(socketLock) {
+                                                shouldRun = false
+                                            }
+                                        }
+                                    } else {
+                                        val refreshed = runCatching { onUnauthorized?.invoke() }.getOrNull()
+                                        if (sessionManager.currentGeneration() != attemptGeneration) {
+                                            return@launch
+                                        }
+                                        if (!refreshed.isNullOrBlank()) {
+                                            sessionManager.updateAccessToken(refreshed)
+                                            synchronized(socketLock) { scheduleReconnectLocked() }
+                                        } else {
+                                            sessionManager.forceUnauthenticated()
+                                            synchronized(socketLock) { shouldRun = false }
+                                        }
+                                    }
+                                }
+                            }
+                            statusCode != null && statusCode in 400..499 && statusCode != 408 && statusCode != 429 -> {
+                                synchronized(socketLock) {
+                                    shouldRun = false
+                                }
+                            }
+                            else -> {
+                                synchronized(socketLock) {
+                                    if (sessionManager.currentGeneration() == attemptGeneration) {
+                                        scheduleReconnectLocked()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+        }
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnectLocked() {
         if (!shouldRun || !isOnlineProvider() || sessionManager.getAccessToken() == null) return
         if (reconnectJob?.isActive == true) return
         val delayMs = backoffSeconds * 1000L
         backoffSeconds = (backoffSeconds * 2L).coerceAtMost(30L)
         reconnectJob = scope.launch {
             delay(delayMs)
-            reconnectJob = null
+            synchronized(socketLock) {
+                reconnectJob = null
+            }
             connectIfEligible()
         }
+    }
+
+    companion object {
+        private const val STABILITY_RESET_MS = 15_000L
+        private const val MAX_CONSECUTIVE_WS_401 = 2
     }
 }
 
@@ -502,21 +819,46 @@ object NetworkFactory {
     const val PLACEHOLDER_HOST = "hotel.local"
     const val PLACEHOLDER_BASE_URL = "https://$PLACEHOLDER_HOST/"
 
-    fun refreshAccessTokenSync(
-        refreshClient: OkHttpClient,
-    ): String? {
+    fun refreshAccessTokenOutcome(refreshClient: OkHttpClient): TokenRefreshOutcome {
         val req = Request.Builder()
             .url("${PLACEHOLDER_BASE_URL}api/auth/refresh")
             .post("".toRequestBody("application/json".toMediaType()))
             .build()
-        return refreshClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@use null
-            val body = resp.body?.string() ?: return@use null
-            runCatching {
-                HotelJson.decodeFromString<RefreshTokenResponseDto>(body).accessToken
-            }.getOrNull()
+        return try {
+            refreshClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return@use TokenRefreshOutcome.TransientFailure
+                    val token = runCatching {
+                        HotelJson.decodeFromString<RefreshTokenResponseDto>(body).accessToken
+                    }.getOrNull()
+                    if (!token.isNullOrBlank()) {
+                        TokenRefreshOutcome.Success(token)
+                    } else {
+                        TokenRefreshOutcome.TransientFailure
+                    }
+                } else if (resp.code == 401 || resp.code == 403) {
+                    TokenRefreshOutcome.AuthRejected
+                } else {
+                    TokenRefreshOutcome.TransientFailure
+                }
+            }
+        } catch (_: IOException) {
+            TokenRefreshOutcome.TransientFailure
         }
     }
+
+    fun refreshAccessTokenSync(
+        refreshClient: OkHttpClient,
+    ): String? = when (val outcome = refreshAccessTokenOutcome(refreshClient)) {
+        is TokenRefreshOutcome.Success -> outcome.accessToken
+        TokenRefreshOutcome.AuthRejected, TokenRefreshOutcome.TransientFailure -> null
+    }
+
+    fun createTokenRefresher(
+        sessionManager: SessionManager,
+        refreshClient: OkHttpClient,
+        baseUrlProvider: () -> String,
+    ): SingleFlightTokenRefresher = SingleFlightTokenRefresher(sessionManager, refreshClient, baseUrlProvider)
 
     private fun createLoggingInterceptor(): HttpLoggingInterceptor =
         HttpLoggingInterceptor().apply {
@@ -545,6 +887,9 @@ object NetworkFactory {
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .addInterceptor(CookieEpochInterceptor(cookieJar))
             .addInterceptor(BaseUrlInterceptor { serverConfigStore.currentBaseUrl() })
             .addInterceptor(AuthInterceptor(accessTokenProvider = { null }))
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -561,28 +906,30 @@ object NetworkFactory {
         cookieJar: EncryptedCookieJar,
         sessionManager: SessionManager,
         refreshClient: OkHttpClient,
+        tokenRefresher: SingleFlightTokenRefresher = createTokenRefresher(
+            sessionManager = sessionManager,
+            refreshClient = refreshClient,
+            baseUrlProvider = { serverConfigStore.currentBaseUrl() },
+        ),
     ): OkHttpClient {
-        val authenticator = TokenAuthenticator(sessionManager) {
-            val req = Request.Builder()
-                .url("${PLACEHOLDER_BASE_URL}api/auth/refresh")
-                .post("".toRequestBody("application/json".toMediaType()))
-                .build()
-            refreshClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@TokenAuthenticator null
-                val body = resp.body?.string() ?: return@TokenAuthenticator null
-                runCatching {
-                    HotelJson.decodeFromString<RefreshTokenResponseDto>(body).accessToken
-                }.getOrNull()
-            }
-        }
+        val authenticator = TokenAuthenticator.fromOutcome(
+            sessionManager = sessionManager,
+            configuredOriginProvider = { serverConfigStore.currentBaseUrl() },
+            refreshTokenOutcome = tokenRefresher::refreshIfStale,
+        )
 
         val builder = OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .addInterceptor(CookieEpochInterceptor(cookieJar))
             .addInterceptor(BaseUrlInterceptor { serverConfigStore.currentBaseUrl() })
             .addInterceptor(
                 AuthInterceptor(
                     accessTokenProvider = { sessionManager.getAccessToken() },
                     baseUrlProvider = { serverConfigStore.currentBaseUrl() },
+                    tokenForOriginProvider = { origin -> sessionManager.getAccessTokenForOrigin(origin) },
+                    requestAuthContextForOriginProvider = { origin -> sessionManager.getRequestAuthContextForOrigin(origin) },
                 ),
             )
             .authenticator(authenticator)
@@ -599,6 +946,8 @@ object NetworkFactory {
         serverConfigStore: ServerConfigStore,
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
+            .followRedirects(false)
+            .followSslRedirects(false)
             .addInterceptor(BaseUrlInterceptor { serverConfigStore.currentBaseUrl() })
             .pingInterval(25, TimeUnit.SECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)

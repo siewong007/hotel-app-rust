@@ -32,15 +32,15 @@ pub struct CheckinSourceContext {
     pub self_checkin_event: Option<SelfCheckinEventInsert>,
 }
 
-/// Allow complimentary-credit bookings for either a user linked to the guest
-/// or staff who can both create bookings and read guest records.
+/// Allow complimentary-credit bookings only for staff (never guest-only
+/// accounts) who can both create bookings and read guest records.
 pub async fn can_book_with_credits_for_guest(
     pool: &DbPool,
     user_id: i64,
-    guest_id: i64,
+    _guest_id: i64,
 ) -> Result<bool, ApiError> {
-    if booking_repo::user_owns_booking(pool, user_id, guest_id).await? {
-        return Ok(true);
+    if crate::core::middleware::is_guest_only_user(pool, user_id).await? {
+        return Ok(false);
     }
 
     let can_create_bookings = AuthService::check_permission(pool, user_id, "bookings:create")
@@ -116,7 +116,47 @@ pub async fn cancel_pending_booking_by_guest(
         BookingGroupRepository::lock_tx_nowait(&mut tx, group_id).await?;
         BookingGroupRepository::ensure_no_room_arrived_tx(&mut tx, group_id).await?;
     }
-    void_booking_by_guest_tx(&mut tx, &booking, user_id, reason.as_deref()).await?;
+    let locked: Option<(String, Option<i64>, bool, Decimal)> = sqlx::query_as(
+        "SELECT status, booking_group_id, COALESCE(is_complimentary, false), \
+         total_amount + CASE WHEN COALESCE(is_tourist, false) THEN COALESCE(tourism_tax_amount, 0) ELSE 0 END + COALESCE(extra_bed_charge, 0) \
+         FROM bookings WHERE id = $1 FOR UPDATE",
+    )
+    .bind(booking_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::from)?;
+    let (locked_status, locked_group_id, is_complimentary, billable_total) =
+        locked.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+    if locked_group_id != group_id {
+        return Err(ApiError::Conflict(
+            "Booking changed concurrently; please refresh and retry.".to_string(),
+        ));
+    }
+    if !is_guest_cancellable_booking(&locked_status) {
+        return Err(ApiError::BadRequest(
+            "Only upcoming bookings can be cancelled online.".to_string(),
+        ));
+    }
+    let has_settled_payment: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM payments WHERE booking_id = $1 AND status IN ('completed', 'refunded'))",
+    )
+    .bind(booking_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ApiError::from)?;
+    if has_settled_payment {
+        return Err(ApiError::Conflict(
+            "Payment has already completed for this booking; please submit a cancellation request for staff review.".to_string(),
+        ));
+    }
+    if locked_status == "confirmed" && !is_complimentary && billable_total > Decimal::ZERO {
+        return Err(ApiError::Conflict(
+            "Confirmed bookings require cancellation review; please submit a cancellation request."
+                .to_string(),
+        ));
+    }
+    let locked_booking = booking_service::fetch_booking_by_id_with(&mut *tx, booking_id).await?;
+    void_booking_by_guest_tx(&mut tx, &locked_booking, user_id, reason.as_deref()).await?;
     if let Some(group_id) = group_id {
         crate::modules::booking_groups::repository::BookingGroupRepository::refresh_totals_tx(
             &mut tx, group_id,
@@ -124,6 +164,21 @@ pub async fn cancel_pending_booking_by_guest(
         .await?;
     }
     tx.commit().await.map_err(ApiError::from)?;
+
+    if let Err(err) = crate::modules::loyalty::service::reverse_booking_points(
+        pool,
+        booking_id,
+        Some(user_id),
+        reason.as_deref().unwrap_or("Booking cancelled by guest"),
+    )
+    .await
+    {
+        log::warn!(
+            "Failed to reverse loyalty points for guest-cancelled booking {}: {}",
+            booking_id,
+            err
+        );
+    }
 
     Ok(serde_json::json!({
         "message": "Booking cancelled successfully",
@@ -200,16 +255,42 @@ pub async fn cancel_pending_group_by_guest(
             "You don't have permission to cancel this booking".to_string(),
         ));
     }
-    let ids: Vec<i64> = sqlx::query_scalar(
-        "SELECT id FROM bookings WHERE booking_group_id = $1 AND status <> 'voided' ORDER BY id",
+    let locked_rows: Vec<(i64, String, bool, Decimal)> = sqlx::query_as(
+        "SELECT id, status, COALESCE(is_complimentary, false), \
+         total_amount + CASE WHEN COALESCE(is_tourist, false) THEN COALESCE(tourism_tax_amount, 0) ELSE 0 END + COALESCE(extra_bed_charge, 0) \
+         FROM bookings WHERE booking_group_id = $1 AND status <> 'voided' ORDER BY id FOR UPDATE",
     )
     .bind(group_id)
     .fetch_all(&mut *tx)
     .await
     .map_err(ApiError::from)?;
-    if ids.is_empty() {
+    if locked_rows.is_empty() {
         return Err(ApiError::BadRequest(
             "This booking has already been cancelled.".to_string(),
+        ));
+    }
+    let ids: Vec<i64> = locked_rows.iter().map(|(id, _, _, _)| *id).collect();
+    let has_settled_payment: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM payments WHERE booking_id = ANY($1) AND status IN ('completed', 'refunded'))",
+    )
+    .bind(&ids)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ApiError::from)?;
+    if has_settled_payment {
+        return Err(ApiError::Conflict(
+            "Payment has already completed for this booking group; please submit a cancellation request for staff review.".to_string(),
+        ));
+    }
+    if locked_rows
+        .iter()
+        .any(|(_, status, is_complimentary, billable_total)| {
+            status == "confirmed" && !*is_complimentary && *billable_total > Decimal::ZERO
+        })
+    {
+        return Err(ApiError::Conflict(
+            "Confirmed bookings require cancellation review; please submit a cancellation request."
+                .to_string(),
         ));
     }
     // The whole unpaid group is going. Put the voucher back, and put each
@@ -236,6 +317,22 @@ pub async fn cancel_pending_group_by_guest(
     }
     BookingGroupRepository::refresh_totals_tx(&mut tx, group_id).await?;
     tx.commit().await.map_err(ApiError::from)?;
+    for cancelled_id in &ids {
+        if let Err(err) = crate::modules::loyalty::service::reverse_booking_points(
+            pool,
+            *cancelled_id,
+            Some(user_id),
+            reason.as_deref().unwrap_or("Booking cancelled by guest"),
+        )
+        .await
+        {
+            log::warn!(
+                "Failed to reverse loyalty points for guest-cancelled group booking {}: {}",
+                cancelled_id,
+                err
+            );
+        }
+    }
     affected_night_audit_dates.sort();
     affected_night_audit_dates.dedup();
     Ok(serde_json::json!({

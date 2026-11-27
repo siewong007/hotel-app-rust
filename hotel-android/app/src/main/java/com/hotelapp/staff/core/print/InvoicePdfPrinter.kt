@@ -1,5 +1,6 @@
 package com.hotelapp.staff.core.print
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -18,9 +19,14 @@ import androidx.core.content.FileProvider
 import com.hotelapp.staff.core.format.DateFormatter
 import com.hotelapp.staff.core.format.MoneyFormatter
 import com.hotelapp.staff.core.format.StatusFormatter
+import com.hotelapp.staff.core.network.runSuspendCatching
 import com.hotelapp.staff.data.dto.InvoiceDto
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.util.UUID
 
 object InvoicePdfPrinter {
     private const val PAGE_WIDTH = 595
@@ -63,9 +69,14 @@ object InvoicePdfPrinter {
                     callback?.onWriteCancelled()
                     return
                 }
+                val fd = destination?.fileDescriptor
+                if (fd == null) {
+                    callback?.onWriteFailed("Destination file descriptor missing")
+                    return
+                }
                 val doc = buildPdfDocument(hotelName, invoice)
                 try {
-                    FileOutputStream(destination?.fileDescriptor).use { out ->
+                    FileOutputStream(fd).use { out ->
                         doc.writeTo(out)
                     }
                     callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
@@ -79,35 +90,50 @@ object InvoicePdfPrinter {
         manager.print("$hotelName Invoice $safeNumber", adapter, PrintAttributes.Builder().build())
     }
 
-    fun shareInvoicePdf(
+    suspend fun shareInvoicePdf(
         context: Context,
         hotelName: String,
         invoice: InvoiceDto,
-    ): Result<Unit> = runCatching {
-        val dir = File(context.cacheDir, "invoices").apply { mkdirs() }
-        val safeName = invoice.invoiceNumber
-            .ifBlank { "invoice-${invoice.bookingId}" }
-            .replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val file = File(dir, "$safeName.pdf")
-        val doc = buildPdfDocument(hotelName, invoice)
-        try {
-            FileOutputStream(file).use { out ->
-                doc.writeTo(out)
+    ): Result<Unit> = runSuspendCatching {
+        val uri = withContext(Dispatchers.IO) {
+            val invoicesRoot = File(context.cacheDir, "invoices").apply { mkdirs() }
+            val staleBeforeMs = System.currentTimeMillis() - 10 * 60 * 1000L
+            invoicesRoot.listFiles()?.forEach { child ->
+                if (child.lastModified() < staleBeforeMs) {
+                    child.deleteRecursively()
+                }
             }
-        } finally {
-            doc.close()
+            val dir = File(invoicesRoot, "${UUID.randomUUID()}").apply { mkdirs() }
+            val safeName = invoice.invoiceNumber
+                .ifBlank { "invoice-${invoice.bookingId}" }
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val file = File(dir, "$safeName.pdf")
+            val doc = buildPdfDocument(hotelName, invoice)
+            try {
+                FileOutputStream(file).use { out ->
+                    doc.writeTo(out)
+                }
+            } finally {
+                doc.close()
+            }
+            file.setReadable(false, false)
+            file.setReadable(true, true)
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val safeSubjectRef = invoice.invoiceNumber.ifBlank { "Booking-${invoice.bookingId}" }
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "$hotelName Invoice ${invoice.invoiceNumber}")
+            putExtra(Intent.EXTRA_SUBJECT, "$hotelName Invoice $safeSubjectRef")
+            clipData = ClipData.newRawUri("Invoice PDF", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = Intent.createChooser(intent, "Share Invoice PDF").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(chooser)
+        withContext(Dispatchers.Main) {
+            context.startActivity(chooser)
+        }
     }
 
     private fun buildPdfDocument(
@@ -236,7 +262,19 @@ object InvoicePdfPrinter {
 
     fun clearCachedInvoices(context: Context) {
         runCatching {
-            File(context.cacheDir, "invoices").deleteRecursively()
+            val root = File(context.cacheDir, "invoices")
+            if (root.exists()) {
+                val authority = "${context.packageName}.fileprovider"
+                root.walkBottomUp()
+                    .filter { it.isFile }
+                    .forEach { file ->
+                        runCatching {
+                            val uri = FileProvider.getUriForFile(context, authority, file)
+                            context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    }
+                root.deleteRecursively()
+            }
         }
     }
 }

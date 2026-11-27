@@ -210,7 +210,9 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
-  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const [stepUpAction, setStepUpAction] = useState<
+    { kind: 'add' } | { kind: 'delete'; passkey: PasskeyInfo } | null
+  >(null);
   const [stepUpPassword, setStepUpPassword] = useState('');
   const [stepUpCode, setStepUpCode] = useState('');
   const [stepUpError, setStepUpError] = useState<string | null>(null);
@@ -220,12 +222,15 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
   const atLimit = passkeys.length >= MAX_PASSKEYS;
   const browserSupported = supportsPasskeys();
   const username = user?.username ?? '';
+  const stepUpPending = addPasskey.isPending || deletePasskey.isPending;
 
   const closeStepUp = () => {
-    setStepUpOpen(false);
+    setStepUpAction(null);
     setStepUpPassword('');
     setStepUpCode('');
     setStepUpError(null);
+    addPasskey.reset();
+    deletePasskey.reset();
   };
 
   const handleAdd = () => {
@@ -234,28 +239,40 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
       return;
     }
     setStepUpError(null);
-    setStepUpOpen(true);
+    setStepUpPassword('');
+    setStepUpCode('');
+    setStepUpAction({ kind: 'add' });
   };
 
   /**
-   * Runs the WebAuthn ceremony with the step-up secret the guest just supplied.
-   *
-   * The failure is shown inside the dialog rather than as a toast: a wrong
-   * password is a retry, and the field to retry in is right here. The API
-   * treats a passkey registration 401 as an auth-endpoint failure, so it does
-   * not refresh-and-logout on a mistyped password.
+   * Runs the passkey registration or deletion with the step-up secret the
+   * guest just supplied. Failures render inline so the user can retry in place.
    */
   const submitStepUp = async () => {
+    if (!stepUpAction) return;
     setStepUpError(null);
     try {
-      await addPasskey.mutateAsync({
-        username,
-        stepUp: { password: stepUpPassword || undefined, totpCode: stepUpCode || undefined },
-      });
-      closeStepUp();
-      notify(t('dashboard.security.passkeys.added'), 'success');
+      if (stepUpAction.kind === 'add') {
+        await addPasskey.mutateAsync({
+          username,
+          stepUp: { password: stepUpPassword || undefined, totpCode: stepUpCode || undefined },
+        });
+        closeStepUp();
+        notify(t('dashboard.security.passkeys.added'), 'success');
+      } else {
+        await deletePasskey.mutateAsync({
+          id: stepUpAction.passkey.id,
+          stepUp: { password: stepUpPassword || undefined, totpCode: stepUpCode || undefined },
+        });
+        closeStepUp();
+        notify(t('dashboard.security.passkeys.removed'), 'success');
+      }
     } catch (error) {
-      setStepUpError(guestErrorMessage(error, t('dashboard.security.passkeys.addFailed')));
+      const fallback =
+        stepUpAction.kind === 'add'
+          ? t('dashboard.security.passkeys.addFailed')
+          : t('dashboard.security.passkeys.removeFailed');
+      setStepUpError(guestErrorMessage(error, fallback));
     }
   };
 
@@ -270,12 +287,10 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
       severity: 'error',
     });
     if (!accepted) return;
-    try {
-      await deletePasskey.mutateAsync(passkey.id);
-      notify(t('dashboard.security.passkeys.removed'), 'success');
-    } catch (error) {
-      notify(guestErrorMessage(error, t('dashboard.security.passkeys.removeFailed')), 'error');
-    }
+    setStepUpError(null);
+    setStepUpPassword('');
+    setStepUpCode('');
+    setStepUpAction({ kind: 'delete', passkey });
   };
 
   const handleRename = async (id: string) => {
@@ -437,11 +452,17 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
           : t('dashboard.security.passkeys.add')}
       </Button>
 
-      <Dialog open={stepUpOpen} onClose={closeStepUp} maxWidth="xs" fullWidth>
+      <Dialog open={stepUpAction !== null} onClose={closeStepUp} maxWidth="xs" fullWidth>
         <DialogTitle>{t('dashboard.security.passkeys.stepUpTitle')}</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 2 }}>
-            {t('dashboard.security.passkeys.stepUpBody')}
+            {stepUpAction?.kind === 'delete'
+              ? t('dashboard.security.passkeys.confirmRemoveBody', {
+                  name:
+                    stepUpAction.passkey.device_name ||
+                    t('dashboard.security.passkeys.thisDevice'),
+                })
+              : t('dashboard.security.passkeys.stepUpBody')}
           </Typography>
           {stepUpError ? (
             <Alert severity="error" role="alert" ref={stepUpErrorRef} tabIndex={-1} sx={{ mb: 2 }}>
@@ -457,9 +478,6 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
             value={stepUpPassword}
             onChange={(event) => setStepUpPassword(event.target.value)}
           />
-          {/* Only when 2FA is on: `ensure_step_up` accepts a TOTP code as an
-              alternative to the password, and a guest who signed in with Google
-              may not have a password at all. */}
           {twoFactorEnabled ? (
             <>
               <Typography variant="body2" sx={{ color: 'text.secondary', my: 1.5 }}>
@@ -481,10 +499,13 @@ function PasskeysCard({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
           <Button onClick={closeStepUp}>{t('common:actions.cancel')}</Button>
           <Button
             variant="contained"
-            disabled={(!stepUpPassword && !stepUpCode) || addPasskey.isPending}
+            disabled={
+              (twoFactorEnabled ? stepUpCode.length !== TOTP_CODE_LENGTH : !stepUpPassword) ||
+              stepUpPending
+            }
             onClick={() => void submitStepUp()}
           >
-            {addPasskey.isPending
+            {stepUpPending
               ? t('dashboard.security.passkeys.waiting')
               : t('dashboard.security.passkeys.continue')}
           </Button>
@@ -520,6 +541,7 @@ function AuthenticatorCard({
   const [verificationCode, setVerificationCode] = useState('');
   const [setupPassword, setSetupPassword] = useState('');
   const [disableOpen, setDisableOpen] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
   const [disableCode, setDisableCode] = useState('');
 
   const closeSetup = () => {
@@ -560,14 +582,26 @@ function AuthenticatorCard({
     }
   };
 
+  const closeDisable = () => {
+    setDisableOpen(false);
+    setDisablePassword('');
+    setDisableCode('');
+    disableTwoFactor.reset();
+  };
+
   const handleDisable = async () => {
+    if (!disablePassword || !disableCode.trim()) return;
     try {
-      await disableTwoFactor.mutateAsync(disableCode.trim());
-      setDisableOpen(false);
-      setDisableCode('');
+      await disableTwoFactor.mutateAsync({
+        code: disableCode.trim(),
+        password: disablePassword,
+      });
+      closeDisable();
       notify(t('dashboard.security.authenticator.disabled'), 'success');
     } catch (error) {
       notify(guestErrorMessage(error, t('dashboard.security.authenticator.codeMismatch')), 'error');
+    } finally {
+      disableTwoFactor.reset();
     }
   };
 
@@ -695,12 +729,22 @@ function AuthenticatorCard({
         </DialogActions>
       </Dialog>
 
-      <Dialog open={disableOpen} onClose={() => setDisableOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog open={disableOpen} onClose={closeDisable} maxWidth="xs" fullWidth>
         <DialogTitle>{t('dashboard.security.authenticator.disableTitle')}</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 2 }}>
             {t('dashboard.security.authenticator.disableBody')}
           </Typography>
+          <TextField
+            fullWidth
+            autoFocus
+            type="password"
+            autoComplete="current-password"
+            label={t('auth:security.currentPassword')}
+            value={disablePassword}
+            onChange={(event) => setDisablePassword(event.target.value)}
+            sx={{ mb: 2 }}
+          />
           <TextField
             fullWidth
             label={t('dashboard.security.authenticator.disableCodeLabel')}
@@ -709,13 +753,13 @@ function AuthenticatorCard({
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDisableOpen(false)}>
+          <Button onClick={closeDisable}>
             {t('dashboard.security.authenticator.keepOn')}
           </Button>
           <Button
             color="error"
             variant="contained"
-            disabled={!disableCode.trim() || disableTwoFactor.isPending}
+            disabled={!disablePassword || !disableCode.trim() || disableTwoFactor.isPending}
             onClick={() => void handleDisable()}
           >
             {disableTwoFactor.isPending

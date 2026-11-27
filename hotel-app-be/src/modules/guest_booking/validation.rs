@@ -125,6 +125,17 @@ pub fn validate_client_request_id(value: &str) -> Result<String, ApiError> {
     Ok(value.to_string())
 }
 
+pub fn validate_anonymous_client_request_id(value: &str) -> Result<String, ApiError> {
+    let value = value.trim();
+    let len = value.chars().count();
+    if !(16..=128).contains(&len) {
+        return Err(ApiError::BadRequest(
+            "Anonymous booking client_request_id must be between 16 and 128 characters".to_string(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
 /// Parse the optional smoking preference from a booking request.
 ///
 /// Absent, blank, or `no_preference` all mean "no preference" (`None`, stored

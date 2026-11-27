@@ -199,14 +199,7 @@ async fn render_campaign_body(pool: &DbPool, campaign: &EmailCampaign) -> Result
 
 pub async fn preview_campaign(pool: &DbPool, id: i64) -> Result<PreviewResponse, ApiError> {
     let campaign = require_campaign(pool, id).await?;
-    // Stored campaign HTML is authored with communications:compose and is
-    // deliberately not stripped for SMTP delivery. The browser preview,
-    // however, renders it with dangerouslySetInnerHTML to viewers holding
-    // only communications:read — so the preview response gets the whitelist
-    // sanitizer while the outbound email keeps the original markup.
-    let body_html = crate::utils::sanitization::Sanitizer::sanitize_html(
-        &render_campaign_body(pool, &campaign).await?,
-    );
+    let body_html = validation::sanitize_email_html(&render_campaign_body(pool, &campaign).await?);
     let scope = segments_service::audience_scope_for(pool, campaign.segment_id).await?;
     let audience = Repo::count_audience(pool, &campaign.topic, &scope).await?;
     Ok(PreviewResponse {
@@ -234,7 +227,7 @@ pub async fn test_send_campaign(
             "Email transport is not configured; set SMTP_* environment variables".to_string(),
         )
     })?;
-    let body_html = render_campaign_body(pool, &campaign).await?;
+    let body_html = validation::sanitize_email_html(&render_campaign_body(pool, &campaign).await?);
     transport
         .send(&OutgoingEmail {
             to: recipient,

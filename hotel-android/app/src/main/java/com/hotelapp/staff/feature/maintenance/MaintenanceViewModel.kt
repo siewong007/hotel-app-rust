@@ -14,7 +14,11 @@ import com.hotelapp.staff.data.dto.UpdateMaintenanceTicketRequestDto
 import com.hotelapp.staff.data.repository.HousekeepingRepository
 import com.hotelapp.staff.data.repository.MaintenanceRepository
 import com.hotelapp.staff.data.repository.RoomsRepository
+import com.hotelapp.staff.feature.rooms.RoomsViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,10 +36,16 @@ data class MaintenanceUiState(
     val priorityFilter: String = "all",
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val endReached: Boolean = false,
     val isMutating: Boolean = false,
     val tickets: List<MaintenanceTicketDto> = emptyList(),
+    val page: Long = 1,
+    val total: Long = 0,
     val rooms: List<RoomWithOccupancyDto> = emptyList(),
     val staff: List<AssignableStaffMemberDto> = emptyList(),
+    val isLoadingPickers: Boolean = false,
+    val pickerError: String? = null,
     val selectedTicket: MaintenanceTicketDto? = null,
     val error: String? = null,
     val sheetError: String? = null,
@@ -59,6 +69,8 @@ class MaintenanceViewModel(
     private val _effects = Channel<MaintenanceEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
+    private var refreshJob: Job? = null
+
     init {
         refresh()
         if (canWrite) {
@@ -79,13 +91,13 @@ class MaintenanceViewModel(
 
     fun setStatusFilter(status: String) {
         if (_uiState.value.statusFilter == status) return
-        _uiState.update { it.copy(statusFilter = status) }
+        _uiState.update { it.copy(statusFilter = status, endReached = false) }
         refresh()
     }
 
     fun setPriorityFilter(priority: String) {
         if (_uiState.value.priorityFilter == priority) return
-        _uiState.update { it.copy(priorityFilter = priority) }
+        _uiState.update { it.copy(priorityFilter = priority, endReached = false) }
         refresh()
     }
 
@@ -97,38 +109,101 @@ class MaintenanceViewModel(
         _uiState.update { it.copy(actionNotice = null) }
     }
 
+    fun clearSheetError() {
+        _uiState.update { it.copy(sheetError = null) }
+    }
+
+    fun retryPickers() {
+        if (canWrite) loadPickers()
+    }
+
     fun refresh(silent: Boolean = false) {
-        viewModelScope.launch {
+        if (canWrite && (_uiState.value.staff.isEmpty() || _uiState.value.rooms.isEmpty())) {
+            loadPickers()
+        }
+        load(page = 1, replace = true, silent = silent)
+    }
+
+    fun loadMore() {
+        val s = _uiState.value
+        if (s.isLoadingMore || s.endReached || s.tickets.size >= s.total) return
+        load(page = s.page + 1, replace = false, silent = false)
+    }
+
+    private fun load(page: Long, replace: Boolean, silent: Boolean) {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             val s = _uiState.value
+            val statusAtDispatch = s.statusFilter
+            val priorityAtDispatch = s.priorityFilter
             _uiState.update {
                 if (silent) it else it.copy(
-                    isLoading = it.tickets.isEmpty(),
-                    isRefreshing = it.tickets.isNotEmpty(),
+                    isLoading = replace && it.tickets.isEmpty(),
+                    isRefreshing = replace && it.tickets.isNotEmpty(),
+                    isLoadingMore = !replace,
+                    endReached = if (replace) false else it.endReached,
                     error = null,
                 )
             }
             repository.list(
-                status = s.statusFilter.takeIf { it != "all" },
-                priority = s.priorityFilter.takeIf { it != "all" },
+                status = statusAtDispatch.takeIf { it != "all" },
+                priority = priorityAtDispatch.takeIf { it != "all" },
+                page = page,
             ).onSuccess { res ->
-                val updatedSelected = s.selectedTicket?.let { sel ->
-                    res.items.find { it.id == sel.id } ?: sel
-                }
-                _uiState.update {
-                    it.copy(
+                _uiState.update { cur ->
+                    if (cur.statusFilter != statusAtDispatch || cur.priorityFilter != priorityAtDispatch) {
+                        return@update cur.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            isLoadingMore = false,
+                        )
+                    }
+                    val preservePagedScroll = silent && replace && cur.page > 1 && cur.tickets.isNotEmpty()
+                    val nextTickets = when {
+                        preservePagedScroll -> {
+                            val updatedById = res.items.associateBy { it.id }
+                            (res.items + cur.tickets.filter { it.id !in updatedById }).distinctBy { it.id }
+                        }
+                        replace -> res.items
+                        else -> (cur.tickets + res.items).distinctBy { it.id }
+                    }
+                    val updatedSelected = cur.selectedTicket?.let { sel ->
+                        nextTickets.find { it.id == sel.id } ?: sel
+                    }
+                    val nextPage = if (preservePagedScroll) cur.page else res.page
+                    val reachedEnd = if (preservePagedScroll) {
+                        nextTickets.size >= res.total || cur.endReached
+                    } else {
+                        res.items.isEmpty() ||
+                            nextTickets.size >= res.total ||
+                            (!replace && nextTickets.size == cur.tickets.size)
+                    }
+                    cur.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        tickets = res.items,
+                        isLoadingMore = false,
+                        endReached = reachedEnd,
+                        tickets = nextTickets,
+                        page = nextPage,
+                        total = res.total,
                         selectedTicket = updatedSelected,
                         error = null,
                     )
                 }
             }.onFailure { err ->
-                _uiState.update {
-                    it.copy(
+                _uiState.update { cur ->
+                    if (cur.statusFilter != statusAtDispatch || cur.priorityFilter != priorityAtDispatch) {
+                        return@update cur.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            isLoadingMore = false,
+                        )
+                    }
+                    cur.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        error = if (silent && it.tickets.isNotEmpty()) it.error else err.message,
+                        isLoadingMore = false,
+                        error = if (silent && cur.tickets.isNotEmpty()) cur.error else err.message,
                     )
                 }
             }
@@ -137,12 +212,26 @@ class MaintenanceViewModel(
 
     private fun loadPickers() {
         viewModelScope.launch {
-            housekeepingRepository.assignableStaff("maintenance").onSuccess { staff ->
-                _uiState.update { it.copy(staff = staff) }
-            }
-            if (session.hasPermission("rooms:read")) {
-                roomsRepository.roomsWithOccupancy().onSuccess { rooms ->
-                    _uiState.update { it.copy(rooms = rooms.sortedBy { r -> r.roomNumber }) }
+            _uiState.update { it.copy(isLoadingPickers = true, pickerError = null) }
+            coroutineScope {
+                val staffDef = async { housekeepingRepository.assignableStaff("maintenance") }
+                val roomsDef = if (session.hasPermission("rooms:read")) {
+                    async { roomsRepository.roomsWithOccupancy() }
+                } else null
+                val staffRes = staffDef.await()
+                val roomsRes = roomsDef?.await()
+                val firstErr = staffRes.exceptionOrNull() ?: roomsRes?.exceptionOrNull()
+                _uiState.update { cur ->
+                    cur.copy(
+                        isLoadingPickers = false,
+                        staff = staffRes.getOrNull() ?: cur.staff,
+                        rooms = roomsRes?.getOrNull()?.sortedWith { a, b ->
+                            RoomsViewModel.compareRoomNumbersNatural(a.roomNumber, b.roomNumber)
+                        } ?: cur.rooms,
+                        pickerError = if (staffRes.isFailure || roomsRes?.isFailure == true) {
+                            firstErr?.message ?: "Unable to load room/staff options."
+                        } else null,
+                    )
                 }
             }
         }
@@ -176,8 +265,10 @@ class MaintenanceViewModel(
         category: String,
         priority: String,
         description: String,
+        idempotencyKey: String? = null,
         onSuccess: () -> Unit,
     ) {
+        if (_uiState.value.isMutating) return
         if (title.isBlank()) {
             _uiState.update { it.copy(sheetError = "Title is required.") }
             return
@@ -191,7 +282,7 @@ class MaintenanceViewModel(
                 description = description.trim().takeIf { it.isNotEmpty() },
             )
             _uiState.update { it.copy(isMutating = true, sheetError = null) }
-            repository.create(request).onSuccess {
+            repository.create(request, idempotencyKey = idempotencyKey).onSuccess {
                 val msg = "Maintenance ticket created."
                 _uiState.update { it.copy(isMutating = false, actionNotice = msg) }
                 _effects.trySend(MaintenanceEffect.ShowMessage(msg))
@@ -199,7 +290,7 @@ class MaintenanceViewModel(
                 onSuccess()
             }.onFailure { err ->
                 if (offlineOps?.isQueueableNetworkFailure(err) == true) {
-                    offlineOps.enqueueMaintenanceCreate(request)
+                    offlineOps.enqueueMaintenanceCreate(request, idempotencyKey = idempotencyKey)
                     val queuedMsg = "Offline — maintenance ticket queued for sync."
                     _uiState.update { it.copy(isMutating = false, actionNotice = queuedMsg) }
                     _effects.trySend(MaintenanceEffect.ShowMessage(queuedMsg))
@@ -212,6 +303,7 @@ class MaintenanceViewModel(
     }
 
     private fun mutate(notice: String, block: suspend () -> Result<MaintenanceTicketDto>) {
+        if (_uiState.value.isMutating) return
         viewModelScope.launch {
             _uiState.update { it.copy(isMutating = true, sheetError = null) }
             block()

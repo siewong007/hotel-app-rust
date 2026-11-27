@@ -14,8 +14,11 @@ use crate::repositories::audit::AuditRepository;
 /// is exactly the event the trail exists to record. `AuditLog::log_event`
 /// deliberately swallows its error to keep unrelated operations alive; this
 /// domain opts out of that.
-async fn audit(pool: &DbPool, event: AuditEvent<'_>) -> Result<(), ApiError> {
-    AuditRepository::insert_event(pool, event, chrono::Utc::now())
+async fn audit(
+    tx: &mut crate::core::db::DbTransaction<'_>,
+    event: AuditEvent<'_>,
+) -> Result<(), ApiError> {
+    AuditRepository::insert_event_tx(tx, event, chrono::Utc::now())
         .await
         .map_err(|e| ApiError::Database(format!("Audit write failed, change rejected: {e}")))
 }
@@ -46,10 +49,14 @@ pub async fn create_team(
     mut input: TeamCreateInput,
 ) -> Result<Team, ApiError> {
     validation::validate_create(&mut input)?;
-    let team = TeamRepository::create(pool, &input, actor_user_id).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let team = TeamRepository::create(&mut *tx, &input, actor_user_id).await?;
 
     audit(
-        pool,
+        &mut tx,
         AuditEvent {
             user_id: Some(actor_user_id),
             action: "team_created",
@@ -63,6 +70,10 @@ pub async fn create_team(
         },
     )
     .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(team)
 }
@@ -82,17 +93,31 @@ pub async fn update_team(
         .ok_or_else(|| ApiError::NotFound("Team not found".to_string()))?;
     if input.is_active.is_some() && input.is_active != Some(before.is_active) {
         let role_ids = TeamRepository::role_ids(pool, team_id).await?;
-        crate::modules::rbac::service::ensure_actor_can_manage_roles(
-            pool,
-            actor_user_id,
-            &role_ids,
-        )
-        .await?;
+        if input.is_active == Some(true) && !before.is_active {
+            crate::modules::rbac::service::ensure_actor_can_manage_roles_until(
+                pool,
+                actor_user_id,
+                &role_ids,
+                None,
+            )
+            .await?;
+        } else {
+            crate::modules::rbac::service::ensure_actor_can_manage_roles(
+                pool,
+                actor_user_id,
+                &role_ids,
+            )
+            .await?;
+        }
     }
-    let team = TeamRepository::update(pool, team_id, &input, actor_user_id).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let team = TeamRepository::update(&mut *tx, team_id, &input, actor_user_id).await?;
 
     audit(
-        pool,
+        &mut tx,
         AuditEvent {
             user_id: Some(actor_user_id),
             action: "team_updated",
@@ -107,6 +132,10 @@ pub async fn update_team(
     )
     .await?;
 
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
     // Deactivating a team withdraws every role it conferred.
     crate::core::rbac_cache::invalidate_all(pool).await;
     Ok(team)
@@ -120,12 +149,16 @@ pub async fn delete_team(pool: &DbPool, actor_user_id: i64, team_id: i64) -> Res
     crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &role_ids)
         .await?;
 
-    if !TeamRepository::soft_delete(pool, team_id, actor_user_id).await? {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    if !TeamRepository::soft_delete(&mut *tx, team_id, actor_user_id).await? {
         return Err(ApiError::NotFound("Team not found".to_string()));
     }
 
     audit(
-        pool,
+        &mut tx,
         AuditEvent {
             user_id: Some(actor_user_id),
             action: "team_deleted",
@@ -136,6 +169,10 @@ pub async fn delete_team(pool: &DbPool, actor_user_id: i64, team_id: i64) -> Res
         },
     )
     .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     crate::core::rbac_cache::invalidate_all(pool).await;
     Ok(())
@@ -201,10 +238,14 @@ pub async fn add_member(
     )
     .await?;
 
-    TeamRepository::upsert_member(pool, team_id, &input, actor_user_id).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    TeamRepository::upsert_member(&mut *tx, team_id, &input, actor_user_id).await?;
 
     audit(
-        pool,
+        &mut tx,
         AuditEvent {
             user_id: Some(actor_user_id),
             action: "team_member_added",
@@ -219,6 +260,10 @@ pub async fn add_member(
         },
     )
     .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     crate::core::rbac_cache::invalidate_all(pool).await;
     Ok(())
@@ -244,14 +289,18 @@ pub async fn remove_member(
     crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &role_ids)
         .await?;
 
-    if !TeamRepository::remove_member(pool, team_id, member_user_id).await? {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    if !TeamRepository::remove_member(&mut *tx, team_id, member_user_id).await? {
         return Err(ApiError::NotFound(
             "That user is not a member of this team".to_string(),
         ));
     }
 
     audit(
-        pool,
+        &mut tx,
         AuditEvent {
             user_id: Some(actor_user_id),
             action: "team_member_removed",
@@ -262,6 +311,10 @@ pub async fn remove_member(
         },
     )
     .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     crate::core::rbac_cache::invalidate_all(pool).await;
     Ok(())
@@ -288,15 +341,29 @@ pub async fn replace_team_roles(
     next.sort_unstable();
     next.dedup();
 
-    crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &current)
-        .await?;
-    crate::modules::rbac::service::ensure_actor_can_manage_roles(pool, actor_user_id, &next)
-        .await?;
+    crate::modules::rbac::service::ensure_actor_can_manage_roles_until(
+        pool,
+        actor_user_id,
+        &current,
+        None,
+    )
+    .await?;
+    crate::modules::rbac::service::ensure_actor_can_manage_roles_until(
+        pool,
+        actor_user_id,
+        &next,
+        None,
+    )
+    .await?;
 
-    TeamRepository::replace_roles(pool, team_id, &next, actor_user_id).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    TeamRepository::replace_roles_tx(&mut tx, team_id, &next, actor_user_id).await?;
 
     audit(
-        pool,
+        &mut tx,
         AuditEvent {
             user_id: Some(actor_user_id),
             action: "team_roles_replaced",
@@ -307,6 +374,10 @@ pub async fn replace_team_roles(
         },
     )
     .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     crate::core::rbac_cache::invalidate_all(pool).await;
     Ok(next.len())

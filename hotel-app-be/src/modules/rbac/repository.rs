@@ -377,10 +377,13 @@ impl RbacRepository {
     }
 
     /// The subset of `names` that exist as permissions.
-    pub async fn existing_permission_names(
-        pool: &DbPool,
+    pub async fn existing_permission_names<'e, E>(
+        executor: E,
         names: &[String],
-    ) -> Result<HashSet<String>, ApiError> {
+    ) -> Result<HashSet<String>, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         if names.is_empty() {
             return Ok(HashSet::new());
         }
@@ -391,7 +394,7 @@ impl RbacRepository {
         );
         let found: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
             .bind(names)
-            .fetch_all(pool)
+            .fetch_all(executor)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -399,10 +402,13 @@ impl RbacRepository {
     }
 
     /// The subset of `names` that exist as roles.
-    pub async fn existing_role_names(
-        pool: &DbPool,
+    pub async fn existing_role_names<'e, E>(
+        executor: E,
         names: &[String],
-    ) -> Result<HashSet<String>, ApiError> {
+    ) -> Result<HashSet<String>, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         if names.is_empty() {
             return Ok(HashSet::new());
         }
@@ -413,7 +419,7 @@ impl RbacRepository {
         );
         let found: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
             .bind(names)
-            .fetch_all(pool)
+            .fetch_all(executor)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -688,17 +694,20 @@ impl RbacRepository {
     /// Cheaper than [`Self::get_user_effective_permissions`] (one text column,
     /// no ordering, no row mapping) because the escalation guard only ever asks
     /// membership questions.
-    pub async fn permission_names_for_user(
-        pool: &DbPool,
+    pub async fn permission_names_for_user<'e, E>(
+        executor: E,
         user_id: i64,
-    ) -> Result<HashSet<String>, ApiError> {
+    ) -> Result<HashSet<String>, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         let names: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "{}{}",
             crate::core::rbac_cache::EFFECTIVE_ROLES_CTE,
             crate::core::rbac_cache::EFFECTIVE_PERMISSIONS_SQL
         )))
         .bind(user_id)
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 

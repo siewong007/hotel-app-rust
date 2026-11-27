@@ -196,9 +196,10 @@ pub struct BackupFile {
 pub struct UploadResponse {
     pub upload_id: Uuid,
     pub bytes: u64,
-    /// `"v1"` (a `hotel-backup` document), `"legacy"` (a retired v1/v2/v3
-    /// export shape), or `"unknown"`. Detection is a first-kilobytes sniff,
-    /// not a verdict — preview reports the real parse errors.
+    /// `"v1"` (a `hotel-backup` document), `"encrypted"` (a passphrase-sealed
+    /// envelope), `"legacy"` (a retired v1/v2/v3 export shape), or `"unknown"`.
+    /// Detection is a first-kilobytes sniff, not a verdict — preview reports the
+    /// real parse errors.
     pub detected_format: String,
 }
 

@@ -60,7 +60,13 @@ fn http_client() -> Result<reqwest::Client, ApiError> {
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(20))
         .build()
-        .map_err(|e| ApiError::Internal(format!("Failed to build HTTP client: {e}")))
+        .map_err(|e| {
+            log::error!("Failed to build PayPal HTTP client: {e}");
+            ApiError::ServiceUnavailable(
+                "Payment provider is temporarily unavailable. Please try again shortly."
+                    .to_string(),
+            )
+        })
 }
 
 /// Process-wide OAuth token cache. PayPal `client_credentials` tokens live for
@@ -176,7 +182,12 @@ pub async fn create_order(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| ApiError::ServiceUnavailable(format!("PayPal create-order failed: {e}")))?;
+        .map_err(|e| {
+            log::error!("PayPal create-order request error: {e}");
+            ApiError::ServiceUnavailable(
+                "PayPal payment service temporarily unavailable.".to_string(),
+            )
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -187,10 +198,10 @@ pub async fn create_order(
         ));
     }
 
-    let json: Value = response
-        .json()
-        .await
-        .map_err(|e| ApiError::ServiceUnavailable(format!("PayPal order decode failed: {e}")))?;
+    let json: Value = response.json().await.map_err(|e| {
+        log::error!("PayPal order response decode error: {e}");
+        ApiError::ServiceUnavailable("PayPal could not create the order.".to_string())
+    })?;
 
     json.get("id")
         .and_then(Value::as_str)
@@ -227,7 +238,12 @@ pub async fn capture_order(order_id: &str) -> Result<PaypalCaptureOutcome, ApiEr
         .body("{}")
         .send()
         .await
-        .map_err(|e| ApiError::ServiceUnavailable(format!("PayPal capture failed: {e}")))?;
+        .map_err(|e| {
+            log::error!("PayPal capture request error: {e}");
+            ApiError::ServiceUnavailable(
+                "PayPal payment service temporarily unavailable.".to_string(),
+            )
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -238,10 +254,10 @@ pub async fn capture_order(order_id: &str) -> Result<PaypalCaptureOutcome, ApiEr
         ));
     }
 
-    let json: Value = response
-        .json()
-        .await
-        .map_err(|e| ApiError::ServiceUnavailable(format!("PayPal capture decode failed: {e}")))?;
+    let json: Value = response.json().await.map_err(|e| {
+        log::error!("PayPal capture decode error: {e}");
+        ApiError::ServiceUnavailable("PayPal could not capture the order.".to_string())
+    })?;
 
     // The capture object under purchase_units[0].payments.captures[0] carries
     // the authoritative capture status, custom_id, and amount that actually moved.

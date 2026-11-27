@@ -652,6 +652,69 @@ pub async fn delete_rate_plan_mapping(pool: &DbPool, mapping_id: i64) -> Result<
 // Price resolution — shared by preview, matrix, portal, and booking writes.
 // ---------------------------------------------------------------------------
 
+/// Batched source rates for a contiguous list of stay dates on one connection
+/// (transaction-safe and avoids N+1 band lookups).
+pub async fn source_rates_for_stay_conn(
+    conn: &mut sqlx::PgConnection,
+    room_type_id: i64,
+    dates: &[NaiveDate],
+    rate_plan_id: Option<i64>,
+) -> Result<Vec<(NaiveDate, Decimal)>, ApiError> {
+    if dates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let room_type = RateRepository::find_room_type(&mut *conn, room_type_id).await?;
+    let mut plan_prices: std::collections::HashMap<NaiveDate, Decimal> =
+        std::collections::HashMap::new();
+    if let Some(plan_id) = rate_plan_id {
+        let rows: Vec<(NaiveDate, Decimal)> = sqlx::query_as(
+            "SELECT DISTINCT ON (d::date) d::date AS stay_date, rr.price
+             FROM UNNEST($3::date[]) AS d
+             JOIN room_rates rr
+               ON rr.rate_plan_id = $1
+              AND rr.room_type_id = $2
+              AND rr.effective_from <= d::date
+              AND (rr.effective_to IS NULL OR rr.effective_to >= d::date)
+             JOIN rate_plans rp ON rp.id = rr.rate_plan_id
+             WHERE rp.is_active = TRUE
+               AND (rp.valid_from IS NULL OR rp.valid_from <= d::date)
+               AND (rp.valid_to IS NULL OR rp.valid_to >= d::date)
+               AND NOT (COALESCE(rp.blackout_dates, '[]'::jsonb) ? d::date::text)
+               AND (
+                   (EXTRACT(ISODOW FROM d::date)::int = 1 AND rp.applies_monday = TRUE) OR
+                   (EXTRACT(ISODOW FROM d::date)::int = 2 AND rp.applies_tuesday = TRUE) OR
+                   (EXTRACT(ISODOW FROM d::date)::int = 3 AND rp.applies_wednesday = TRUE) OR
+                   (EXTRACT(ISODOW FROM d::date)::int = 4 AND rp.applies_thursday = TRUE) OR
+                   (EXTRACT(ISODOW FROM d::date)::int = 5 AND rp.applies_friday = TRUE) OR
+                   (EXTRACT(ISODOW FROM d::date)::int = 6 AND rp.applies_saturday = TRUE) OR
+                   (EXTRACT(ISODOW FROM d::date)::int = 7 AND rp.applies_sunday = TRUE)
+               )
+             ORDER BY d::date, rr.id DESC",
+        )
+        .bind(plan_id)
+        .bind(room_type_id)
+        .bind(dates)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+        plan_prices = rows.into_iter().collect();
+    }
+
+    Ok(dates
+        .iter()
+        .map(|&date| {
+            let price = if let Some(&band) = plan_prices.get(&date) {
+                band
+            } else if matches!(date.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
+                room_type.weekend_rate.unwrap_or(room_type.base_price)
+            } else {
+                room_type.weekday_rate.unwrap_or(room_type.base_price)
+            };
+            (date, price)
+        })
+        .collect())
+}
+
 /// The pre-channel per-night rate for a room type on a date: the named rate
 /// plan's band price when given (falling back to the room-type rate), else
 /// weekday/weekend then base — matching the portal pipeline.
@@ -661,47 +724,13 @@ pub async fn source_rate_for(
     date: NaiveDate,
     rate_plan_id: Option<i64>,
 ) -> Result<Decimal, ApiError> {
-    let room_type = RateRepository::find_room_type(pool, room_type_id).await?;
-    if let Some(plan_id) = rate_plan_id {
-        let day_of_week = date.weekday().num_days_from_monday() as i32;
-        let band = sqlx::query_scalar::<_, Decimal>(
-            "SELECT rr.price
-             FROM room_rates rr
-             JOIN rate_plans rp ON rp.id = rr.rate_plan_id
-             WHERE rr.rate_plan_id = $1 AND rr.room_type_id = $2
-               AND rp.is_active = TRUE
-               AND rr.effective_from <= $3 AND (rr.effective_to IS NULL OR rr.effective_to >= $3)
-               AND (rp.valid_from IS NULL OR rp.valid_from <= $3)
-               AND (rp.valid_to IS NULL OR rp.valid_to >= $3)
-               AND NOT (COALESCE(rp.blackout_dates, '[]'::jsonb) ? $3::text)
-               AND (
-                   ($4 = 0 AND rp.applies_monday = TRUE) OR
-                   ($4 = 1 AND rp.applies_tuesday = TRUE) OR
-                   ($4 = 2 AND rp.applies_wednesday = TRUE) OR
-                   ($4 = 3 AND rp.applies_thursday = TRUE) OR
-                   ($4 = 4 AND rp.applies_friday = TRUE) OR
-                   ($4 = 5 AND rp.applies_saturday = TRUE) OR
-                   ($4 = 6 AND rp.applies_sunday = TRUE)
-               )
-             ORDER BY rr.id DESC LIMIT 1",
-        )
-        .bind(plan_id)
-        .bind(room_type_id)
-        .bind(date)
-        .bind(day_of_week)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
-        if let Some(price) = band {
-            return Ok(price);
-        }
-    }
-    let is_weekend = matches!(date.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun);
-    Ok(if is_weekend {
-        room_type.weekend_rate.unwrap_or(room_type.base_price)
-    } else {
-        room_type.weekday_rate.unwrap_or(room_type.base_price)
-    })
+    let mut conn = pool.acquire().await.map_err(ApiError::from)?;
+    let prices = source_rates_for_stay_conn(&mut conn, room_type_id, &[date], rate_plan_id).await?;
+    Ok(prices
+        .into_iter()
+        .next()
+        .map(|(_, price)| price)
+        .unwrap_or(Decimal::ZERO))
 }
 
 /// Commission configuration in force for a channel on `as_of`: the dated rule
@@ -711,7 +740,18 @@ pub async fn commission_config_for(
     channel: &BookingChannel,
     as_of: NaiveDate,
 ) -> Result<CommissionConfig, ApiError> {
-    let rules = repository::active_commission_rules(pool, channel.id).await?;
+    commission_config_for_with(pool, channel, as_of).await
+}
+
+pub async fn commission_config_for_with<'e, E>(
+    executor: E,
+    channel: &BookingChannel,
+    as_of: NaiveDate,
+) -> Result<CommissionConfig, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let rules = repository::active_commission_rules(executor, channel.id).await?;
     if let Some(config) = pricing::select_commission_rule(&rules, as_of) {
         return Ok(config);
     }
@@ -731,11 +771,25 @@ pub async fn resolve_channel_nights(
     rate_plan_id: Option<i64>,
     sources: &[(NaiveDate, Decimal)],
 ) -> Result<Vec<PricedNight>, ApiError> {
+    resolve_channel_nights_with(pool, channel_id, room_type_id, rate_plan_id, sources).await
+}
+
+pub async fn resolve_channel_nights_with<'e, E>(
+    executor: E,
+    channel_id: i64,
+    room_type_id: i64,
+    rate_plan_id: Option<i64>,
+    sources: &[(NaiveDate, Decimal)],
+) -> Result<Vec<PricedNight>, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let Some((first, _)) = sources.first() else {
         return Ok(Vec::new());
     };
     let last_night = sources.last().map(|(d, _)| *d).unwrap_or(*first);
-    let rules = repository::active_pricing_rules(pool, &[channel_id], *first, last_night).await?;
+    let rules =
+        repository::active_pricing_rules(executor, &[channel_id], *first, last_night).await?;
     Ok(sources
         .iter()
         .map(|(date, source)| {
@@ -792,15 +846,17 @@ pub async fn preview(
         RateRepository::find_rate_plan(pool, plan_id).await?;
     }
 
-    let mut sources = Vec::new();
+    let mut dates = Vec::new();
     let mut date = check_in;
     while date < check_out {
-        sources.push((
-            date,
-            source_rate_for(pool, input.room_type_id, date, input.rate_plan_id).await?,
-        ));
+        dates.push(date);
         date += chrono::Duration::days(1);
     }
+    let mut conn = pool.acquire().await.map_err(ApiError::from)?;
+    let sources =
+        source_rates_for_stay_conn(&mut conn, input.room_type_id, &dates, input.rate_plan_id)
+            .await?;
+    drop(conn);
 
     let quote = resolve_channel_quote(
         pool,
@@ -866,29 +922,71 @@ pub async fn matrix(
         .map(|channel| channel.id)
         .collect();
     let rules = repository::active_pricing_rules(pool, &channel_ids, date, date).await?;
+    let all_commission_rules = repository::all_active_commission_rules(pool).await?;
+
+    let mut rules_by_channel: std::collections::HashMap<i64, Vec<ChannelPricingRule>> =
+        std::collections::HashMap::new();
+    for rule in rules {
+        rules_by_channel
+            .entry(rule.channel_id)
+            .or_default()
+            .push(rule);
+    }
+
+    let mut commission_rules_by_channel: std::collections::HashMap<
+        i64,
+        Vec<ChannelCommissionRule>,
+    > = std::collections::HashMap::new();
+    for rule in all_commission_rules {
+        commission_rules_by_channel
+            .entry(rule.channel_id)
+            .or_default()
+            .push(rule);
+    }
+
+    let mut source_rates_by_room_type: std::collections::HashMap<i64, Decimal> =
+        std::collections::HashMap::with_capacity(room_types.len());
+    if !channel_ids.is_empty() {
+        let mut conn = pool.acquire().await.map_err(ApiError::from)?;
+        for room_type in &room_types {
+            let prices =
+                source_rates_for_stay_conn(&mut conn, room_type.id, &[date], rate_plan_id).await?;
+            let source = prices
+                .into_iter()
+                .next()
+                .map(|(_, price)| price)
+                .unwrap_or(Decimal::ZERO);
+            source_rates_by_room_type.insert(room_type.id, source);
+        }
+    }
 
     let currency = crate::modules::settings::service::hotel_currency(pool).await;
 
     let mut cells = Vec::with_capacity(channels.len() * room_types.len());
     for channel in &channels {
-        let commission = commission_config_for(pool, channel, date).await?;
+        let commission = commission_rules_by_channel
+            .get(&channel.id)
+            .and_then(|channel_rules| pricing::select_commission_rule(channel_rules, date))
+            .unwrap_or_else(|| CommissionConfig {
+                commission_type: channel.default_commission_type.clone(),
+                value: channel.default_commission_value,
+                scope: channel.default_commission_scope.clone(),
+            });
+        let channel_rules = rules_by_channel
+            .get(&channel.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         for room_type in &room_types {
             let source = if channel.is_active {
-                source_rate_for(pool, room_type.id, date, rate_plan_id).await?
+                source_rates_by_room_type
+                    .get(&room_type.id)
+                    .copied()
+                    .unwrap_or(Decimal::ZERO)
             } else {
                 Decimal::ZERO
             };
-            let night = pricing::price_night(
-                date,
-                source,
-                &rules
-                    .iter()
-                    .filter(|rule| rule.channel_id == channel.id)
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                room_type.id,
-                rate_plan_id,
-            );
+            let night =
+                pricing::price_night(date, source, channel_rules, room_type.id, rate_plan_id);
             let (commission_amount, net_revenue) = match night.selling_price {
                 Some(selling) if channel.is_active => {
                     let amount = pricing::commission_amount(&commission, selling, 1);

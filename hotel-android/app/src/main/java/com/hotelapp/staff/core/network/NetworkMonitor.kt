@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import com.hotelapp.staff.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,43 +16,81 @@ interface NetworkMonitor {
 class AndroidNetworkMonitor(context: Context) : NetworkMonitor {
     private val connectivityManager =
         context.applicationContext.getSystemService(ConnectivityManager::class.java)
+    private val lock = Any()
+    private val validNetworks = HashSet<Network>()
 
-    private val _isOnline = MutableStateFlow(computeIsOnline())
+    private val _isOnline = MutableStateFlow(computeInitialOnline())
     override val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            updateState()
+            val caps = connectivityManager?.getNetworkCapabilities(network)
+            updateNetwork(network, caps)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            updateState()
+            updateNetwork(network, networkCapabilities)
         }
 
         override fun onLost(network: Network) {
-            updateState()
+            synchronized(lock) {
+                validNetworks.remove(network)
+                _isOnline.value = validNetworks.isNotEmpty()
+            }
         }
 
         override fun onUnavailable() {
-            _isOnline.value = false
+            synchronized(lock) {
+                validNetworks.clear()
+                _isOnline.value = false
+            }
         }
     }
 
     init {
-        runCatching {
+        val registered = runCatching {
             connectivityManager?.registerDefaultNetworkCallback(callback)
+        }.isSuccess
+        if (registered) {
+            synchronized(lock) {
+                validNetworks.clear()
+                val cm = connectivityManager
+                val active = cm?.activeNetwork
+                val caps = if (active != null) cm.getNetworkCapabilities(active) else null
+                if (active != null && hasUsableInternet(caps)) {
+                    validNetworks.add(active)
+                }
+                _isOnline.value = validNetworks.isNotEmpty()
+            }
         }
     }
 
-    private fun updateState() {
-        _isOnline.value = computeIsOnline()
+    private fun hasUsableInternet(capabilities: NetworkCapabilities?): Boolean {
+        if (capabilities == null) return false
+        if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return false
+        return if (BuildConfig.DEBUG) {
+            true
+        } else {
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        }
     }
 
-    private fun computeIsOnline(): Boolean {
+    private fun updateNetwork(network: Network, capabilities: NetworkCapabilities?) {
+        val usable = hasUsableInternet(capabilities)
+        synchronized(lock) {
+            if (usable) {
+                validNetworks.add(network)
+            } else {
+                validNetworks.remove(network)
+            }
+            _isOnline.value = validNetworks.isNotEmpty()
+        }
+    }
+
+    private fun computeInitialOnline(): Boolean {
         val cm = connectivityManager ?: return true
         val active = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(active) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return hasUsableInternet(caps)
     }
 }

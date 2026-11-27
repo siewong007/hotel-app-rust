@@ -37,11 +37,14 @@ impl TeamRepository {
         .map_err(|e| ApiError::Database(e.to_string()))
     }
 
-    pub async fn create(
-        pool: &DbPool,
+    pub async fn create<'e, E>(
+        executor: E,
         input: &TeamCreateInput,
         actor_user_id: i64,
-    ) -> Result<Team, ApiError> {
+    ) -> Result<Team, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, Team>(
             r#"
             INSERT INTO teams (code, name, description, created_by, updated_by)
@@ -53,7 +56,7 @@ impl TeamRepository {
         .bind(&input.name)
         .bind(input.description.as_deref())
         .bind(actor_user_id)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .map_err(|e| {
             if e.to_string().contains("teams_code_live_key") {
@@ -65,12 +68,15 @@ impl TeamRepository {
     }
 
     /// COALESCE-style partial update: an omitted field keeps its current value.
-    pub async fn update(
-        pool: &DbPool,
+    pub async fn update<'e, E>(
+        executor: E,
         team_id: i64,
         input: &TeamUpdateInput,
         actor_user_id: i64,
-    ) -> Result<Team, ApiError> {
+    ) -> Result<Team, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, Team>(
             r#"
             UPDATE teams
@@ -88,7 +94,7 @@ impl TeamRepository {
         .bind(input.description.as_deref())
         .bind(input.is_active)
         .bind(actor_user_id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?
         .ok_or_else(|| ApiError::NotFound("Team not found".to_string()))
@@ -96,11 +102,14 @@ impl TeamRepository {
 
     /// Soft delete, mirroring `users.deleted_at`. The partial unique index on
     /// `code` is scoped to live rows, so the code becomes reusable afterwards.
-    pub async fn soft_delete(
-        pool: &DbPool,
+    pub async fn soft_delete<'e, E>(
+        executor: E,
         team_id: i64,
         actor_user_id: i64,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<bool, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         let result = sqlx::query(
             "UPDATE teams SET deleted_at = CURRENT_TIMESTAMP, is_active = false, \
              updated_by = $2, updated_at = CURRENT_TIMESTAMP \
@@ -108,7 +117,7 @@ impl TeamRepository {
         )
         .bind(team_id)
         .bind(actor_user_id)
-        .execute(pool)
+        .execute(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -151,12 +160,15 @@ impl TeamRepository {
 
     /// Upsert a membership. `added_by` is always written — the whole point of
     /// this column is that "who put this person here" stays answerable.
-    pub async fn upsert_member(
-        pool: &DbPool,
+    pub async fn upsert_member<'e, E>(
+        executor: E,
         team_id: i64,
         input: &TeamMemberInput,
         actor_user_id: i64,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query(
             r#"
             INSERT INTO team_members (team_id, user_id, is_lead, added_by, expires_at)
@@ -172,22 +184,25 @@ impl TeamRepository {
         .bind(input.is_lead)
         .bind(actor_user_id)
         .bind(input.expires_at)
-        .execute(pool)
+        .execute(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
         Ok(())
     }
 
-    pub async fn remove_member(
-        pool: &DbPool,
+    pub async fn remove_member<'e, E>(
+        executor: E,
         team_id: i64,
         user_id: i64,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<bool, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         let result = sqlx::query("DELETE FROM team_members WHERE team_id = $1 AND user_id = $2")
             .bind(team_id)
             .bind(user_id)
-            .execute(pool)
+            .execute(executor)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -219,8 +234,40 @@ impl TeamRepository {
             .map_err(|e| ApiError::Database(e.to_string()))
     }
 
+    /// Replace a team's conferred roles inside a caller-owned transaction,
+    /// writing `granted_by` for every surviving row.
+    pub async fn replace_roles_tx(
+        tx: &mut crate::core::db::DbTransaction<'_>,
+        team_id: i64,
+        role_ids: &[i64],
+        actor_user_id: i64,
+    ) -> Result<(), ApiError> {
+        sqlx::query("DELETE FROM team_roles WHERE team_id = $1")
+            .bind(team_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+
+        if !role_ids.is_empty() {
+            sqlx::query(
+                "INSERT INTO team_roles (team_id, role_id, granted_by) \
+                 SELECT $1, r, $3 FROM UNNEST($2::bigint[]) AS r \
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(team_id)
+            .bind(role_ids)
+            .bind(actor_user_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
     /// Replace a team's conferred roles in one transaction, writing
     /// `granted_by` for every surviving row.
+    #[allow(dead_code)]
     pub async fn replace_roles(
         pool: &DbPool,
         team_id: i64,
@@ -231,26 +278,7 @@ impl TeamRepository {
             .begin()
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
-
-        sqlx::query("DELETE FROM team_roles WHERE team_id = $1")
-            .bind(team_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
-
-        for role_id in role_ids {
-            sqlx::query(
-                "INSERT INTO team_roles (team_id, role_id, granted_by) VALUES ($1, $2, $3) \
-                 ON CONFLICT DO NOTHING",
-            )
-            .bind(team_id)
-            .bind(role_id)
-            .bind(actor_user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
-        }
-
+        Self::replace_roles_tx(&mut tx, team_id, role_ids, actor_user_id).await?;
         tx.commit()
             .await
             .map_err(|e| ApiError::Database(e.to_string()))

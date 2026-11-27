@@ -86,15 +86,15 @@ variable "ssh_ingress_cidrs" {
 }
 
 variable "web_ingress_cidrs" {
-  description = "CIDRs permitted to reach ports 80, 443, and the optional development API port."
+  description = "CIDRs permitted to reach ports 80, 443, and the optional development API port. Keep this restricted rather than defaulting to 0.0.0.0/0."
   type        = set(string)
-  default     = ["0.0.0.0/0"]
+  default     = []
 }
 
 variable "expose_backend_port" {
-  description = "Expose port 3030 for the current frontend build-time API origin."
+  description = "Expose port 3030 directly only when terminating TLS or fronting behind a separate proxy is intentionally bypassed."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "shape" {

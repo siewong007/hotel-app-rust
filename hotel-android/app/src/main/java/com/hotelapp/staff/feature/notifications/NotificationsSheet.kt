@@ -50,7 +50,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,6 +65,7 @@ import com.hotelapp.staff.core.design.HotelExtendedColors
 import com.hotelapp.staff.core.design.HotelModalSheetContainer
 import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.HotelTooltipIconButton
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.ListCardSkeleton
 import com.hotelapp.staff.core.design.StatusPill
 import com.hotelapp.staff.core.design.StatusTone
@@ -70,6 +74,7 @@ import com.hotelapp.staff.core.format.DateFormatter
 import com.hotelapp.staff.core.network.RealtimeSocketClient
 import com.hotelapp.staff.data.dto.StaffNotificationItemDto
 import com.hotelapp.staff.data.repository.NotificationsRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -106,6 +111,7 @@ class NotificationsViewModel(
     val incomingAlerts: SharedFlow<StaffNotificationItemDto> = _incomingAlerts.asSharedFlow()
 
     private var knownIds: MutableSet<Long>? = null
+    private var refreshJob: Job? = null
 
     init {
         refresh()
@@ -122,8 +128,13 @@ class NotificationsViewModel(
         _uiState.update { it.copy(filter = filter) }
     }
 
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
+    }
+
     fun refresh(silent: Boolean = false) {
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             if (!silent) {
                 _uiState.update { it.copy(isLoading = it.items.isEmpty(), error = null) }
             }
@@ -168,7 +179,7 @@ class NotificationsViewModel(
                 }
                 .onFailure { err ->
                     _uiState.update {
-                        it.copy(isLoading = false, error = if (silent) it.error else err.message)
+                        it.copy(isLoading = false, error = if (silent) it.error else (err.message ?: "Unable to load notifications."))
                     }
                 }
         }
@@ -176,6 +187,7 @@ class NotificationsViewModel(
 
     fun markRead(id: Long) {
         viewModelScope.launch {
+            val previous = _uiState.value
             _uiState.update { cur ->
                 val target = cur.items.firstOrNull { it.id == id }
                 val targetWasUnread = target != null && target.readAt == null && target.actionPending
@@ -184,26 +196,37 @@ class NotificationsViewModel(
                     items = cur.items.map { item -> if (item.id == id) item.copy(readAt = item.readAt ?: "read") else item },
                     unreadCount = if (targetWasUnread) (cur.unreadCount - 1).coerceAtLeast(0L) else cur.unreadCount,
                     urgentUnreadCount = if (targetWasUrgent) (cur.urgentUnreadCount - 1).coerceAtLeast(0L) else cur.urgentUnreadCount,
+                    error = null,
                 )
             }
-            repository.markRead(id).onSuccess {
-                refresh(silent = true)
-            }
+            repository.markRead(id)
+                .onSuccess { refresh(silent = true) }
+                .onFailure { err ->
+                    _uiState.value = previous.copy(
+                        error = err.message ?: "Unable to mark notification as read.",
+                    )
+                }
         }
     }
 
     fun markAllRead() {
         viewModelScope.launch {
+            val previous = _uiState.value
             _uiState.update { cur ->
                 cur.copy(
                     items = cur.items.map { item -> item.copy(readAt = item.readAt ?: "read") },
                     unreadCount = 0L,
                     urgentUnreadCount = 0L,
+                    error = null,
                 )
             }
-            repository.markAllRead().onSuccess {
-                refresh(silent = true)
-            }
+            repository.markAllRead()
+                .onSuccess { refresh(silent = true) }
+                .onFailure { err ->
+                    _uiState.value = previous.copy(
+                        error = err.message ?: "Unable to mark all notifications as read.",
+                    )
+                }
         }
     }
 }
@@ -309,7 +332,7 @@ fun NotificationsModalSheet(
 
     val displayedItems = remember(state.items, state.filter) {
         when (state.filter) {
-            NotificationFilter.ACTION_NEEDED -> state.items.filter { it.actionPending || it.readAt == null }
+            NotificationFilter.ACTION_NEEDED -> state.items.filter { it.actionPending }
             NotificationFilter.ALL -> state.items
         }
     }
@@ -335,6 +358,9 @@ fun NotificationsModalSheet(
                         text = "Notifications",
                         color = colors.textPrimary,
                         style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (state.unreadCount > 0) {
                         val urgent = state.urgentUnreadCount > 0
@@ -355,12 +381,18 @@ fun NotificationsModalSheet(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (state.unreadCount > 0) {
                         TextButton(
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             onClick = {
                                 haptics.confirm()
                                 viewModel.markAllRead()
                             },
                         ) {
-                            Text("Mark all read", color = colors.primaryOnSurface)
+                            Text(
+                                text = "Mark all read",
+                                color = colors.primaryOnSurface,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     }
                     HotelTooltipIconButton(
@@ -380,7 +412,7 @@ fun NotificationsModalSheet(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
             ) {
-                val pendingTotal = state.items.count { it.actionPending || it.readAt == null }
+                val pendingTotal = state.items.count { it.actionPending }
                 FilterChip(
                     selected = state.filter == NotificationFilter.ACTION_NEEDED,
                     onClick = { viewModel.setFilter(NotificationFilter.ACTION_NEEDED) },
@@ -402,15 +434,23 @@ fun NotificationsModalSheet(
             }
 
             when {
-                state.isLoading -> ListCardSkeleton(
+                state.isLoading && state.items.isEmpty() -> ListCardSkeleton(
                     count = 3,
                     modifier = Modifier.height(260.dp),
                 )
-                state.error != null -> ErrorStateView(
+                state.error != null && state.items.isEmpty() -> ErrorStateView(
                     message = state.error!!,
                     onRetry = { viewModel.refresh() },
                 )
                 displayedItems.isEmpty() -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (state.error != null) {
+                        InlineAlertBanner(
+                            message = state.error!!,
+                            tone = colors.danger,
+                            onDismiss = viewModel::clearError,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     EmptyStateView(
                         title = "All caught up",
                         subtitle = if (state.filter == NotificationFilter.ACTION_NEEDED && state.items.isNotEmpty()) {
@@ -430,6 +470,15 @@ fun NotificationsModalSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(bottom = 24.dp),
                 ) {
+                    if (state.error != null) {
+                        item(key = "notif_inline_error") {
+                            InlineAlertBanner(
+                                message = state.error!!,
+                                tone = colors.danger,
+                                onDismiss = viewModel::clearError,
+                            )
+                        }
+                    }
                     items(displayedItems, key = { it.id }) { item ->
                         val priority = effectivePriority(item)
                         val isPending = item.actionPending
@@ -485,11 +534,7 @@ fun NotificationsModalSheet(
                                 else -> colors.borderSubtle
                             }
                             HotelCard(
-                                onClick = {
-                                    haptics.click()
-                                    viewModel.markRead(item.id)
-                                    onOpenItem(item)
-                                },
+                                onClick = { onOpenItem(item) },
                                 contentPadding = PaddingValues(0.dp),
                                 containerColor = if (isUnread) colors.surfaceRaised else colors.surfaceBase,
                                 borderColor = cardBorder,
@@ -558,20 +603,12 @@ fun NotificationsModalSheet(
                                                     color = colors.textMuted,
                                                     style = MaterialTheme.typography.labelSmall,
                                                 )
-                                                TextButton(
-                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                                    onClick = {
-                                                        haptics.click()
-                                                        viewModel.markRead(item.id)
-                                                        onOpenItem(item)
-                                                    },
-                                                ) {
-                                                    Text(
-                                                        text = notificationActionLabel(item),
-                                                        color = if (priority == "urgent" && isPending) colors.danger.fg else colors.primaryOnSurface,
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                    )
-                                                }
+                                                Text(
+                                                    text = notificationActionLabel(item),
+                                                    color = if (priority == "urgent" && isPending) colors.danger.fg else colors.primaryOnSurface,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                )
                                             }
                                         }
                                     },
@@ -581,7 +618,8 @@ fun NotificationsModalSheet(
                                                 modifier = Modifier
                                                     .size(8.dp)
                                                     .clip(CircleShape)
-                                                    .background(if (priority == "urgent") colors.danger.fg else colors.primaryMain),
+                                                    .background(if (priority == "urgent") colors.danger.fg else colors.primaryMain)
+                                                    .semantics { contentDescription = "Unread" },
                                             )
                                         }
                                     } else null,

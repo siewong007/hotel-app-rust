@@ -19,8 +19,11 @@
 -keepclassmembers class com.hotelapp.staff.core.sync.** { *** Companion; }
 -keepclasseswithmembers class com.hotelapp.staff.core.sync.** { kotlinx.serialization.KSerializer serializer(...); }
 -keep,includedescriptorclasses class com.hotelapp.staff.core.network.**$$serializer { *; }
--keepclassmembers class com.hotelapp.staff.core.network.** { *; }
+-keepclassmembers class com.hotelapp.staff.core.network.** { *** Companion; }
 -keepclasseswithmembers class com.hotelapp.staff.core.network.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class com.hotelapp.staff.core.storage.**$$serializer { *; }
+-keepclassmembers class com.hotelapp.staff.core.storage.** { *** Companion; }
+-keepclasseswithmembers class com.hotelapp.staff.core.storage.** { kotlinx.serialization.KSerializer serializer(...); }
 -keep,includedescriptorclasses class com.hotelapp.staff.widget.**$$serializer { *; }
 -keepclassmembers class com.hotelapp.staff.widget.** { *** Companion; }
 -keepclasseswithmembers class com.hotelapp.staff.widget.** { kotlinx.serialization.KSerializer serializer(...); }
@@ -33,3 +36,6 @@
 -dontwarn okio.**
 -dontwarn javax.annotation.**
 -dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
+
+# Keep GlanceAppWidget canonical class names intact so persisted widget bindings survive app updates.
+-keepnames class * extends androidx.glance.appwidget.GlanceAppWidget

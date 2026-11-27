@@ -1,7 +1,7 @@
 use super::handlers;
 use crate::core::db::DbPool;
 use crate::core::error::ApiError;
-use crate::core::middleware::{require_any_permission_helper, require_auth};
+use crate::core::middleware::{require_any_permission_helper, require_auth, require_guest_user};
 use crate::modules::loyalty::models;
 use axum::{
     Json, Router,
@@ -51,6 +51,7 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<JsonResponse<models::LoyaltyMeResponse>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    require_guest_user(&pool, user_id).await?;
     handlers::me_handler(State(pool), Extension(user_id)).await
 }
 
@@ -59,6 +60,7 @@ async fn enroll(
     headers: HeaderMap,
 ) -> Result<JsonResponse<models::LoyaltyEnrollmentResponse>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    require_guest_user(&pool, user_id).await?;
     handlers::enroll_handler(State(pool), Extension(user_id)).await
 }
 
@@ -67,6 +69,7 @@ async fn activity(
     headers: HeaderMap,
 ) -> Result<JsonResponse<Vec<models::LoyaltyTransaction>>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    require_guest_user(&pool, user_id).await?;
     handlers::activity_handler(State(pool), Extension(user_id)).await
 }
 
@@ -76,6 +79,7 @@ async fn guest_rewards(
     query: Query<models::LoyaltyRewardQuery>,
 ) -> Result<JsonResponse<Vec<models::LoyaltyReward>>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    require_guest_user(&pool, user_id).await?;
     handlers::guest_rewards_handler(State(pool), Extension(user_id), query).await
 }
 
@@ -86,6 +90,7 @@ async fn redeem_reward(
     Json(input): Json<models::RedeemRewardInput>,
 ) -> Result<JsonResponse<models::LoyaltyRedemption>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    require_guest_user(&pool, user_id).await?;
     handlers::redeem_reward_handler(State(pool), Extension(user_id), path, Json(input)).await
 }
 

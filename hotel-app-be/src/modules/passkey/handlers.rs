@@ -24,8 +24,9 @@ pub async fn delete_passkey_handler(
     State(pool): State<DbPool>,
     Extension(user_id): Extension<i64>,
     Path(passkey_id): Path<uuid::Uuid>,
+    Json(req): Json<PasskeyDeleteRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    svc::delete_passkey(&pool, user_id, passkey_id).await?;
+    svc::delete_passkey(&pool, user_id, passkey_id, req).await?;
 
     Ok(Json(
         serde_json::json!({"message": "Passkey deleted successfully"}),

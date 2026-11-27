@@ -106,6 +106,23 @@ pub async fn verify_guest_booking(
     if !guest_name_matches(&guest.nick_name, &request.name) {
         return Err(verify_booking_failure());
     }
+    if let Some(stored_email) = guest
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let supplied = request.email.as_deref().map(str::trim).unwrap_or("");
+        if !stored_email.eq_ignore_ascii_case(supplied) {
+            return Err(verify_booking_failure());
+        }
+    }
+    if GuestPortalRepository::guest_has_active_account(pool, booking.guest_id).await? {
+        return Err(ApiError::Forbidden(
+            "This booking belongs to a registered guest account. Please sign in to manage your booking."
+                .to_string(),
+        ));
+    }
 
     let check_in_date = booking.check_in_date;
     let today = hotel_today(pool).await?;
@@ -204,6 +221,112 @@ pub async fn get_booking_by_token(
     portal_response(pool, booking).await
 }
 
+fn sanitize_bounded_field(
+    slot: &mut Option<String>,
+    field_label: &str,
+    max_chars: usize,
+    sanitize: fn(&str) -> String,
+) -> Result<(), ApiError> {
+    let Some(raw) = slot.as_deref() else {
+        return Ok(());
+    };
+    let sanitized = sanitize(raw);
+    if sanitized.chars().count() > max_chars {
+        return Err(ApiError::BadRequest(format!(
+            "{field_label} must be at most {max_chars} characters"
+        )));
+    }
+    *slot = Some(sanitized);
+    Ok(())
+}
+
+fn sanitize_phone_field(slot: &mut Option<String>, field_label: &str) -> Result<(), ApiError> {
+    let Some(raw) = slot.as_deref() else {
+        return Ok(());
+    };
+    if raw.chars().count() > 64 {
+        return Err(ApiError::BadRequest(format!(
+            "{field_label} must be at most 64 characters"
+        )));
+    }
+    sanitize_bounded_field(slot, field_label, 30, Sanitizer::sanitize_phone)
+}
+
+fn sanitize_precheckin_request(request: &mut PreCheckInUpdateRequest) -> Result<(), ApiError> {
+    normalize_guest_email(request)?;
+    let g = &mut request.guest_update;
+    sanitize_bounded_field(
+        &mut g.first_name,
+        "First name",
+        100,
+        Sanitizer::sanitize_guest_name,
+    )?;
+    sanitize_bounded_field(
+        &mut g.last_name,
+        "Last name",
+        100,
+        Sanitizer::sanitize_guest_name,
+    )?;
+    sanitize_phone_field(&mut g.phone, "Phone")?;
+    sanitize_phone_field(&mut g.alt_phone, "Alternative phone")?;
+    sanitize_bounded_field(&mut g.title, "Title", 20, Sanitizer::sanitize_header_line)?;
+    sanitize_bounded_field(
+        &mut g.postal_code,
+        "Postal code",
+        20,
+        Sanitizer::sanitize_header_line,
+    )?;
+    sanitize_bounded_field(
+        &mut g.ic_number,
+        "ID/Passport number",
+        100,
+        Sanitizer::sanitize_header_line,
+    )?;
+    sanitize_bounded_field(
+        &mut g.nationality,
+        "Nationality",
+        100,
+        Sanitizer::sanitize_header_line,
+    )?;
+    sanitize_bounded_field(
+        &mut g.address_line1,
+        "Address",
+        255,
+        Sanitizer::sanitize_header_line,
+    )?;
+    sanitize_bounded_field(&mut g.city, "City", 100, Sanitizer::sanitize_header_line)?;
+    sanitize_bounded_field(
+        &mut g.state_province,
+        "State/province",
+        100,
+        Sanitizer::sanitize_header_line,
+    )?;
+    sanitize_bounded_field(
+        &mut g.country,
+        "Country",
+        100,
+        Sanitizer::sanitize_header_line,
+    )?;
+    sanitize_bounded_field(
+        &mut request.market_code,
+        "Market code",
+        50,
+        Sanitizer::sanitize_header_line,
+    )?;
+    if let Some(special_requests) = request.special_requests.as_deref() {
+        let sanitized = Sanitizer::sanitize_notes(special_requests)
+            .trim()
+            .to_string();
+        if sanitized.chars().count() > 2000 {
+            return Err(ApiError::BadRequest(
+                "Special requests must be at most 2000 characters".to_string(),
+            ));
+        }
+        request.special_requests = Some(sanitized);
+    }
+    Ok(())
+}
+
 pub async fn submit_precheckin_update(
     pool: &DbPool,
     token: &str,
@@ -211,7 +334,7 @@ pub async fn submit_precheckin_update(
 ) -> Result<GuestPortalBookingResponse, ApiError> {
     let booking = require_valid_token(pool, token).await?;
 
-    normalize_guest_email(&mut request);
+    sanitize_precheckin_request(&mut request)?;
 
     GuestPortalRepository::update_guest_precheckin(pool, booking.guest_id, &request.guest_update)
         .await?;
@@ -246,6 +369,12 @@ pub async fn auto_checkin_by_token(
     token: &str,
 ) -> Result<crate::models::AutoCheckinResponse, ApiError> {
     let booking = require_valid_token(pool, token).await?;
+    if GuestPortalRepository::guest_has_active_account(pool, booking.guest_id).await? {
+        return Err(ApiError::Forbidden(
+            "Sign in to your guest account to complete online check-in for this booking."
+                .to_string(),
+        ));
+    }
     let response = auto_checkin::auto_checkin_for_guest_portal(pool, booking.id).await?;
     AuditLog::log_event(
         pool,
@@ -457,23 +586,29 @@ async fn require_valid_token(pool: &DbPool, token: &str) -> Result<Booking, ApiE
     }
 }
 
-fn normalize_guest_email(request: &mut PreCheckInUpdateRequest) {
+fn normalize_guest_email(request: &mut PreCheckInUpdateRequest) -> Result<(), ApiError> {
     let Some(email) = &request.guest_update.email else {
-        return;
+        return Ok(());
     };
     let trimmed = email.trim();
 
     if trimmed.is_empty() {
         request.guest_update.email = Some(String::new());
-        return;
+        return Ok(());
+    }
+    if trimmed.chars().count() > 255 {
+        return Err(ApiError::BadRequest(
+            "Email must be at most 255 characters".to_string(),
+        ));
     }
 
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if email_regex.is_match(trimmed) {
-        request.guest_update.email = Some(trimmed.to_string());
+        request.guest_update.email = Some(Sanitizer::sanitize_email(trimmed));
     } else {
         request.guest_update.email = None;
     }
+    Ok(())
 }
 
 async fn portal_response(
@@ -673,17 +808,9 @@ pub async fn update_my_profile(
 /// path: a paid booking can never be voided by the guest directly, so the
 /// button on a paid stay always means "ask staff to cancel", which stays
 /// available regardless of the toggle.
-pub async fn get_my_bookings(
-    pool: &DbPool,
-    guest_id: i64,
-    limit: i64,
-    offset: i64,
-    search: Option<&str>,
-) -> Result<GuestPortalPage<GuestPortalBookingSummary>, ApiError> {
+async fn apply_cancellation_eligibility(pool: &DbPool, items: &mut [GuestPortalBookingSummary]) {
     let portal_cancel_enabled = portal_cancellation_enabled(pool).await;
-    let (mut items, total) =
-        GuestPortalSessionRepository::list_bookings(pool, guest_id, limit, offset, search).await?;
-    for booking in &mut items {
+    for booking in items {
         if booking.cancellation_unavailable_reason.is_none() {
             booking.cancellation_unavailable_reason = cancellation_block_reason(
                 &booking.status,
@@ -694,6 +821,18 @@ pub async fn get_my_bookings(
         }
         booking.can_cancel = booking.cancellation_unavailable_reason.is_none();
     }
+}
+
+pub async fn get_my_bookings(
+    pool: &DbPool,
+    guest_id: i64,
+    limit: i64,
+    offset: i64,
+    search: Option<&str>,
+) -> Result<GuestPortalPage<GuestPortalBookingSummary>, ApiError> {
+    let (mut items, total) =
+        GuestPortalSessionRepository::list_bookings(pool, guest_id, limit, offset, search).await?;
+    apply_cancellation_eligibility(pool, &mut items).await;
     Ok(GuestPortalPage { items, total })
 }
 
@@ -762,9 +901,9 @@ pub async fn cancel_my_booking(
             "Cancellation reason must be 1,000 characters or fewer".to_string(),
         ));
     }
-    let (items, _) = get_my_bookings(pool, guest_id, 10_000, 0, None)
-        .await
-        .map(|page| (page.items, page.total))?;
+    let mut items =
+        GuestPortalSessionRepository::list_booking_unit(pool, guest_id, booking_id).await?;
+    apply_cancellation_eligibility(pool, &mut items).await;
     let Some(booking) = items
         .iter()
         .find(|booking| booking.id == booking_id)
@@ -887,9 +1026,9 @@ pub async fn cancel_my_booking_group(
             "Cancellation reason must be 1,000 characters or fewer".to_string(),
         ));
     }
-    let (items, _) = get_my_bookings(pool, guest_id, 10_000, 0, None)
-        .await
-        .map(|page| (page.items, page.total))?;
+    let mut items =
+        GuestPortalSessionRepository::list_group_bookings(pool, guest_id, group_id).await?;
+    apply_cancellation_eligibility(pool, &mut items).await;
     let rooms: Vec<_> = items
         .into_iter()
         .filter(|booking| booking.booking_group_id == Some(group_id) && booking.status != "voided")
@@ -1528,5 +1667,107 @@ mod tests {
         // ask for one.
         assert!(cancellation_block_reason("confirmed", false, true, true).is_none());
         assert!(cancellation_block_reason("confirmed", false, true, false).is_none());
+    }
+
+    #[test]
+    fn precheckin_request_strips_html_control_chars_and_normalizes_contact_fields() {
+        let mut req = PreCheckInUpdateRequest {
+            guest_update: crate::models::GuestUpdateInput {
+                first_name: Some("  Alice\u{0007}  ".to_string()),
+                last_name: Some(" O'Brien\r\n ".to_string()),
+                email: Some("  Guest.Name@Example.COM  ".to_string()),
+                phone: Some("+60 (12) 345-6789".to_string()),
+                alt_phone: Some("03-1234 5678".to_string()),
+                address_line1: Some(" 12 Jalan\tTest\r\n ".to_string()),
+                postal_code: Some(" 50000\n ".to_string()),
+                ..Default::default()
+            },
+            market_code: Some(" WALK_IN\u{0000} ".to_string()),
+            special_requests: Some(
+                "<script>alert(1)</script>Quiet floor please\u{0007}".to_string(),
+            ),
+        };
+
+        sanitize_precheckin_request(&mut req).expect("valid sanitized precheckin must pass");
+
+        assert_eq!(req.guest_update.first_name.as_deref(), Some("Alice"));
+        assert_eq!(req.guest_update.last_name.as_deref(), Some("O'Brien"));
+        assert_eq!(
+            req.guest_update.email.as_deref(),
+            Some("guest.name@example.com")
+        );
+        assert_eq!(req.guest_update.phone.as_deref(), Some("+60123456789"));
+        assert_eq!(req.guest_update.alt_phone.as_deref(), Some("0312345678"));
+        assert_eq!(
+            req.guest_update.address_line1.as_deref(),
+            Some("12 JalanTest")
+        );
+        assert_eq!(req.guest_update.postal_code.as_deref(), Some("50000"));
+        assert_eq!(req.market_code.as_deref(), Some("WALK_IN"));
+        assert_eq!(req.special_requests.as_deref(), Some("Quiet floor please"));
+    }
+
+    #[test]
+    fn precheckin_request_rejects_overlong_fields_and_preserves_blank_email_clear() {
+        let mut clear_email = PreCheckInUpdateRequest {
+            guest_update: crate::models::GuestUpdateInput {
+                email: Some("   ".to_string()),
+                ..Default::default()
+            },
+            market_code: None,
+            special_requests: None,
+        };
+        sanitize_precheckin_request(&mut clear_email).expect("blank email clear must succeed");
+        assert_eq!(clear_email.guest_update.email.as_deref(), Some(""));
+
+        let cases = [
+            PreCheckInUpdateRequest {
+                guest_update: crate::models::GuestUpdateInput {
+                    first_name: Some("a".repeat(101)),
+                    ..Default::default()
+                },
+                market_code: None,
+                special_requests: None,
+            },
+            PreCheckInUpdateRequest {
+                guest_update: crate::models::GuestUpdateInput {
+                    postal_code: Some("1".repeat(21)),
+                    ..Default::default()
+                },
+                market_code: None,
+                special_requests: None,
+            },
+            PreCheckInUpdateRequest {
+                guest_update: crate::models::GuestUpdateInput {
+                    phone: Some("1".repeat(65)),
+                    ..Default::default()
+                },
+                market_code: None,
+                special_requests: None,
+            },
+            PreCheckInUpdateRequest {
+                guest_update: crate::models::GuestUpdateInput {
+                    email: Some(format!("{}@example.com", "a".repeat(250))),
+                    ..Default::default()
+                },
+                market_code: None,
+                special_requests: None,
+            },
+            PreCheckInUpdateRequest {
+                guest_update: Default::default(),
+                market_code: None,
+                special_requests: Some("x".repeat(2001)),
+            },
+        ];
+
+        for mut case in cases {
+            assert!(
+                matches!(
+                    sanitize_precheckin_request(&mut case),
+                    Err(ApiError::BadRequest(_))
+                ),
+                "overlong precheckin field must fail validation"
+            );
+        }
     }
 }

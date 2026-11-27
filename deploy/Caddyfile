@@ -16,9 +16,13 @@
 		format filter {
 			wrap json
 			fields {
-				request>uri query {
-					replace token REDACTED
-				}
+				request>uri regexp "(/guest-portal/(?:booking|pre-checkin|auto-checkin)/|/booking/recover-payment/|/communications/unsubscribe/)[A-Za-z0-9._~-]{16,}|([?&]token=)[^&#]+" "${1}${2}REDACTED"
+				request>headers>Sec-WebSocket-Protocol delete
+				request>headers>X-Booking-Access-Token delete
+				request>headers>X-Desktop-Client-Token delete
+				request>headers>X-Step-Up delete
+				request>headers>X-Backup-Passphrase delete
+				resp_headers>Sec-WebSocket-Protocol delete
 			}
 		}
 	}

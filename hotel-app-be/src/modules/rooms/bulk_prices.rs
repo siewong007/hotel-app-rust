@@ -298,17 +298,17 @@ async fn fetch_rows(
 ) -> Result<Vec<PriceRow>, ApiError> {
     let rows = if lock {
         sqlx::query(
-            "SELECT id, code, name, base_price, weekday_rate, weekend_rate \
+            "SELECT id, code, name, base_price, weekday_rate, weekend_rate, sort_order \
              FROM room_types \
              WHERE (cardinality($1::bigint[]) = 0 OR id = ANY($1)) \
-             ORDER BY sort_order, id FOR UPDATE",
+             ORDER BY id FOR UPDATE",
         )
         .bind(ids)
         .fetch_all(conn)
         .await
     } else {
         sqlx::query(
-            "SELECT id, code, name, base_price, weekday_rate, weekend_rate \
+            "SELECT id, code, name, base_price, weekday_rate, weekend_rate, sort_order \
              FROM room_types \
              WHERE (cardinality($1::bigint[]) = 0 OR id = ANY($1)) \
              ORDER BY sort_order, id",
@@ -318,18 +318,25 @@ async fn fetch_rows(
         .await
     }
     .map_err(db_err)?;
-    rows.iter()
+    let mut items: Vec<(Option<i32>, PriceRow)> = rows
+        .iter()
         .map(|r| {
-            Ok(PriceRow {
+            let sort_order: Option<i32> = r.try_get("sort_order").map_err(db_err)?;
+            let row = PriceRow {
                 id: r.try_get("id").map_err(db_err)?,
                 code: r.try_get("code").map_err(db_err)?,
                 name: r.try_get("name").map_err(db_err)?,
                 base_price: r.try_get("base_price").map_err(db_err)?,
                 weekday_rate: r.try_get("weekday_rate").map_err(db_err)?,
                 weekend_rate: r.try_get("weekend_rate").map_err(db_err)?,
-            })
+            };
+            Ok((sort_order, row))
         })
-        .collect()
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    if lock {
+        items.sort_by_key(|(sort_order, row)| (sort_order.unwrap_or(i32::MAX), row.id));
+    }
+    Ok(items.into_iter().map(|(_, row)| row).collect())
 }
 
 fn ensure_all_found(rows: &[PriceRow], ids: &[i64]) -> Result<(), ApiError> {

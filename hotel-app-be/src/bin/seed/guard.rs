@@ -35,11 +35,11 @@ pub fn db_host(url: &str) -> &str {
     let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
     let authority = after_scheme.split('/').next().unwrap_or_default();
     let hostport = authority.rsplit('@').next().unwrap_or_default();
-    hostport
-        .trim_start_matches('[')
-        .split([':', ']'])
-        .next()
-        .unwrap_or_default()
+    if let Some(rest) = hostport.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default()
+    } else {
+        hostport.split(':').next().unwrap_or_default()
+    }
 }
 
 fn is_loopback_host(host: &str) -> bool {
@@ -50,6 +50,10 @@ fn is_loopback_host(host: &str) -> bool {
         || host == "::1"
         || host.starts_with('/') // unix socket directory
         || host.starts_with("%2F") // url-encoded unix socket
+}
+
+pub fn is_loopback_url(database_url: &str) -> bool {
+    is_loopback_host(db_host(database_url))
 }
 
 /// `--reset` may run only when the environment is explicitly development, or
@@ -84,4 +88,97 @@ pub fn require_reset_permitted(env: DeployEnv, database_url: &str) -> Result<(),
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |key| map.get(key).cloned()
+    }
+
+    #[test]
+    fn resolve_env_prefers_app_env_over_environment() {
+        assert_eq!(
+            resolve_env(env_from(&[
+                ("APP_ENV", "Production"),
+                ("ENVIRONMENT", "development"),
+            ])),
+            DeployEnv::Production
+        );
+        assert_eq!(
+            resolve_env(env_from(
+                &[("APP_ENV", "STAGING"), ("ENVIRONMENT", "prod"),]
+            )),
+            DeployEnv::Development
+        );
+        assert_eq!(
+            resolve_env(env_from(&[("ENVIRONMENT", "local")])),
+            DeployEnv::Development
+        );
+        assert_eq!(
+            resolve_env(env_from(&[("APP_ENV", "custom")])),
+            DeployEnv::Unknown
+        );
+    }
+
+    #[test]
+    fn db_host_handles_urls_ipv6_and_unix_sockets() {
+        assert_eq!(
+            db_host("postgres://user:pass@127.0.0.1:5432/db"),
+            "127.0.0.1"
+        );
+        assert_eq!(
+            db_host("postgres://user@localhost:55432/test_pg19"),
+            "localhost"
+        );
+        assert_eq!(db_host("postgres://user@[::1]:5432/db"), "::1");
+        assert_eq!(
+            db_host("postgres://user@[2001:db8::1]:5432/db"),
+            "2001:db8::1"
+        );
+        assert!(!reset_permitted(
+            DeployEnv::Unknown,
+            "postgres://user@[2001:db8::1]:5432/db"
+        ));
+        assert_eq!(db_host("postgres:///db?host=/var/run/postgresql"), "");
+        assert_eq!(
+            db_host("postgres://prod.example.com:5432/hotel"),
+            "prod.example.com"
+        );
+    }
+
+    #[test]
+    fn reset_and_production_guards_enforce_safety() {
+        assert!(require_not_production(DeployEnv::Production).is_err());
+        assert!(require_not_production(DeployEnv::Development).is_ok());
+        assert!(require_not_production(DeployEnv::Unknown).is_ok());
+
+        assert!(!reset_permitted(
+            DeployEnv::Production,
+            "postgres://user@localhost:5432/db"
+        ));
+        assert!(reset_permitted(
+            DeployEnv::Development,
+            "postgres://db.internal:5432/dev"
+        ));
+        assert!(reset_permitted(
+            DeployEnv::Unknown,
+            "postgres://user@127.0.0.1:5432/db"
+        ));
+        assert!(!reset_permitted(
+            DeployEnv::Unknown,
+            "postgres://user@prod-db.internal:5432/db"
+        ));
+        assert!(
+            require_reset_permitted(DeployEnv::Unknown, "postgres://user@remote-host:5432/db")
+                .is_err()
+        );
+    }
 }

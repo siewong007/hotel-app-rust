@@ -18,7 +18,33 @@ pub async fn mark_complimentary_handler(
     Path(booking_id): Path<i64>,
     Json(input): Json<MarkComplimentaryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Check if booking exists and is in a valid state, get room and rate info
+    // Parse date overrides before opening the transaction so malformed input
+    // fails fast without acquiring a row lock.
+    let parsed_comp_start = match &input.complimentary_start_date {
+        Some(date_str) => Some(
+            NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
+                ApiError::BadRequest(
+                    "Invalid complimentary_start_date format. Use YYYY-MM-DD".to_string(),
+                )
+            })?,
+        ),
+        None => None,
+    };
+    let parsed_comp_end = match &input.complimentary_end_date {
+        Some(date_str) => Some(
+            NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
+                ApiError::BadRequest(
+                    "Invalid complimentary_end_date format. Use YYYY-MM-DD".to_string(),
+                )
+            })?,
+        ),
+        None => None,
+    };
+
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+
+    // Lock the booking row before checking status/complimentary flags or
+    // computing totals so concurrent check-in or comp mutations serialize.
     let booking_row = sqlx::query(
         r#"
         SELECT b.id, b.guest_id, b.status, b.is_complimentary, b.check_in_date, b.check_out_date,
@@ -28,10 +54,11 @@ pub async fn mark_complimentary_handler(
         INNER JOIN rooms r ON b.room_id = r.id
         INNER JOIN room_types rt ON r.room_type_id = rt.id
         WHERE b.id = $1
+        FOR UPDATE OF b
         "#,
     )
     .bind(booking_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?
     .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
@@ -66,23 +93,8 @@ pub async fn mark_complimentary_handler(
         ));
     }
 
-    // Parse and validate complimentary date range
-    let comp_start = match &input.complimentary_start_date {
-        Some(date_str) => NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
-            ApiError::BadRequest(
-                "Invalid complimentary_start_date format. Use YYYY-MM-DD".to_string(),
-            )
-        })?,
-        None => check_in,
-    };
-    let comp_end = match &input.complimentary_end_date {
-        Some(date_str) => NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
-            ApiError::BadRequest(
-                "Invalid complimentary_end_date format. Use YYYY-MM-DD".to_string(),
-            )
-        })?,
-        None => check_out,
-    };
+    let comp_start = parsed_comp_start.unwrap_or(check_in);
+    let comp_end = parsed_comp_end.unwrap_or(check_out);
 
     // Validate date range is within booking period
     if comp_start < check_in || comp_end > check_out {
@@ -114,35 +126,7 @@ pub async fn mark_complimentary_handler(
     let new_subtotal = room_rate * Decimal::from(paid_nights);
     let new_tax = Decimal::ZERO;
     let new_total = new_subtotal;
-
-    let mut tx = pool.begin().await.map_err(ApiError::from)?;
-    let locked_status: Option<String> =
-        sqlx::query_scalar("SELECT status FROM bookings WHERE id = $1 FOR UPDATE")
-            .bind(booking_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
-    let locked_status =
-        locked_status.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
-    if matches!(
-        locked_status.as_str(),
-        "voided" | "checked_out" | "completed" | "no_show" | "comp_void"
-    ) {
-        return Err(ApiError::BadRequest(format!(
-            "Cannot mark booking as complimentary in status: {locked_status}"
-        )));
-    }
-
-    // Update booking with all new fields (`status` stays `'confirmed'` if
-    // already confirmed/comped, preserving overlap constraint protection).
-    let target_status = if matches!(
-        locked_status.as_str(),
-        "partial_complimentary" | "fully_complimentary"
-    ) {
-        "confirmed"
-    } else {
-        locked_status.as_str()
-    };
+    let target_status = status.as_str();
 
     sqlx::query(
         r#"
@@ -417,29 +401,7 @@ pub async fn update_complimentary_handler(
     Path(booking_id): Path<i64>,
     Json(input): Json<UpdateComplimentaryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Get current booking
-    let booking_row = sqlx::query(
-        "SELECT id, is_complimentary, check_in_date, check_out_date, room_rate, total_amount FROM bookings WHERE id = $1"
-    )
-    .bind(booking_id)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?
-    .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
-
-    let is_complimentary: Option<bool> = booking_row.get(1);
-    if is_complimentary != Some(true) {
-        return Err(ApiError::BadRequest(
-            "Booking is not marked as complimentary".to_string(),
-        ));
-    }
-
-    let check_in: NaiveDate = booking_row.get(2);
-    let check_out: NaiveDate = booking_row.get(3);
-    let room_rate: Decimal = booking_row.get_decimal(4);
-    let original_total: Decimal = booking_row.get_decimal(5);
-
-    // Parse new dates if provided
+    // Parse new dates before opening the transaction so malformed input fails fast.
     let comp_start = if let Some(ref date_str) = input.complimentary_start_date {
         Some(
             NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
@@ -459,6 +421,52 @@ pub async fn update_complimentary_handler(
     } else {
         None
     };
+
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+
+    // Lock the row inside the transaction before validating flags, status, or pricing.
+    let booking_row = sqlx::query(
+        "SELECT id, status, is_complimentary, check_in_date, check_out_date, room_rate, total_amount \
+         FROM bookings WHERE id = $1 FOR UPDATE",
+    )
+    .bind(booking_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?
+    .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+
+    let locked_status: String = booking_row
+        .try_get::<Option<String>, _>(1)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let is_complimentary: Option<bool> = booking_row.get(2);
+    if is_complimentary != Some(true) {
+        return Err(ApiError::BadRequest(
+            "Booking is not marked as complimentary".to_string(),
+        ));
+    }
+
+    if matches!(
+        locked_status.as_str(),
+        "checked_in"
+            | "auto_checked_in"
+            | "checked_out"
+            | "completed"
+            | "voided"
+            | "cancelled"
+            | "no_show"
+            | "comp_void"
+    ) {
+        return Err(ApiError::BadRequest(format!(
+            "Cannot update complimentary details for booking in status: {locked_status}"
+        )));
+    }
+
+    let check_in: NaiveDate = booking_row.get(3);
+    let check_out: NaiveDate = booking_row.get(4);
+    let room_rate: Decimal = booking_row.get_decimal(5);
+    let original_total: Decimal = booking_row.get_decimal(6);
 
     // Validate dates if both provided
     if let (Some(start), Some(end)) = (comp_start, comp_end) {
@@ -482,23 +490,6 @@ pub async fn update_complimentary_handler(
         let new_tax = Decimal::ZERO;
         let new_total = new_subtotal;
 
-        let mut tx = pool.begin().await.map_err(ApiError::from)?;
-        let locked_status: Option<String> =
-            sqlx::query_scalar("SELECT status FROM bookings WHERE id = $1 FOR UPDATE")
-                .bind(booking_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|e| ApiError::Database(e.to_string()))?;
-        let locked_status =
-            locked_status.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
-        if matches!(
-            locked_status.as_str(),
-            "voided" | "checked_out" | "completed" | "no_show" | "comp_void"
-        ) {
-            return Err(ApiError::BadRequest(format!(
-                "Cannot update complimentary dates for booking in status: {locked_status}"
-            )));
-        }
         let target_status = if matches!(
             locked_status.as_str(),
             "partial_complimentary" | "fully_complimentary"
@@ -569,9 +560,10 @@ pub async fn update_complimentary_handler(
         sqlx::query("UPDATE bookings SET complimentary_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2")
             .bind(reason)
             .bind(booking_id)
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
+        tx.commit().await.map_err(ApiError::from)?;
 
         // Record in booking_modifications audit trail
         sqlx::query(
@@ -585,6 +577,8 @@ pub async fn update_complimentary_handler(
         .execute(&pool)
         .await
         .ok();
+    } else {
+        tx.commit().await.map_err(ApiError::from)?;
     }
 
     Ok(Json(serde_json::json!({

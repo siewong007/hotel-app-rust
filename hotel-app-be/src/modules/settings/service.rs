@@ -151,6 +151,9 @@ pub async fn update_system_setting(
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Setting '{}' not found", key)))?;
     settings_cache::invalidate_key(pool, key).await;
+    if key == "timezone" {
+        crate::core::db::clear_timezone_cache();
+    }
 
     AuditLog::log_event(
         pool,
@@ -194,6 +197,9 @@ pub async fn reset_system_setting(
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Setting '{}' not found", key)))?;
     settings_cache::invalidate_key(pool, key).await;
+    if key == "timezone" {
+        crate::core::db::clear_timezone_cache();
+    }
 
     AuditLog::log_event(
         pool,
@@ -282,9 +288,8 @@ pub fn normalize_currency(raw: &str) -> Option<String> {
 /// The hotel's configured currency (`system_settings.currency`), falling back
 /// to [`FALLBACK_CURRENCY`]. Every money column defaults to this, never USD.
 pub async fn hotel_currency(pool: &DbPool) -> String {
-    get_setting_value(pool, "currency")
+    settings_cache::get_optional_string(pool, "currency")
         .await
-        .ok()
         .as_deref()
         .and_then(normalize_currency)
         .unwrap_or_else(|| FALLBACK_CURRENCY.to_string())

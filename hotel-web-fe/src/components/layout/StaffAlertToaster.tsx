@@ -30,7 +30,7 @@ export const StaffAlertToaster: React.FC = () => {
   const markRead = useMarkStaffNotificationRead();
 
   const seenIdsRef = React.useRef<Set<number> | null>(null);
-  const lastUserIdRef = React.useRef<number | undefined>(undefined);
+  const lastUserIdRef = React.useRef<string | number | undefined>(undefined);
   const [queue, setQueue] = React.useState<StaffNotificationItem[]>([]);
 
   React.useEffect(() => {

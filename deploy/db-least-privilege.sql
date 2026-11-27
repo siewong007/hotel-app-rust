@@ -29,6 +29,26 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO hotel_app
 GRANT SELECT, INSERT, UPDATE, DELETE ON app.invalid_data_quarantine TO hotel_app;
 GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public, app TO hotel_app;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON public.hotel_schema_revisions FROM hotel_app;
+DO $$
+DECLARE
+    partition_row record;
+BEGIN
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM hotel_app;
+    FOR partition_row IN
+        SELECT ns.nspname AS schema_name, cls.relname AS table_name
+        FROM pg_inherits inh
+        JOIN pg_class cls ON cls.oid = inh.inhrelid
+        JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+        WHERE inh.inhparent = 'public.audit_logs'::regclass
+    LOOP
+        EXECUTE format(
+            'REVOKE UPDATE, DELETE, TRUNCATE ON %I.%I FROM hotel_app',
+            partition_row.schema_name,
+            partition_row.table_name
+        );
+    END LOOP;
+END
+$$;
 GRANT EXECUTE ON FUNCTION public.transfer_import_ddl(text,text,text,text), public.maintain_audit_partition(date) TO hotel_app;
 -- These defaults belong to the executing migrator/schema-owner role.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public

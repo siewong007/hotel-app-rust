@@ -14,6 +14,7 @@ mod engine;
 mod guard;
 mod registry;
 mod sections;
+mod verify;
 mod wipe;
 
 use clap::Parser;
@@ -59,7 +60,45 @@ async fn run() -> Result<(), anyhow::Error> {
         registry::resolve(&cli.scenario).map_err(anyhow::Error::msg)?
     };
 
-    let summary = engine::run(&url, &modules, cli.ref_date).await?;
+    let staff_password_hash = if modules.is_empty() {
+        None
+    } else {
+        let env_pw = std::env::var("SEED_STAFF_PASSWORD")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let plaintext = match env_pw {
+            Some(pw) => {
+                if pw.len() < 12 {
+                    anyhow::bail!("SEED_STAFF_PASSWORD must be at least 12 characters");
+                }
+                pw
+            }
+            None => {
+                if !cli.allow_dev_default_password || !guard::is_loopback_url(&url) {
+                    anyhow::bail!(
+                        "SEED_STAFF_PASSWORD env var (min 12 chars) is required for seeding; \
+                         --allow-dev-default-password is permitted only on loopback databases"
+                    );
+                }
+                "HotelStaging2026!".to_string()
+            }
+        };
+        Some(
+            hotel_app_be::AuthService::hash_password(&plaintext)
+                .await
+                .map_err(anyhow::Error::msg)?,
+        )
+    };
+
+    let summary = engine::run(
+        &url,
+        &modules,
+        cli.ref_date,
+        !cli.skip_verify,
+        staff_password_hash.as_deref(),
+    )
+    .await?;
 
     if cli.reset && modules.is_empty() {
         println!(

@@ -13,7 +13,10 @@ interface MaintenanceRepository {
         priority: String? = null,
         page: Long = 1,
     ): Result<MaintenanceTicketListResponseDto>
-    suspend fun create(request: CreateMaintenanceTicketRequestDto): Result<MaintenanceTicketDto>
+    suspend fun create(
+        request: CreateMaintenanceTicketRequestDto,
+        idempotencyKey: String? = null,
+    ): Result<MaintenanceTicketDto>
     suspend fun update(id: Long, request: UpdateMaintenanceTicketRequestDto): Result<MaintenanceTicketDto>
 }
 
@@ -28,8 +31,11 @@ class DefaultMaintenanceRepository(
         api.list(status = status, priority = priority, page = page, pageSize = 30)
     }
 
-    override suspend fun create(request: CreateMaintenanceTicketRequestDto): Result<MaintenanceTicketDto> =
-        safeApiCall { api.create(request) }
+    override suspend fun create(
+        request: CreateMaintenanceTicketRequestDto,
+        idempotencyKey: String?,
+    ): Result<MaintenanceTicketDto> =
+        safeApiCall { api.create(request, idempotencyKey = idempotencyKey) }
 
     override suspend fun update(id: Long, request: UpdateMaintenanceTicketRequestDto): Result<MaintenanceTicketDto> =
         safeApiCall { api.update(id, request) }

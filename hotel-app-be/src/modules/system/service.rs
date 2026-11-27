@@ -7,7 +7,6 @@ use std::time::Instant;
 use crate::core::db::DbPool;
 use crate::core::error::ApiError;
 use crate::core::metrics;
-use crate::modules::rbac::repository::RbacRepository;
 use crate::modules::system::models::{
     JobRunRow, StaffNotificationItem, StaffNotificationsResponse, SystemHealthResponse,
 };
@@ -75,7 +74,7 @@ pub async fn my_notifications(
             items: Vec::new(),
         });
     }
-    let permissions = RbacRepository::permission_names_for_user(pool, user_id).await?;
+    let permissions = crate::core::rbac_cache::effective_permissions(pool, user_id).await?;
     let names: Vec<String> = permissions.iter().cloned().collect();
     let items = repository::list_notifications(pool, user_id, &names, NOTIFICATIONS_LIMIT).await?;
     let unread = items
@@ -108,10 +107,9 @@ pub async fn mark_notification_read(
     if !repository::table_present(pool).await {
         return Ok(());
     }
-    let permissions = RbacRepository::permission_names_for_user(pool, user_id).await?;
-    let names: Vec<String> = permissions.into_iter().collect();
+    let permissions = crate::core::rbac_cache::effective_permissions(pool, user_id).await?;
+    let names: Vec<String> = permissions.iter().cloned().collect();
     repository::mark_notification_read(pool, notification_id, user_id, &names).await?;
-    crate::modules::system::notifications::publish_notifications_changed(pool);
     Ok(())
 }
 
@@ -119,9 +117,8 @@ pub async fn mark_all_notifications_read(pool: &DbPool, user_id: i64) -> Result<
     if !repository::table_present(pool).await {
         return Ok(());
     }
-    let permissions = RbacRepository::permission_names_for_user(pool, user_id).await?;
-    let names: Vec<String> = permissions.into_iter().collect();
+    let permissions = crate::core::rbac_cache::effective_permissions(pool, user_id).await?;
+    let names: Vec<String> = permissions.iter().cloned().collect();
     repository::mark_all_notifications_read(pool, user_id, &names).await?;
-    crate::modules::system::notifications::publish_notifications_changed(pool);
     Ok(())
 }

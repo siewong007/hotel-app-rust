@@ -30,8 +30,11 @@ export function useUpdateProfileMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: UserProfileUpdate) => UsersService.updateUserProfile(data),
-    onSuccess: profile => {
+    onSuccess: (profile, variables) => {
       queryClient.setQueryData(queryKeys.profile.me(), profile);
+      if (variables.email) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile.sessions() });
+      }
     },
   });
 }
@@ -48,9 +51,13 @@ export function useUpdatePasswordMutation() {
   });
 }
 
-function usePasskeyMutation<TArgs>(mutationFn: (args: TArgs) => Promise<unknown>) {
+function usePasskeyMutation<TArgs>(
+  mutationFn: (args: TArgs) => Promise<unknown>,
+  gcTime?: number
+) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...(gcTime !== undefined ? { gcTime } : {}),
     mutationFn,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.profile.passkeys() });
@@ -59,7 +66,17 @@ function usePasskeyMutation<TArgs>(mutationFn: (args: TArgs) => Promise<unknown>
 }
 
 export function useDeletePasskeyMutation(options?: ApiRequestOptions) {
-  return usePasskeyMutation((id: string) => AuthService.deletePasskey(id, options));
+  return usePasskeyMutation(
+    ({ id, stepUp }: { id: string; stepUp?: PasskeyStepUp }) =>
+      AuthService.deletePasskey(
+        id,
+        stepUp
+          ? { password: stepUp.password, totp_code: stepUp.totpCode }
+          : undefined,
+        options
+      ),
+    0
+  );
 }
 
 export function useRenamePasskeyMutation(options?: ApiRequestOptions) {

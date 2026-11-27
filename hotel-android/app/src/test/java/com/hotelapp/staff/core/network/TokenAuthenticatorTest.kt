@@ -114,4 +114,49 @@ class TokenAuthenticatorTest {
         assertEquals(2, server.requestCount)
         assertTrue(sessionManager.authState.value is AuthState.Unauthenticated)
     }
+
+    @Test
+    fun `authenticator rejects 401 responses without prior bearer header or stale generation`() {
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"Unauthorized"}"""))
+
+        var refreshCalled = 0
+        val genBefore = sessionManager.currentGeneration()
+        val authenticator = TokenAuthenticator.fromOutcome(
+            sessionManager = sessionManager,
+            configuredOriginProvider = { server.url("/").toString().trimEnd('/') },
+        ) { _, _, _ ->
+            refreshCalled++
+            TokenRefreshOutcome.Success("should-not-run")
+        }
+
+        val client = OkHttpClient.Builder()
+            .authenticator(authenticator)
+            .build()
+
+        // No Authorization header on initial request -> must NOT attempt refresh or inject new token.
+        val resp = client.newCall(
+            Request.Builder().url(server.url("/api/bookings")).build(),
+        ).execute()
+        assertEquals(401, resp.code)
+        assertEquals(0, refreshCalled)
+
+        // Now attach stale RequestSessionTag whose generation no longer matches.
+        sessionManager.setAuthenticated(
+            "user-b-tok",
+            StaffSession(UserSummaryDto(id = 2, username = "mgr"), listOf("manager"), listOf("bookings:read")),
+        )
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"Unauthorized"}"""))
+        val taggedResp = client.newCall(
+            Request.Builder()
+                .url(server.url("/api/bookings"))
+                .header("Authorization", "Bearer expired_tok")
+                .tag(
+                    RequestSessionTag::class.java,
+                    RequestSessionTag(genBefore, SessionManager.originOf(server.url("/"))),
+                )
+                .build(),
+        ).execute()
+        assertEquals(401, taggedResp.code)
+        assertEquals(0, refreshCalled)
+    }
 }

@@ -192,6 +192,33 @@ impl SegmentRepository {
         Ok(row.try_get::<i64, _>(0).unwrap_or_default())
     }
 
+    /// Batch member counts for multiple compiled clauses in one scan over active guests.
+    pub async fn count_matching_batch(
+        pool: &DbPool,
+        clauses: &[CompiledClause],
+    ) -> Result<Vec<i64>, ApiError> {
+        if clauses.is_empty() {
+            return Ok(Vec::new());
+        }
+        let projections: Vec<String> = clauses
+            .iter()
+            .enumerate()
+            .map(|(i, clause)| format!("COUNT(*) FILTER (WHERE {}) AS c_{i}", clause.sql))
+            .collect();
+        let sql = format!(
+            "SELECT {} FROM guests g WHERE g.is_active IS TRUE",
+            projections.join(", ")
+        );
+        let mut q = query(sqlx::AssertSqlSafe(&*sql));
+        for clause in clauses {
+            q = rules::apply_binds(q, &clause.binds);
+        }
+        let row = q.fetch_one(pool).await.map_err(ApiError::from)?;
+        Ok((0..clauses.len())
+            .map(|i| row.try_get::<i64, _>(i).unwrap_or_default())
+            .collect())
+    }
+
     /// First `limit` matching guests for the preview. The clause is compiled
     /// with `first_param = 1`; the limit bind lands at `$n+1` after it.
     pub async fn sample_matching(

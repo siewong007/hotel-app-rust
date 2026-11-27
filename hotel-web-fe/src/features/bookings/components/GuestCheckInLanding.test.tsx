@@ -48,6 +48,23 @@ describe('GuestCheckInLanding', () => {
     await waitFor(() => expect(mocks.setBookingAccessToken).toHaveBeenCalledWith('booking-token'));
   });
 
+  it('forwards optional booking email when entered', async () => {
+    mocks.verify.mockResolvedValue({ token: 'booking-token-email' });
+    renderPage(<GuestCheckInLanding />, { route: '/guest-checkin' });
+    const [bookingField, nameField, emailField] = await screen.findAllByRole('textbox');
+    fireEvent.change(bookingField, { target: { value: 'BK-1002' } });
+    fireEvent.change(nameField, { target: { value: 'Aminah' } });
+    fireEvent.change(emailField, { target: { value: ' aminah@example.com ' } });
+    fireEvent.submit(screen.getByRole('button'));
+    await waitFor(() =>
+      expect(mocks.verify).toHaveBeenCalledWith({
+        booking_number: 'BK-1002',
+        name: 'Aminah',
+        email: 'aminah@example.com',
+      }),
+    );
+  });
+
   it('reports no axe violations', async () => {
     const { container } = renderPage(<GuestCheckInLanding />, { route: '/guest-checkin' });
     await screen.findByRole('heading', { level: 1 });

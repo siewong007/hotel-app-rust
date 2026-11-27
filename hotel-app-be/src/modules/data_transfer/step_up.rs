@@ -74,10 +74,17 @@ pub async fn issue_step_up(
 
     let (totp_enabled, stored_secret) = AuthRepository::two_factor_state(pool, user_id).await?;
     let totp_enabled = totp_enabled.unwrap_or(false);
-    let totp_ok = if totp_enabled {
+    // Only verify and consume the single-use TOTP code when the password factor
+    // already cleared (or the account is passwordless), so a wrong password
+    // never burns a valid TOTP code.
+    let totp_ok = if totp_enabled && (stored_hash.is_none() || password_ok) {
         match (request.totp_code.as_deref(), stored_secret.as_deref()) {
             (Some(code), Some(stored)) => match AuthService::decrypt_stored_totp_secret(stored) {
-                Ok(secret) => AuthService::verify_totp_code(&secret, code).unwrap_or(false),
+                Ok(secret) => {
+                    AuthService::verify_and_consume_totp_code(pool, user_id, &secret, code)
+                        .await
+                        .unwrap_or(false)
+                }
                 Err(error) => {
                     log::warn!("step-up: TOTP secret undecryptable for user {user_id}: {error}");
                     false

@@ -10,5 +10,6 @@
     <string name="shortcut_maintenance_short">Maintenance</string>
     <string name="shortcut_maintenance_long">Maintenance Tickets</string>
     <string name="ops_widget_description">Live occupancy, arriving stays, dirty rooms, and open maintenance count.</string>
+    <string name="ops_widget_loading">Loading hotel operations…</string>
     <string name="asset_statements" translatable="false">[{\"include\": \"https://saliminn.my/.well-known/assetlinks.json\"}]</string>
 </resources>

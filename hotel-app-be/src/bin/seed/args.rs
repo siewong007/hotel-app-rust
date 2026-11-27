@@ -45,4 +45,13 @@ pub struct Cli {
     /// Database URL; defaults to $DATABASE_URL (after loading .env).
     #[arg(long, value_name = "URL")]
     pub database_url: Option<String>,
+
+    /// Skip post-seed invariant verification before committing.
+    #[arg(long)]
+    pub skip_verify: bool,
+
+    /// Permit using the development-only default password (`HotelStaging2026!`)
+    /// when `SEED_STAFF_PASSWORD` is unset. Restricted to loopback databases only.
+    #[arg(long)]
+    pub allow_dev_default_password: bool,
 }

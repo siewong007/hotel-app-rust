@@ -50,6 +50,106 @@ use tower_http::{
     set_header::SetResponseHeaderLayer, trace::TraceLayer,
 };
 
+pub const DESKTOP_CLIENT_TOKEN_HEADER: &str = "x-desktop-client-token";
+
+fn is_allowed_desktop_host(host: &str) -> bool {
+    let host = host.trim();
+    let host_only = if let Some(rest) = host.strip_prefix('[') {
+        let Some(end) = rest.find(']') else {
+            return false;
+        };
+        let after = &rest[end + 1..];
+        if !after.is_empty()
+            && after
+                .strip_prefix(':')
+                .is_none_or(|port| port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()))
+        {
+            return false;
+        }
+        &host[..=end + 1]
+    } else {
+        match host.rsplit_once(':') {
+            Some((name, port))
+                if !name.is_empty()
+                    && !port.is_empty()
+                    && port.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                name
+            }
+            Some(_) => return false,
+            None => host,
+        }
+    };
+    host_only.eq_ignore_ascii_case("localhost") || host_only == "127.0.0.1" || host_only == "[::1]"
+}
+
+pub async fn enforce_desktop_local_guard_with(
+    desktop_mode: bool,
+    expected_token: Option<&str>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !desktop_mode || request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
+
+    let valid_host = request
+        .headers()
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(is_allowed_desktop_host);
+    if !valid_host {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({"error": "Forbidden Host header for desktop backend"})),
+        )
+            .into_response();
+    }
+
+    let path = request.uri().path();
+    let is_websocket_upgrade = request
+        .headers()
+        .get(axum::http::header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("websocket"));
+    let skips_token = path == "/health"
+        || path == "/uploads"
+        || path.starts_with("/uploads/")
+        || is_websocket_upgrade;
+
+    if !skips_token && let Some(expected) = expected_token.map(str::trim).filter(|t| !t.is_empty())
+    {
+        let presented = request
+            .headers()
+            .get(DESKTOP_CLIENT_TOKEN_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .unwrap_or("");
+        if !constant_time_eq::constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({"error": "Missing or invalid desktop client token"})),
+            )
+                .into_response();
+        }
+    }
+
+    next.run(request).await
+}
+
+async fn enforce_desktop_local_guard(request: Request, next: Next) -> Response {
+    let Some(cfg) = config::try_get() else {
+        return next.run(request).await;
+    };
+    enforce_desktop_local_guard_with(
+        cfg.desktop_mode,
+        cfg.desktop_client_token.as_deref(),
+        request,
+        next,
+    )
+    .await
+}
+
 /// Extract client IP from trusted proxy headers or the direct peer address.
 ///
 /// `X-Forwarded-For` is parsed **right-to-left**: proxies append the peer they
@@ -114,17 +214,19 @@ fn extract_client_ip_with(
         return peer_addr.ip();
     }
 
+    if let Some(last_xff) = headers.get_all("x-forwarded-for").into_iter().next_back() {
+        return last_xff
+            .to_str()
+            .ok()
+            .and_then(|s| s.rsplit(',').next())
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or_else(|| peer_addr.ip());
+    }
+
     headers
-        .get("x-forwarded-for")
+        .get("x-real-ip")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.rsplit(',').next())
         .and_then(|s| s.trim().parse().ok())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.trim().parse().ok())
-        })
         .unwrap_or_else(|| peer_addr.ip())
 }
 
@@ -146,6 +248,13 @@ async fn enforce_active_session(
         return next.run(request).await;
     }
 
+    let token = match middleware::extract_bearer_token(request.headers()) {
+        Ok(token) => token.to_string(),
+        Err(_error) if request.uri().path().contains("/guest-portal/") => {
+            return next.run(request).await;
+        }
+        Err(error) => return error.into_response(),
+    };
     let claims = match middleware::extract_claims(request.headers()).await {
         Ok(claims) => claims,
         Err(_error) if request.uri().path().contains("/guest-portal/") => {
@@ -153,7 +262,7 @@ async fn enforce_active_session(
         }
         Err(error) => return error.into_response(),
     };
-    let Some(session_id) = claims.sid else {
+    let Some(session_id) = claims.sid.clone() else {
         return crate::core::error::ApiError::Unauthorized(
             "Session-bound authentication is required".to_string(),
         )
@@ -165,7 +274,7 @@ async fn enforce_active_session(
     };
 
     match AuthService::is_session_active(&pool, user_id, &session_id).await {
-        Ok(true) => next.run(request).await,
+        Ok(true) => middleware::scope_verified_claims(token, claims, next.run(request)).await,
         Ok(false) => {
             crate::core::error::ApiError::Unauthorized("Session has been logged out".to_string())
                 .into_response()
@@ -398,6 +507,7 @@ pub fn create_router(pool: DbPool) -> Router {
                         crate::modules::data_transfer::routes::BACKUP_PASSPHRASE_HEADER,
                     ),
                     axum::http::HeaderName::from_static("x-booking-access-token"),
+                    axum::http::HeaderName::from_static(DESKTOP_CLIENT_TOKEN_HEADER),
                     axum::http::HeaderName::from_static("x-requested-with"),
                     // Connect/gRPC-Web request headers — needed for cross-origin
                     // browser calls to the tonic services (dev mode's Any
@@ -535,6 +645,7 @@ pub fn create_router(pool: DbPool) -> Router {
             // `{"error": ...}` shape clients always parse.
             .layer(axum::middleware::map_response(normalize_error_response))
             .layer(cors)
+            .layer(axum::middleware::from_fn(enforce_desktop_local_guard))
             // Security headers
             .layer(SetResponseHeaderLayer::if_not_present(
                 axum::http::header::STRICT_TRANSPORT_SECURITY,
@@ -556,7 +667,7 @@ pub fn create_router(pool: DbPool) -> Router {
                 axum::http::header::CONTENT_SECURITY_POLICY,
                 axum::http::HeaderValue::from_static(
                     "default-src 'self'; \
-                     script-src 'self' https://challenges.cloudflare.com https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com; \
+                     script-src 'self' https://challenges.cloudflare.com https://www.paypal.com https://www.sandbox.paypal.com https://www.paypalobjects.com; \
                      style-src 'self' https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com; \
                      img-src 'self' data: https:; \
                      font-src 'self' data:; \
@@ -654,6 +765,29 @@ mod client_ip_tests {
         let headers = headers_with_xff("not-an-ip");
         assert_eq!(
             extract_client_ip_with(true, &headers, PEER),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
+        );
+    }
+
+    #[test]
+    fn trusted_proxy_prefers_last_xff_header_and_does_not_fall_back_to_real_ip() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.append("x-forwarded-for", "198.51.100.1".parse().unwrap());
+        headers.append(
+            "x-forwarded-for",
+            "198.51.100.2, 203.0.113.44".parse().unwrap(),
+        );
+        headers.insert("x-real-ip", "192.0.2.9".parse().unwrap());
+        assert_eq!(
+            extract_client_ip_with(true, &headers, PEER),
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 44))
+        );
+
+        let mut garbage_xff = axum::http::HeaderMap::new();
+        garbage_xff.insert("x-forwarded-for", "not-an-ip".parse().unwrap());
+        garbage_xff.insert("x-real-ip", "192.0.2.9".parse().unwrap());
+        assert_eq!(
+            extract_client_ip_with(true, &garbage_xff, PEER),
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
         );
     }

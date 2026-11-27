@@ -28,8 +28,8 @@ const PROMOTION_COLUMNS: &str = r#"
     p.min_nights,
     p.max_nights,
     p.min_subtotal,
-    p.claim_limit,
-    p.claimed_count,
+    CAST(p.claim_limit AS BIGINT) AS claim_limit,
+    CAST(p.claimed_count AS BIGINT) AS claimed_count,
     p.per_guest_limit,
     p.is_public,
     p.is_cancellable,
@@ -89,8 +89,8 @@ const PROMOTION_COLUMNS_PUBLIC: &str = r#"
     p.min_nights,
     p.max_nights,
     p.min_subtotal,
-    p.claim_limit,
-    p.claimed_count,
+    CAST(p.claim_limit AS BIGINT) AS claim_limit,
+    CAST(p.claimed_count AS BIGINT) AS claimed_count,
     p.per_guest_limit,
     p.is_public,
     p.is_cancellable,
@@ -578,7 +578,7 @@ impl PromotionRepository {
                     is_cancellable = $20, internal_code = $21, objective = $22,
                     updated_by = $23, updated_at = CURRENT_TIMESTAMP, version = version + 1
                 WHERE id = $24
-                  AND ($25::integer IS NULL OR version = $25)
+                  AND ($25::bigint IS NULL OR version::bigint = $25)
                   AND status IN ('draft', 'paused')
                 RETURNING id
             "#,
@@ -623,10 +623,10 @@ impl PromotionRepository {
             .execute(&mut **tx)
             .await
             .map_err(ApiError::from)?;
-        for room_type_id in room_type_ids {
-            query("INSERT INTO promotion_room_types (promotion_id, room_type_id) VALUES ($1, $2)")
+        if !room_type_ids.is_empty() {
+            query("INSERT INTO promotion_room_types (promotion_id, room_type_id) SELECT $1, x FROM UNNEST($2::bigint[]) AS x ON CONFLICT DO NOTHING")
                 .bind(promotion_id)
-                .bind(room_type_id)
+                .bind(room_type_ids)
                 .execute(&mut **tx)
                 .await
                 .map_err(ApiError::from)?;
@@ -644,15 +644,13 @@ impl PromotionRepository {
             .execute(&mut **tx)
             .await
             .map_err(ApiError::from)?;
-        for channel_id in booking_channel_ids {
-            query(
-                "INSERT INTO promotion_channels (promotion_id, booking_channel_id) VALUES ($1, $2)",
-            )
-            .bind(promotion_id)
-            .bind(channel_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(ApiError::from)?;
+        if !booking_channel_ids.is_empty() {
+            query("INSERT INTO promotion_channels (promotion_id, booking_channel_id) SELECT $1, x FROM UNNEST($2::bigint[]) AS x ON CONFLICT DO NOTHING")
+                .bind(promotion_id)
+                .bind(booking_channel_ids)
+                .execute(&mut **tx)
+                .await
+                .map_err(ApiError::from)?;
         }
         Ok(())
     }
@@ -667,10 +665,10 @@ impl PromotionRepository {
             .execute(&mut **tx)
             .await
             .map_err(ApiError::from)?;
-        for tier_id in loyalty_tier_ids {
-            query("INSERT INTO promotion_loyalty_tiers (promotion_id, loyalty_tier_id) VALUES ($1, $2)")
+        if !loyalty_tier_ids.is_empty() {
+            query("INSERT INTO promotion_loyalty_tiers (promotion_id, loyalty_tier_id) SELECT $1, x FROM UNNEST($2::bigint[]) AS x ON CONFLICT DO NOTHING")
                 .bind(promotion_id)
-                .bind(tier_id)
+                .bind(loyalty_tier_ids)
                 .execute(&mut **tx)
                 .await
                 .map_err(ApiError::from)?;
@@ -710,7 +708,7 @@ impl PromotionRepository {
         query_scalar(r#"
                 UPDATE promotions
                 SET status = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP, version = version + 1
-                WHERE id = $3 AND ($4::integer IS NULL OR version = $4)
+                WHERE id = $3 AND ($4::bigint IS NULL OR version::bigint = $4)
                 RETURNING id
             "#)
         .bind(status)
@@ -943,6 +941,8 @@ impl PromotionRepository {
                 SET claimed_count = claimed_count + 1, updated_at = CURRENT_TIMESTAMP
                 WHERE id = $1
                   AND status = 'published'
+                  AND (claim_starts_at IS NULL OR claim_starts_at <= CURRENT_TIMESTAMP)
+                  AND (claim_ends_at IS NULL OR claim_ends_at >= CURRENT_TIMESTAMP)
                   AND (claim_limit IS NULL OR claimed_count < claim_limit)
             "#,
         )

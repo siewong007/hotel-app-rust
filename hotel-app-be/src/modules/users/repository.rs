@@ -568,8 +568,11 @@ impl UserRepository {
         Ok(result.rows_affected() == 1)
     }
 
-    /// Get password hash for a user
-    pub async fn get_password_hash(pool: &DbPool, user_id: i64) -> Result<String, ApiError> {
+    /// Get password hash for a user (None for passwordless / passkey-only accounts)
+    pub async fn get_password_hash(
+        pool: &DbPool,
+        user_id: i64,
+    ) -> Result<Option<String>, ApiError> {
         sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(pool)

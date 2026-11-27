@@ -338,6 +338,7 @@ jobs:
                              -c "CREATE DATABASE hotel_ci_staging"
           psql "$STAGING_URL" -f database/postgres/migrations/0001_v1_baseline.sql
           psql "$STAGING_URL" -f database/postgres/seed.sql
+          DATABASE_URL="$STAGING_URL" ./database/postgres/apply-patches.sh
           # One line per table with an integer id: in-band row count and an md5
           # of the sorted in-band ids, so an id that moves between runs fails
           # the step even when every count matches.
@@ -353,9 +354,9 @@ jobs:
           \gexec
           SQL
           }
-          APP_ENV=development DATABASE_URL="$STAGING_URL" cargo run --quiet --bin seed -- --all > "$RUNNER_TEMP/seed-first.txt"
+          SEED_STAFF_PASSWORD="Ci-Ephemeral-Seed-Pass-2026!" APP_ENV=development DATABASE_URL="$STAGING_URL" cargo run --quiet --bin seed -- --all > "$RUNNER_TEMP/seed-first.txt"
           band_ids > "$RUNNER_TEMP/ids-first.txt"
-          APP_ENV=development DATABASE_URL="$STAGING_URL" cargo run --quiet --bin seed -- --all > "$RUNNER_TEMP/seed-second.txt"
+          SEED_STAFF_PASSWORD="Ci-Ephemeral-Seed-Pass-2026!" APP_ENV=development DATABASE_URL="$STAGING_URL" cargo run --quiet --bin seed -- --all > "$RUNNER_TEMP/seed-second.txt"
           band_ids > "$RUNNER_TEMP/ids-second.txt"
           cat "$RUNNER_TEMP/seed-first.txt"
           # Explicit exits: bash -e does not stop on a failure left of && or ||.

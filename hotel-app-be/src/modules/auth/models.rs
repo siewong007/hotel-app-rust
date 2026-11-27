@@ -387,6 +387,10 @@ pub struct TwoFactorDisableRequest {
     // (XXXXX-XXXXX-XXXXX-XXXXX as produced by generate_backup_codes).
     #[validate(length(min = 6, max = 32, message = "Invalid 2FA code"))]
     pub code: String,
+    /// Account password required alongside the 2FA code on password-bearing
+    /// accounts so a stolen session + single TOTP cannot silently turn off 2FA.
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 /// 2FA status response
@@ -428,7 +432,16 @@ pub struct PasskeyRegistrationStart {
     /// durable, 2FA-bypassing account takeover.
     #[serde(default)]
     pub password: Option<String>,
-    /// Alternative to `password` for accounts with 2FA enabled.
+    /// Alternative to `password` when registering a passwordless passkey.
+    #[serde(default)]
+    pub totp_code: Option<String>,
+}
+
+/// Request payload for deleting a passkey (requires step-up re-authentication).
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct PasskeyDeleteRequest {
+    #[serde(default)]
+    pub password: Option<String>,
     #[serde(default)]
     pub totp_code: Option<String>,
 }

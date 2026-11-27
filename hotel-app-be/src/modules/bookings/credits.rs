@@ -22,6 +22,14 @@ pub async fn book_with_credits_handler(
     Json(input): Json<BookWithCreditsRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
+    if !crate::core::auth::AuthService::check_permission(&pool, user_id, "bookings:create").await?
+        || !crate::core::auth::AuthService::check_permission(&pool, user_id, "guests:read").await?
+    {
+        return Err(ApiError::Forbidden(
+            "Insufficient permissions to create complimentary bookings".to_string(),
+        ));
+    }
 
     let has_access =
         super::service::can_book_with_credits_for_guest(&pool, user_id, input.guest_id).await?;
@@ -96,15 +104,12 @@ pub async fn book_with_credits_handler(
     }
 
     let complimentary_nights = complimentary_dates.len() as i32;
-    let caller_can_create_bookings =
-        crate::core::auth::AuthService::check_permission(&pool, user_id, "bookings:create")
-            .await
-            .unwrap_or(false);
-    if !caller_can_create_bookings && complimentary_nights < total_nights {
-        return Err(ApiError::BadRequest(
-            "Partial complimentary bookings require online checkout payment.".to_string(),
-        ));
-    }
+    let tourism_tax_rate = crate::core::settings_cache::get_positive_decimal(
+        &pool,
+        "tourism_tax_rate",
+        Decimal::from(10),
+    )
+    .await;
 
     // Everything below runs in one transaction. The FOR UPDATE lock on the
     // room row serializes concurrent bookings for that room, so the overlap
@@ -234,11 +239,26 @@ pub async fn book_with_credits_handler(
         )));
     }
 
+    let (is_tourist, tourism_tax_amount) = super::lifecycle::canonical_tourism_tax_for_guest_tx(
+        &mut *tx,
+        input.guest_id,
+        check_in,
+        check_out,
+        tourism_tax_rate,
+    )
+    .await?;
+
     // Calculate charges for non-complimentary nights (room rates are tax-inclusive).
     let paid_nights = total_nights - complimentary_nights;
     let subtotal = room_rate * Decimal::from(paid_nights);
     let tax_amount = Decimal::ZERO;
     let total_amount = subtotal;
+    let billable_total = total_amount + tourism_tax_amount;
+    let payment_status = if billable_total <= Decimal::ZERO {
+        "paid"
+    } else {
+        "unpaid"
+    };
 
     // Second-granularity timestamps collided under concurrent requests; the
     // uuid suffix keeps booking_number unique (matching the BK-* scheme).
@@ -280,10 +300,11 @@ pub async fn book_with_credits_handler(
             booking_number, guest_id, room_id, check_in_date, check_out_date,
             room_rate, subtotal, tax_amount, discount_amount, total_amount,
             status, payment_status, adults, children, special_requests,
-            source, is_complimentary, complimentary_reason, created_by
+            source, is_complimentary, complimentary_reason, complimentary_nights,
+            created_by, is_tourist, tourism_tax_amount
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9, 'confirmed', $10, $11, $12, $13,
-                'complimentary_credits', true, $14, $15)
+                'complimentary_credits', true, $14, $15, $16, $17, $18)
         RETURNING id
         "#,
     )
@@ -296,16 +317,15 @@ pub async fn book_with_credits_handler(
     .bind(crate::core::db::decimal_to_db(subtotal))
     .bind(crate::core::db::decimal_to_db(tax_amount))
     .bind(crate::core::db::decimal_to_db(total_amount))
-    .bind(if is_fully_complimentary {
-        "paid"
-    } else {
-        "unpaid"
-    })
+    .bind(payment_status)
     .bind(adults)
     .bind(children)
     .bind(&sanitized_special_requests)
     .bind(&complimentary_reason)
+    .bind(complimentary_nights)
     .bind(user_id)
+    .bind(is_tourist)
+    .bind(crate::core::db::decimal_to_db(tourism_tax_amount))
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| {
@@ -337,6 +357,8 @@ pub async fn book_with_credits_handler(
         "complimentary_dates": complimentary_dates_str,
         "paid_nights": paid_nights,
         "total_amount": total_amount.to_string(),
+        "tourism_tax_amount": tourism_tax_amount.to_string(),
+        "payment_status": payment_status,
         "room_type": room_type_name,
         "is_free_gift": is_fully_complimentary
     })))

@@ -494,6 +494,7 @@ pub async fn send_staff_message(
     user_agent: Option<String>,
 ) -> Result<SupportConversationDetail, ApiError> {
     check_permission(pool, actor_id, "support:write").await?;
+    check_permission(pool, actor_id, "support:read").await?;
     request_id_is_valid(request.client_message_id.as_deref())?;
     let expected_version = request.expected_version.ok_or_else(|| {
         ApiError::BadRequest("A conversation version is required for support replies".to_string())
@@ -618,6 +619,7 @@ pub async fn apply_staff_action(
     user_agent: Option<String>,
 ) -> Result<SupportConversationDetail, ApiError> {
     let action = validation::validate_action(&input.action)?;
+    check_permission(pool, actor_id, "support:read").await?;
     require_action_permission(pool, actor_id, &action).await?;
     request_id_is_valid(input.client_action_id.as_deref())?;
     let current = SupportRepository::find_conversation(pool, conversation_id)

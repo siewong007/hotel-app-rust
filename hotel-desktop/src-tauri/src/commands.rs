@@ -17,6 +17,7 @@ use tokio::sync::{Mutex, RwLock};
 use crate::get_data_directory;
 
 const DESKTOP_INSTANCE_HEADER: &str = "x-desktop-instance";
+const DESKTOP_CLIENT_TOKEN_HEADER: &str = "x-desktop-client-token";
 const MAX_LOG_LINES: usize = 2000;
 
 /// Global state for the backend process
@@ -30,6 +31,7 @@ static BACKEND_PROCESS: LazyLock<ManagedBackendProcess> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
 static DESKTOP_INSTANCE_NONCE: LazyLock<RwLock<Option<String>>> =
     LazyLock::new(|| RwLock::new(None));
+static DESKTOP_CLIENT_TOKEN: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
 
 const PROD_ALLOWED_ORIGINS: &str = "tauri://localhost,http://tauri.localhost";
 #[allow(dead_code)]
@@ -79,6 +81,7 @@ pub struct AppStatus {
     pub backend_url: String,
     pub data_directory: String,
     pub version: String,
+    pub desktop_client_token: Option<String>,
     pub postgres: serde_json::Value,
 }
 
@@ -91,6 +94,7 @@ pub async fn get_status(app_handle: AppHandle) -> Result<AppStatus, String> {
         backend_url: get_backend_url(),
         data_directory: get_data_directory().to_string_lossy().to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        desktop_client_token: DESKTOP_CLIENT_TOKEN.read().await.clone(),
         postgres: crate::postgres::get_postgres_status(&app_handle).await,
     })
 }
@@ -185,11 +189,17 @@ async fn require_desktop_permission(
         .await
         .clone()
         .ok_or_else(|| "Desktop instance nonce is unavailable".to_string())?;
+    let client_token = DESKTOP_CLIENT_TOKEN
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "Desktop client token is unavailable".to_string())?;
 
     let client = build_local_backend_client()?;
     let url = format!("{}/api/auth/access", get_backend_url());
     let response = client
         .get(&url)
+        .header(DESKTOP_CLIENT_TOKEN_HEADER, &client_token)
         .bearer_auth(token)
         .send()
         .await
@@ -255,6 +265,8 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
         crate::postgres::read_or_create_totp_encryption_key().map_err(|e| e.to_string())?;
     let instance_nonce = generate_desktop_instance_nonce();
     *DESKTOP_INSTANCE_NONCE.write().await = Some(instance_nonce.clone());
+    let client_token = generate_desktop_instance_nonce();
+    *DESKTOP_CLIENT_TOKEN.write().await = Some(client_token.clone());
 
     let shell = app_handle.shell();
     let sidecar_command = shell
@@ -270,6 +282,7 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
         .env("JWT_SECRET", jwt_secret)
         .env("TOTP_ENCRYPTION_KEY", totp_encryption_key)
         .env("DESKTOP_INSTANCE_NONCE", &instance_nonce)
+        .env("DESKTOP_CLIENT_TOKEN", &client_token)
         .env("HOTEL_DESKTOP_MODE", "1")
         // KEEP IN SYNC: dev proxy prefixes in hotel-web-fe/vite.config.ts;
         // router merge in hotel-app-be/src/routes/mod.rs; dev http origins in
@@ -357,6 +370,7 @@ pub async fn start_backend_sidecar(app_handle: &AppHandle) -> Result<(), String>
     {
         if BACKEND_GENERATION.load(Ordering::SeqCst) == generation {
             *DESKTOP_INSTANCE_NONCE.write().await = None;
+            *DESKTOP_CLIENT_TOKEN.write().await = None;
             BACKEND_RUNNING.store(false, Ordering::SeqCst);
             let mut process = BACKEND_PROCESS.lock().await;
             if matches!(process.as_ref(), Some((proc_gen, _)) if *proc_gen == generation)
@@ -496,6 +510,7 @@ pub async fn stop_backend_sidecar() -> Result<(), String> {
         log::info!("Backend sidecar stopped");
     }
     *DESKTOP_INSTANCE_NONCE.write().await = None;
+    *DESKTOP_CLIENT_TOKEN.write().await = None;
     BACKEND_RUNNING.store(false, Ordering::SeqCst);
     BACKEND_STARTING.store(false, Ordering::SeqCst);
 
@@ -536,7 +551,6 @@ pub async fn backup_database(
         access_token.as_deref(),
         &[
             "data_transfer:import",
-            "data_transfer:export",
             "data_transfer:manage",
             "settings:manage",
         ],
@@ -746,18 +760,25 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
 /// Open the data folder in the file explorer
 #[tauri::command]
 pub async fn open_data_folder(access_token: Option<String>) -> Result<(), String> {
-    if BACKEND_RUNNING.load(Ordering::SeqCst) {
-        require_desktop_permission(
-            access_token.as_deref(),
-            &[
-                "settings:manage",
-                "data_transfer:import",
-                "data_transfer:manage",
-            ],
-        )
-        .await?;
-    }
+    require_desktop_permission(
+        access_token.as_deref(),
+        &[
+            "settings:manage",
+            "data_transfer:import",
+            "data_transfer:manage",
+        ],
+    )
+    .await?;
     open_in_file_manager(&get_data_directory())
+}
+
+/// Open only the logs subdirectory so offline boot failures can be diagnosed
+/// without exposing the database/credentials data root without authentication.
+#[tauri::command]
+pub async fn open_logs_folder() -> Result<(), String> {
+    let logs_dir = get_data_directory().join("logs");
+    std::fs::create_dir_all(&logs_dir).map_err(|e| e.to_string())?;
+    open_in_file_manager(&logs_dir)
 }
 
 /// Open the managed backups folder in the OS file explorer so the user can
@@ -770,7 +791,6 @@ pub async fn open_backups_folder(access_token: Option<String>) -> Result<(), Str
         &[
             "data_transfer:import",
             "data_transfer:restore",
-            "data_transfer:export",
             "data_transfer:manage",
             "settings:manage",
         ],
@@ -779,25 +799,6 @@ pub async fn open_backups_folder(access_token: Option<String>) -> Result<(), Str
     let dir = crate::postgres::backups_directory();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     open_in_file_manager(&dir)
-}
-
-/// Shutdown the application gracefully
-#[tauri::command]
-pub async fn shutdown_app(app_handle: AppHandle) -> Result<(), String> {
-    log::info!("Shutting down application...");
-
-    // Stop backend
-    stop_backend_sidecar().await?;
-
-    // Stop PostgreSQL
-    if let Err(e) = crate::postgres::stop_postgres(&app_handle).await {
-        log::warn!("Failed to stop PostgreSQL: {}", e);
-    }
-
-    // Exit the application
-    app_handle.exit(0);
-
-    Ok(())
 }
 
 /// Information about an available update, returned to the frontend.
@@ -871,8 +872,13 @@ pub struct InstallOutcome {
 /// (`restart_after_install`, default true). The invoke promise therefore never
 /// resolves on Windows — process exit is the success signal, not a failure.
 #[tauri::command]
-pub async fn install_update(app_handle: AppHandle) -> Result<InstallOutcome, String> {
+pub async fn install_update(
+    app_handle: AppHandle,
+    access_token: Option<String>,
+) -> Result<InstallOutcome, String> {
     use tauri_plugin_updater::UpdaterExt;
+
+    require_desktop_permission(access_token.as_deref(), &["settings:manage"]).await?;
 
     // Windows-only hook (a no-op on other platforms): the plugin's install
     // ends in std::process::exit(0), which bypasses the RunEvent::Exit
@@ -931,8 +937,13 @@ pub async fn install_update(app_handle: AppHandle) -> Result<InstallOutcome, Str
 /// than `tauri::process::restart`, which hard-exits and would orphan them.
 /// Returns immediately; the app exits and relaunches shortly after.
 #[tauri::command]
-pub fn restart_app(app_handle: AppHandle) {
+pub async fn restart_app(
+    app_handle: AppHandle,
+    access_token: Option<String>,
+) -> Result<(), String> {
+    require_desktop_permission(access_token.as_deref(), &["settings:manage"]).await?;
     app_handle.request_restart();
+    Ok(())
 }
 
 #[cfg(test)]

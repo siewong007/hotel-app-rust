@@ -128,11 +128,11 @@ WITH current_bookings AS (
         check_in_date,
         check_out_date
     FROM bookings
-    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation')
+    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'late_checkout', 'pending', 'pending_payment', 'pending_confirmation')
       AND check_out_date >= CURRENT_DATE
     ORDER BY room_id,
         CASE
-            WHEN status IN ('checked_in', 'auto_checked_in') THEN 1
+            WHEN status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN 1
             WHEN status = 'confirmed' AND check_in_date <= CURRENT_DATE THEN 2
             WHEN status = 'confirmed' THEN 3
             WHEN status IN ('pending', 'pending_payment', 'pending_confirmation') AND check_in_date <= CURRENT_DATE THEN 4
@@ -147,7 +147,7 @@ SELECT
     rt.code as room_type_code,
     COALESCE(r.custom_price, rt.base_price)::text as price_per_night,
     CASE
-        WHEN cb.booking_status IN ('checked_in', 'auto_checked_in') THEN false
+        WHEN cb.booking_status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN false
         WHEN cb.booking_status IN ('confirmed', 'pending', 'pending_payment', 'pending_confirmation') THEN false
         WHEN r.status IN ('maintenance', 'out_of_order', 'dirty', 'cleaning', 'reserved_dirty') THEN false
         ELSE true
@@ -159,7 +159,7 @@ SELECT
     NULL::DECIMAL as average_rating,
     NULL::BIGINT as review_count,
     CASE
-        WHEN cb.booking_status IN ('checked_in', 'auto_checked_in') THEN 'occupied'
+        WHEN cb.booking_status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN 'occupied'
         -- A room is held from its guest's arrival day only; a reserved_dirty
         -- room whose next stay is still in the future reads dirty.
         WHEN r.status = 'reserved_dirty' AND NOT EXISTS (
@@ -200,7 +200,7 @@ const SEARCH_ROOMS_WITH_DATES_QUERY: &str = r#"
 WITH conflicting_bookings AS (
     SELECT DISTINCT room_id
     FROM bookings
-    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation')
+    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'late_checkout', 'pending', 'pending_payment', 'pending_confirmation')
       AND (check_in_date < $2 AND check_out_date > $1)
       AND ($3::BIGINT IS NULL OR id != $3)
 )
@@ -263,11 +263,11 @@ WITH current_bookings AS (
         status as booking_status,
         check_in_date
     FROM bookings
-    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation')
+    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'late_checkout', 'pending', 'pending_payment', 'pending_confirmation')
       AND check_out_date >= CURRENT_DATE
     ORDER BY room_id,
         CASE
-            WHEN status IN ('checked_in', 'auto_checked_in') THEN 1
+            WHEN status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN 1
             WHEN status = 'confirmed' AND check_in_date <= CURRENT_DATE THEN 2
             WHEN status IN ('pending', 'pending_payment', 'pending_confirmation') AND check_in_date <= CURRENT_DATE THEN 3
             ELSE 4
@@ -301,7 +301,7 @@ LEFT JOIN current_bookings cb ON cb.room_id = r.id
 WHERE r.is_active = true
   AND r.status NOT IN ('maintenance', 'out_of_order', 'dirty', 'cleaning', 'reserved_dirty', 'occupied', 'reserved')
   AND (cb.room_id IS NULL OR NOT (
-      cb.booking_status IN ('checked_in', 'auto_checked_in') OR
+      cb.booking_status IN ('checked_in', 'auto_checked_in', 'late_checkout') OR
       (cb.booking_status IN ('confirmed', 'pending', 'pending_payment', 'pending_confirmation') AND cb.check_in_date <= CURRENT_DATE)
   ))
   AND ($1::text IS NULL OR LOWER(rt.name) = LOWER($1) OR LOWER(rt.code) = LOWER($1))

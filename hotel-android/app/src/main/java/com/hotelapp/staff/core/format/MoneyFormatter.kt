@@ -11,15 +11,34 @@ object MoneyFormatter {
 
     fun format(amount: BigDecimal?, currencyCode: String = "MYR"): String {
         val value = (amount ?: BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP)
-        val numberStr = DecimalFormat("#,##0.00", decimalFormatSymbols).format(value)
+        val isNegative = value < BigDecimal.ZERO
+        val absNumberStr = DecimalFormat("#,##0.00", decimalFormatSymbols).format(value.abs())
         val code = currencyCode.trim().uppercase(Locale.US).ifEmpty { "MYR" }
-        return when (code) {
-            "MYR" -> "RM $numberStr"
-            "USD" -> "$$numberStr"
-            "SGD" -> "S$$numberStr"
-            "EUR" -> "€$numberStr"
-            "GBP" -> "£$numberStr"
-            else -> "$code $numberStr"
+        val symbol = when (code) {
+            "MYR" -> "RM "
+            "USD" -> "$"
+            "SGD" -> "S$"
+            "EUR" -> "€"
+            "GBP" -> "£"
+            else -> "$code "
         }
+        return if (isNegative) "-$symbol$absNumberStr" else "$symbol$absNumberStr"
+    }
+}
+
+object MoneyInputParser {
+    private val defaultMaxAmount = BigDecimal("9999999.99")
+
+    fun parsePositiveAmount(
+        raw: String,
+        maxAmount: BigDecimal = defaultMaxAmount,
+    ): BigDecimal? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        val parsed = trimmed.toBigDecimalOrNull() ?: return null
+        if (parsed <= BigDecimal.ZERO) return null
+        if (parsed > maxAmount) return null
+        if (parsed.stripTrailingZeros().scale() > 2) return null
+        return parsed
     }
 }

@@ -24,11 +24,27 @@ DELETE FROM public.night_audit_details WHERE id BETWEEN 800000 AND 899999
 DELETE FROM public.staff_notification_reads
  WHERE notification_id IN (SELECT id FROM public.staff_notifications WHERE id BETWEEN 800000 AND 899999)
     OR user_id BETWEEN 800000 AND 899999;
+DELETE FROM public.support_guest_request_idempotency_keys
+ WHERE conversation_id IN (SELECT id FROM public.support_conversations WHERE id BETWEEN 800000 AND 899999);
 DELETE FROM public.support_messages
  WHERE conversation_id IN (SELECT id FROM public.support_conversations WHERE id BETWEEN 800000 AND 899999);
 DELETE FROM public.support_events
  WHERE conversation_id IN (SELECT id FROM public.support_conversations WHERE id BETWEEN 800000 AND 899999);
 DELETE FROM public.support_conversations WHERE id BETWEEN 800000 AND 899999;
+DELETE FROM public.ekyc_decision_history
+ WHERE id BETWEEN 800000 AND 899999 OR application_id BETWEEN 800000 AND 899999;
+DELETE FROM public.ekyc_notes
+ WHERE id BETWEEN 800000 AND 899999 OR application_id BETWEEN 800000 AND 899999;
+DELETE FROM public.ekyc_access_events
+ WHERE application_id BETWEEN 800000 AND 899999;
+DELETE FROM public.ekyc_idempotency_keys
+ WHERE application_id BETWEEN 800000 AND 899999;
+DELETE FROM public.ekyc_sensitive_reveals
+ WHERE application_id BETWEEN 800000 AND 899999;
+DELETE FROM public.ekyc_verifications
+ WHERE id BETWEEN 800000 AND 899999
+    OR guest_id BETWEEN 800000 AND 899999
+    OR user_id BETWEEN 800000 AND 899999;
 DELETE FROM public.self_checkin_events WHERE id BETWEEN 800000 AND 899999
     OR booking_id BETWEEN 800000 AND 899999;
 DELETE FROM public.email_deliveries WHERE id BETWEEN 800000 AND 899999
@@ -65,6 +81,8 @@ DELETE FROM public.booking_modifications WHERE booking_id BETWEEN 800000 AND 899
 DELETE FROM public.booking_services WHERE booking_id BETWEEN 800000 AND 899999;
 DELETE FROM public.room_changes WHERE booking_id BETWEEN 800000 AND 899999;
 DELETE FROM public.bookings WHERE id BETWEEN 800000 AND 899999;
+UPDATE public.bookings SET booking_group_id = NULL WHERE booking_group_id BETWEEN 800000 AND 899999;
+DELETE FROM public.booking_groups WHERE id BETWEEN 800000 AND 899999;
 DELETE FROM public.housekeeping_tasks WHERE id BETWEEN 800000 AND 899999
     OR room_id BETWEEN 800000 AND 899999;
 DELETE FROM public.maintenance_tickets WHERE id BETWEEN 800000 AND 899999;
@@ -79,6 +97,12 @@ DELETE FROM public.room_rates WHERE rate_plan_id BETWEEN 800000 AND 899999
     OR room_type_id BETWEEN 800000 AND 899999;
 DELETE FROM public.rooms WHERE id BETWEEN 800000 AND 899999;
 DELETE FROM public.promotion_channels WHERE promotion_id BETWEEN 800000 AND 899999;
+DELETE FROM public.promotion_channels WHERE booking_channel_id BETWEEN 800000 AND 899999;
+DELETE FROM public.channel_pricing_rules
+ WHERE id BETWEEN 800000 AND 899999 OR channel_id BETWEEN 800000 AND 899999;
+DELETE FROM public.channel_commission_rules
+ WHERE id BETWEEN 800000 AND 899999 OR channel_id BETWEEN 800000 AND 899999;
+DELETE FROM public.booking_channels WHERE id BETWEEN 800000 AND 899999;
 DELETE FROM public.promotion_loyalty_tiers WHERE promotion_id BETWEEN 800000 AND 899999;
 DELETE FROM public.promotion_room_types WHERE promotion_id BETWEEN 800000 AND 899999;
 DELETE FROM public.room_type_amenities WHERE room_type_id BETWEEN 800000 AND 899999;

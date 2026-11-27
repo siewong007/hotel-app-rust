@@ -15,8 +15,8 @@ pub async fn seed(tx: &mut Tx<'_>) -> Result<(), sqlx::Error> {
 }
 
 // ---------------------------------------------------------------------------
-// Organization & access — every user shares the development-only password
-// `HotelStaging2026!` (bcrypt, cost 12). Never reuse outside dev.
+// Organization & access — uses the operator-supplied SEED_STAFF_PASSWORD hash
+// (or loopback-only dev default when --allow-dev-default-password is passed).
 // ---------------------------------------------------------------------------
 const SQL_USERS: &str = r#"
 INSERT INTO public.users (
@@ -26,33 +26,33 @@ INSERT INTO public.users (
 )
 OVERRIDING SYSTEM VALUE
 VALUES
-    (800001, 'manager_stg',    'manager.stg@staging.hotel-app.test',    '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Maya Krishnan',   '+60-12-555-0101', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '2 hours',   CURRENT_TIMESTAMP - interval '90 days'),
-    (800002, 'frontdesk_amy',  'frontdesk.amy@staging.hotel-app.test',  '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Amy Tan',         '+60-12-555-0102', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '30 minutes', CURRENT_TIMESTAMP - interval '88 days'),
-    (800003, 'frontdesk_bala', 'frontdesk.bala@staging.hotel-app.test', '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Bala Subramaniam','+60-12-555-0103', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '1 day',      CURRENT_TIMESTAMP - interval '88 days'),
-    (800004, 'hk_siti',        'hk.siti@staging.hotel-app.test',        '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Siti Rahayu',     '+60-12-555-0104', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '4 hours',    CURRENT_TIMESTAMP - interval '80 days'),
-    (800005, 'hk_kumar',       'hk.kumar@staging.hotel-app.test',       '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Kumar Velu',      '+60-12-555-0105', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '1 day',      CURRENT_TIMESTAMP - interval '80 days'),
-    (800006, 'finance_mei',    'finance.mei@staging.hotel-app.test',    '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Mei Lin Chong',   '+60-12-555-0106', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '3 hours',    CURRENT_TIMESTAMP - interval '75 days'),
-    (800007, 'marketing_nadia','marketing.nadia@staging.hotel-app.test','$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Nadia Hassan',    '+60-12-555-0107', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '5 hours',    CURRENT_TIMESTAMP - interval '70 days'),
-    (800008, 'staff_razak',    'staff.razak@staging.hotel-app.test',    '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Razak Ibrahim',   '+60-12-555-0108', 'staff', true,  true, false, 0, false, NULL,                                     CURRENT_TIMESTAMP - interval '60 days'),
-    (800009, 'support_viewer', 'support.viewer@staging.hotel-app.test', '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Vikram Nair',     '+60-12-555-0109', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '2 days',     CURRENT_TIMESTAMP - interval '55 days'),
-    (800010, 'ekyc_reviewer',  'ekyc.reviewer@staging.hotel-app.test',  '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Farah Aziz',      '+60-12-555-0110', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '6 hours',    CURRENT_TIMESTAMP - interval '50 days'),
+    (800001, 'manager_stg',    'manager.stg@staging.hotel-app.test',    (SELECT staff_password_hash FROM staging_ref), 'Maya Krishnan',   '+60-12-555-0101', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '2 hours',   ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '90 days'),
+    (800002, 'frontdesk_amy',  'frontdesk.amy@staging.hotel-app.test',  (SELECT staff_password_hash FROM staging_ref), 'Amy Tan',         '+60-12-555-0102', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '30 minutes', ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '88 days'),
+    (800003, 'frontdesk_bala', 'frontdesk.bala@staging.hotel-app.test', (SELECT staff_password_hash FROM staging_ref), 'Bala Subramaniam','+60-12-555-0103', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 day',      ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '88 days'),
+    (800004, 'hk_siti',        'hk.siti@staging.hotel-app.test',        (SELECT staff_password_hash FROM staging_ref), 'Siti Rahayu',     '+60-12-555-0104', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '4 hours',    ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '80 days'),
+    (800005, 'hk_kumar',       'hk.kumar@staging.hotel-app.test',       (SELECT staff_password_hash FROM staging_ref), 'Kumar Velu',      '+60-12-555-0105', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 day',      ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '80 days'),
+    (800006, 'finance_mei',    'finance.mei@staging.hotel-app.test',    (SELECT staff_password_hash FROM staging_ref), 'Mei Lin Chong',   '+60-12-555-0106', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '3 hours',    ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '75 days'),
+    (800007, 'marketing_nadia','marketing.nadia@staging.hotel-app.test',(SELECT staff_password_hash FROM staging_ref), 'Nadia Hassan',    '+60-12-555-0107', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '5 hours',    ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '70 days'),
+    (800008, 'staff_razak',    'staff.razak@staging.hotel-app.test',    (SELECT staff_password_hash FROM staging_ref), 'Razak Ibrahim',   '+60-12-555-0108', 'staff', true,  true, false, 0, false, NULL,                                     ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '60 days'),
+    (800009, 'support_viewer', 'support.viewer@staging.hotel-app.test', (SELECT staff_password_hash FROM staging_ref), 'Vikram Nair',     '+60-12-555-0109', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '2 days',     ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '55 days'),
+    (800010, 'ekyc_reviewer',  'ekyc.reviewer@staging.hotel-app.test',  (SELECT staff_password_hash FROM staging_ref), 'Farah Aziz',      '+60-12-555-0110', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '6 hours',    ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '50 days'),
     -- Inactive account: cannot log in, still appears in admin user lists.
-    (800011, 'inactive_former','inactive.former@staging.hotel-app.test','$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Former Employee', '+60-12-555-0111', 'staff', false, true, false, 0, false, CURRENT_TIMESTAMP - interval '30 days',    CURRENT_TIMESTAMP - interval '200 days'),
+    (800011, 'inactive_former','inactive.former@staging.hotel-app.test',(SELECT staff_password_hash FROM staging_ref), 'Former Employee', '+60-12-555-0111', 'staff', false, true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '30 days',    ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '200 days'),
     -- Locked account: exercises the lockout path in admin + auth flows.
-    (800012, 'locked_desk',    'locked.desk@staging.hotel-app.test',    '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Locked Reception','+60-12-555-0112', 'staff', true,  true, true,  5, false, CURRENT_TIMESTAMP - interval '12 hours',   CURRENT_TIMESTAMP - interval '40 days'),
+    (800012, 'locked_desk',    'locked.desk@staging.hotel-app.test',    (SELECT staff_password_hash FROM staging_ref), 'Locked Reception','+60-12-555-0112', 'staff', true,  true, true,  5, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '12 hours',   ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '40 days'),
     -- Guest-portal login (user_type 'guest'); linked to guest 801020 below.
-    (800013, 'guest_portal',   'guest.portal@staging.hotel-app.test',   '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Portal Guest',    NULL,             'guest', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '8 hours',    CURRENT_TIMESTAMP - interval '45 days'),
+    (800013, 'guest_portal',   'guest.portal@staging.hotel-app.test',   (SELECT staff_password_hash FROM staging_ref), 'Portal Guest',    NULL,             'guest', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '8 hours',    ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '45 days'),
     -- Unverified staff account (registered, never confirmed email).
-    (800014, 'newhire_unverified','newhire.unverified@staging.hotel-app.test','$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK','New Hire', NULL,'staff', true,  false, false, 0, false, NULL, CURRENT_TIMESTAMP - interval '1 day'),
+    (800014, 'newhire_unverified','newhire.unverified@staging.hotel-app.test',(SELECT staff_password_hash FROM staging_ref),'New Hire', NULL,'staff', true,  false, false, 0, false, NULL, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 day'),
     -- Voucher-scope audit pair: 800015 holds promotions:read + vouchers:read
     -- only (see user_permissions below); 800016 has no voucher permissions at
     -- all. Together they exercise read-only vs forbidden voucher views.
-    (800015, 'voucher_audit',  'voucher.audit@staging.hotel-app.test',   '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Voucher Auditor','+60-12-555-0113', 'staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '2 days',     CURRENT_TIMESTAMP - interval '30 days'),
-    (800016, 'voucher_noperm', 'voucher.noperm@staging.hotel-app.test',  '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'No Voucher Perms','+60-12-555-0114','staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '2 days',     CURRENT_TIMESTAMP - interval '30 days'),
+    (800015, 'voucher_audit',  'voucher.audit@staging.hotel-app.test',   (SELECT staff_password_hash FROM staging_ref), 'Voucher Auditor','+60-12-555-0113', 'staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '2 days',     ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '30 days'),
+    (800016, 'voucher_noperm', 'voucher.noperm@staging.hotel-app.test',  (SELECT staff_password_hash FROM staging_ref), 'No Voucher Perms','+60-12-555-0114','staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '2 days',     ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '30 days'),
     -- Role-complete admin pair: the bootstrap admin/superadmin rows carry a
     -- non-recoverable placeholder password, so these are the dev logins.
-    (800017, 'admin_stg',      'admin.stg@staging.hotel-app.test',       '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Admin Seed',     '+60-12-555-0115','staff', true,  true, false, 0, false, CURRENT_TIMESTAMP - interval '1 hour',     CURRENT_TIMESTAMP - interval '90 days'),
-    (800018, 'super_stg',      'super.stg@staging.hotel-app.test',       '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Super Seed',     '+60-12-555-0116','staff', true,  true, false, 0, true,  CURRENT_TIMESTAMP - interval '1 hour',     CURRENT_TIMESTAMP - interval '90 days');
+    (800017, 'admin_stg',      'admin.stg@staging.hotel-app.test',       (SELECT staff_password_hash FROM staging_ref), 'Admin Seed',     '+60-12-555-0115','staff', true,  true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 hour',     ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '90 days'),
+    (800018, 'super_stg',      'super.stg@staging.hotel-app.test',       (SELECT staff_password_hash FROM staging_ref), 'Super Seed',     '+60-12-555-0116','staff', true,  true, false, 0, true,  ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 hour',     ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '90 days');
 
 INSERT INTO public.user_roles (user_id, role_id)
 SELECT u.id, r.id
@@ -302,9 +302,9 @@ OVERRIDING SYSTEM VALUE VALUES
 
 INSERT INTO public.corporate_accounts (id, name, company_registration, tax_id, industry, billing_address, billing_email, billing_phone, credit_limit, credit_balance, payment_terms, discount_percentage, contract_start, contract_end, is_active, notes, created_by)
 OVERRIDING SYSTEM VALUE VALUES
-    ('80000000-0000-4000-8000-000000000001', 'TechCorp Solutions Sdn Bhd', 'SA-2011-00442', 'C-TECH-442', 'Technology', 'Level 10, Menara Axis, Kuala Lumpur', 'ap@techcorp.staging.hotel-app.test', '+60-3-7000-1001', 50000.00, 12400.00, 'Net 30', 10.00, CURRENT_DATE - 400, CURRENT_DATE + 265, true, 'Direct-bill: invoices go to AP mailbox.', 800001),
-    ('80000000-0000-4000-8000-000000000002', 'Globex (Malaysia) Sdn Bhd', 'SA-2009-00117', 'C-GLBX-117', 'Manufacturing', 'Suite 8, Wisma UOA, Kuala Lumpur', 'travel@globex.staging.hotel-app.test', '+60-3-7000-1002', 80000.00, 32750.00, 'Net 45', 12.50, CURRENT_DATE - 300, CURRENT_DATE + 65, true, 'Contract renewal due soon.', 800001),
-    ('80000000-0000-4000-8000-000000000003', 'Initech Events', 'SA-2019-00788', 'C-INCH-788', 'Events', 'Bangsar South, Kuala Lumpur', 'events@initech.staging.hotel-app.test', NULL, 10000.00, 0.00, 'Net 14', 5.00, CURRENT_DATE - 120, CURRENT_DATE - 10, false, 'Expired contract — filter coverage.', 800001);
+    ('80000000-0000-4000-8000-000000000001', 'TechCorp Solutions Sdn Bhd', 'SA-2011-00442', 'C-TECH-442', 'Technology', 'Level 10, Menara Axis, Kuala Lumpur', 'ap@techcorp.staging.hotel-app.test', '+60-3-7000-1001', 50000.00, 12400.00, 'Net 30', 10.00, (SELECT today FROM staging_ref) - 400, (SELECT today FROM staging_ref) + 265, true, 'Direct-bill: invoices go to AP mailbox.', 800001),
+    ('80000000-0000-4000-8000-000000000002', 'Globex (Malaysia) Sdn Bhd', 'SA-2009-00117', 'C-GLBX-117', 'Manufacturing', 'Suite 8, Wisma UOA, Kuala Lumpur', 'travel@globex.staging.hotel-app.test', '+60-3-7000-1002', 80000.00, 32750.00, 'Net 45', 12.50, (SELECT today FROM staging_ref) - 300, (SELECT today FROM staging_ref) + 65, true, 'Contract renewal due soon.', 800001),
+    ('80000000-0000-4000-8000-000000000003', 'Initech Events', 'SA-2019-00788', 'C-INCH-788', 'Events', 'Bangsar South, Kuala Lumpur', 'events@initech.staging.hotel-app.test', NULL, 10000.00, 0.00, 'Net 14', 5.00, (SELECT today FROM staging_ref) - 120, (SELECT today FROM staging_ref) - 10, false, 'Expired contract — filter coverage.', 800001);
 
 INSERT INTO public.corporate_account_contacts (id, corporate_account_id, name, email, phone, role, is_primary)
 OVERRIDING SYSTEM VALUE VALUES
@@ -338,14 +338,14 @@ OVERRIDING SYSTEM VALUE VALUES
 
 INSERT INTO public.guest_documents (id, guest_id, document_type, document_number, is_verified, verified_at, verified_by)
 OVERRIDING SYSTEM VALUE VALUES
-    (809501, 801003, 'passport', 'STG-PP-UK-3303', true, CURRENT_TIMESTAMP - interval '20 days', 800002),
-    (809502, 801006, 'passport', 'STG-PP-CN-6606', true, CURRENT_TIMESTAMP - interval '15 days', 800002),
+    (809501, 801003, 'passport', 'STG-PP-UK-3303', true, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '20 days', 800002),
+    (809502, 801006, 'passport', 'STG-PP-CN-6606', true, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '15 days', 800002),
     (809503, 801012, 'passport', 'STG-PP-PH-7712', false, NULL, NULL);
 
 INSERT INTO public.guest_reviews (id, guest_id, booking_id, overall_rating, cleanliness_rating, service_rating, comfort_rating, location_rating, value_rating, title, content, response, response_at, response_by, is_published)
 OVERRIDING SYSTEM VALUE VALUES
-    (809601, 801001, NULL, 5.00, 5.00, 5.00, 4.50, 5.00, 4.50, 'Consistently excellent', 'Third stay this year; the team remembered my preferences.', 'Thank you, Aisha — see you next visit.', CURRENT_TIMESTAMP - interval '30 days', 800001, true),
-    (809602, 801005, NULL, 3.50, 4.00, 3.00, 4.00, 4.50, 3.00, 'Good room, slow dining', 'Room was spotless but room service took nearly an hour.', 'Apologies for the delay — we have briefed the F&B team.', CURRENT_TIMESTAMP - interval '18 days', 800001, true),
+    (809601, 801001, NULL, 5.00, 5.00, 5.00, 4.50, 5.00, 4.50, 'Consistently excellent', 'Third stay this year; the team remembered my preferences.', 'Thank you, Aisha — see you next visit.', ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '30 days', 800001, true),
+    (809602, 801005, NULL, 3.50, 4.00, 3.00, 4.00, 4.50, 3.00, 'Good room, slow dining', 'Room was spotless but room service took nearly an hour.', 'Apologies for the delay — we have briefed the F&B team.', ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '18 days', 800001, true),
     (809603, 801013, NULL, 4.00, NULL, NULL, NULL, NULL, NULL, 'Short stay, smooth check-in', 'In and out for a conference. No complaints.', NULL, NULL, NULL, true),
     (809604, 801011, NULL, 2.50, 2.00, 3.00, 2.00, 4.00, 3.00, 'Aircon too loud', 'Unit in the economy room rattled all night.', NULL, NULL, NULL, false);
 
@@ -359,7 +359,7 @@ OVERRIDING SYSTEM VALUE VALUES
 -- Portal linkage: the guest-portal login user manages its own guest record.
 INSERT INTO public.user_guests (id, user_id, guest_id, relationship_type, can_book_for, can_view_bookings, can_modify, linked_by)
 OVERRIDING SYSTEM VALUE VALUES
-    (898201, 800013, 801020, 'self', true, true, false, 800001);
+    (809821, 800013, 801020, 'self', true, true, false, 800001);
 
 UPDATE public.users SET guest_id = 801020 WHERE id = 800013;
 

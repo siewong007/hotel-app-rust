@@ -111,10 +111,16 @@ export const PublicBookingApi = {
       .json<GuestBookingQuote>();
   },
 
-  create(input: CreateAnonymousBookingRequest): Promise<GuestBookingConfirmation> {
+  create(
+    input: CreateAnonymousBookingRequest,
+    turnstileToken?: string,
+  ): Promise<GuestBookingConfirmation> {
     return api
       .post('booking/reservations', {
-        headers: { [SKIP_API_NOTIFICATION_HEADER]: 'true' },
+        headers: {
+          [SKIP_API_NOTIFICATION_HEADER]: 'true',
+          ...(turnstileToken ? { 'cf-turnstile-response': turnstileToken } : {}),
+        },
         json: input,
       })
       .json<GuestBookingConfirmation>();
@@ -147,10 +153,16 @@ export const PublicGroupBookingApi = {
       .json<GroupQuote>();
   },
 
-  create(input: CreateAnonymousGroupBookingRequest): Promise<GroupBookingConfirmation> {
+  create(
+    input: CreateAnonymousGroupBookingRequest,
+    turnstileToken?: string,
+  ): Promise<GroupBookingConfirmation> {
     return api
       .post('booking/group-reservations', {
-        headers: { [SKIP_API_NOTIFICATION_HEADER]: 'true' },
+        headers: {
+          [SKIP_API_NOTIFICATION_HEADER]: 'true',
+          ...(turnstileToken ? { 'cf-turnstile-response': turnstileToken } : {}),
+        },
         json: input,
       })
       .json<GroupBookingConfirmation>();

@@ -6,6 +6,7 @@ import com.hotelapp.staff.core.network.RealtimeSocketClient
 import com.hotelapp.staff.data.dto.AssignableStaffMemberDto
 import com.hotelapp.staff.data.dto.BookingBoardSummaryDto
 import com.hotelapp.staff.data.dto.BookingDto
+import com.hotelapp.staff.data.dto.BookingGroupDetailDto
 import com.hotelapp.staff.data.dto.BookingTimelineEntryDto
 import com.hotelapp.staff.data.dto.BookingWithDetailsDto
 import com.hotelapp.staff.data.dto.CheckInAdvisoryDto
@@ -18,7 +19,10 @@ import com.hotelapp.staff.data.dto.EkycApplicationDetailDto
 import com.hotelapp.staff.data.dto.EkycDashboardMetricsDto
 import com.hotelapp.staff.data.dto.EkycReasonCodeDto
 import com.hotelapp.staff.data.dto.EkycReviewActionRequestDto
+import com.hotelapp.staff.data.dto.EkycSensitiveRevealResponseDto
+import com.hotelapp.staff.data.dto.ForfeitDepositRequestDto
 import com.hotelapp.staff.data.dto.GlobalSearchResponseDto
+import com.hotelapp.staff.data.dto.GroupPayRequestDto
 import com.hotelapp.staff.data.dto.HousekeepingBoardResponseDto
 import com.hotelapp.staff.data.dto.HousekeepingTaskDto
 import com.hotelapp.staff.data.dto.HousekeepingTaskListResponseDto
@@ -26,11 +30,15 @@ import com.hotelapp.staff.data.dto.MaintenanceTicketDto
 import com.hotelapp.staff.data.dto.MaintenanceTicketListResponseDto
 import com.hotelapp.staff.data.dto.NewReservationsResponseDto
 import com.hotelapp.staff.data.dto.PaginatedResponseDto
+import com.hotelapp.staff.data.dto.PasskeyAllowCredentialDto
 import com.hotelapp.staff.data.dto.PasskeyLoginFinishRequestDto
 import com.hotelapp.staff.data.dto.PasskeyLoginStartResponseDto
+import com.hotelapp.staff.data.dto.PasskeySecondFactorFinishRequestDto
 import com.hotelapp.staff.data.dto.PaymentActionResponseDto
+import com.hotelapp.staff.data.dto.PaymentReceiptFile
 import com.hotelapp.staff.data.dto.PendingPaymentPageDto
 import com.hotelapp.staff.data.dto.RecordPaymentRequestDto
+import com.hotelapp.staff.data.dto.RefundDepositRequestDto
 import com.hotelapp.staff.data.dto.RoomDetailedStatusDto
 import com.hotelapp.staff.data.dto.RoomWithOccupancyDto
 import com.hotelapp.staff.data.dto.StaffNotificationsResponseDto
@@ -102,6 +110,14 @@ object TestFixtures {
 
 class FakeAuthRepository : AuthRepository {
     var nextLoginResult: Result<StaffSession> = Result.success(TestFixtures.adminSession())
+    var nextPasskey2faStartResult: Result<PasskeyLoginStartResponseDto> = Result.success(
+        PasskeyLoginStartResponseDto(
+            challenge = "chal",
+            allowCredentials = listOf(PasskeyAllowCredentialDto(id = "c1")),
+        ),
+    )
+    var nextPasskey2faFinishResult: Result<StaffSession> =
+        Result.failure(UnsupportedOperationException("Not configured in test"))
     var lastLoginArgs: Triple<String, String, String?>? = null
     override suspend fun restoreSession(): Boolean = false
     override suspend fun login(username: String, password: String, totpCode: String?): Result<StaffSession> {
@@ -112,6 +128,10 @@ class FakeAuthRepository : AuthRepository {
         Result.failure(UnsupportedOperationException("Not configured in test"))
     override suspend fun passkeyLoginFinish(request: PasskeyLoginFinishRequestDto): Result<StaffSession> =
         Result.failure(UnsupportedOperationException("Not configured in test"))
+    override suspend fun passkeySecondFactorStart(mfaToken: String): Result<PasskeyLoginStartResponseDto> =
+        nextPasskey2faStartResult
+    override suspend fun passkeySecondFactorFinish(request: PasskeySecondFactorFinishRequestDto): Result<StaffSession> =
+        nextPasskey2faFinishResult
     override suspend fun logout(): Result<Unit> = Result.success(Unit)
     override suspend fun listSessions(): Result<List<UserSessionInfoDto>> = Result.success(emptyList())
     override suspend fun revokeSession(sessionId: String): Result<Unit> = Result.success(Unit)
@@ -124,12 +144,17 @@ class FakeBookingsRepository : BookingsRepository {
     var detailResult: Result<BookingWithDetailsDto> = Result.success(TestFixtures.sampleBooking())
     var timelineResult: Result<List<BookingTimelineEntryDto>> = Result.success(emptyList())
     var advisoryResult: Result<CheckInAdvisoryDto> = Result.success(CheckInAdvisoryDto())
+    var groupDetailResult: Result<BookingGroupDetailDto?> = Result.success(null)
     var checkInResult: Result<Unit> = Result.success(Unit)
     var checkOutResult: Result<Unit> = Result.success(Unit)
     var voidResult: Result<Unit> = Result.success(Unit)
     var releaseResult: Result<Unit> = Result.success(Unit)
+    var reactivateResult: Result<Unit> = Result.success(Unit)
+    var groupReactivateResult: Result<Unit> = Result.success(Unit)
     var lastCheckInRequest: CheckInRequestDto? = null
     var lastVoidReason: String? = null
+    val reactivateCalls = mutableListOf<Long>()
+    val groupReactivateCalls = mutableListOf<Long>()
 
     override suspend fun summary(): Result<BookingBoardSummaryDto> = Result.success(BookingBoardSummaryDto())
     override suspend fun newReservations(): Result<NewReservationsResponseDto> = Result.success(NewReservationsResponseDto())
@@ -151,6 +176,16 @@ class FakeBookingsRepository : BookingsRepository {
         return voidResult
     }
     override suspend fun releaseHold(id: Long, reason: String): Result<Unit> = releaseResult
+    override suspend fun groupPay(id: Long, request: GroupPayRequestDto): Result<Unit> = Result.success(Unit)
+    override suspend fun bookingGroup(id: Long): Result<BookingGroupDetailDto?> = groupDetailResult
+    override suspend fun reactivate(id: Long): Result<Unit> {
+        reactivateCalls.add(id)
+        return reactivateResult
+    }
+    override suspend fun groupReactivate(id: Long): Result<Unit> {
+        groupReactivateCalls.add(id)
+        return groupReactivateResult
+    }
 }
 
 class FakeRoomsRepository : RoomsRepository {
@@ -165,6 +200,9 @@ class FakeRoomsRepository : RoomsRepository {
     )
     var statusCalls = mutableListOf<Triple<Long, String, String?>>()
     var endCleaningCalls = mutableListOf<Long>()
+    var endCleaningResult: Result<Unit> = Result.success(Unit)
+    var endMaintenanceCalls = mutableListOf<Long>()
+    var endMaintenanceResult: Result<Unit> = Result.success(Unit)
 
     override suspend fun occupancySummary() = throw UnsupportedOperationException()
     override suspend fun roomsWithOccupancy(): Result<List<RoomWithOccupancyDto>> = roomsResult
@@ -175,9 +213,12 @@ class FakeRoomsRepository : RoomsRepository {
     }
     override suspend fun endCleaning(id: Long): Result<Unit> {
         endCleaningCalls.add(id)
-        return Result.success(Unit)
+        return endCleaningResult
     }
-    override suspend fun endMaintenance(id: Long): Result<Unit> = Result.success(Unit)
+    override suspend fun endMaintenance(id: Long): Result<Unit> {
+        endMaintenanceCalls.add(id)
+        return endMaintenanceResult
+    }
 }
 
 class FakeHousekeepingRepository : HousekeepingRepository {
@@ -216,6 +257,7 @@ class FakeHousekeepingRepository : HousekeepingRepository {
 class FakeMaintenanceRepository : MaintenanceRepository {
     var listResult: Result<MaintenanceTicketListResponseDto> = Result.success(MaintenanceTicketListResponseDto())
     val created = mutableListOf<CreateMaintenanceTicketRequestDto>()
+    val createdIdempotencyKeys = mutableListOf<String?>()
     val updated = mutableListOf<Pair<Long, UpdateMaintenanceTicketRequestDto>>()
 
     private fun sampleTicket(id: Long, status: String = "open") = MaintenanceTicketDto(
@@ -232,8 +274,12 @@ class FakeMaintenanceRepository : MaintenanceRepository {
     )
 
     override suspend fun list(status: String?, priority: String?, page: Long): Result<MaintenanceTicketListResponseDto> = listResult
-    override suspend fun create(request: CreateMaintenanceTicketRequestDto): Result<MaintenanceTicketDto> {
+    override suspend fun create(
+        request: CreateMaintenanceTicketRequestDto,
+        idempotencyKey: String?,
+    ): Result<MaintenanceTicketDto> {
         created.add(request)
+        createdIdempotencyKeys.add(idempotencyKey)
         return Result.success(sampleTicket(77L))
     }
     override suspend fun update(id: Long, request: UpdateMaintenanceTicketRequestDto): Result<MaintenanceTicketDto> {
@@ -254,8 +300,11 @@ class FakePaymentsRepository : PaymentsRepository {
     var pendingResult: Result<PendingPaymentPageDto> = Result.success(PendingPaymentPageDto())
     var approveResult: Result<PaymentActionResponseDto> = Result.success(PaymentActionResponseDto(1L, "completed", "confirmed"))
     var rejectResult: Result<PaymentActionResponseDto> = Result.success(PaymentActionResponseDto(1L, "rejected", "cancelled"))
+    var downloadReceiptResult: Result<PaymentReceiptFile> = Result.failure(UnsupportedOperationException("Not configured"))
+    var requestReceiptResult: Result<Unit> = Result.success(Unit)
     val approvedIds = mutableListOf<Long>()
     val rejectedCalls = mutableListOf<Pair<Long, String>>()
+    val requestedReceiptCalls = mutableListOf<Pair<Long, String?>>()
 
     override suspend fun bookingPayments(bookingId: Long) = Result.success(emptyList<com.hotelapp.staff.data.dto.BookingPaymentRecordDto>())
     override suspend fun workflowSummary(bookingId: Long) = Result.failure<com.hotelapp.staff.data.dto.PaymentWorkflowSummaryDto>(UnsupportedOperationException())
@@ -269,8 +318,15 @@ class FakePaymentsRepository : PaymentsRepository {
         rejectedCalls.add(paymentId to reason)
         return rejectResult
     }
+    override suspend fun downloadReceipt(paymentId: Long): Result<PaymentReceiptFile> = downloadReceiptResult
+    override suspend fun requestReceipt(paymentId: Long, message: String?): Result<Unit> {
+        requestedReceiptCalls.add(paymentId to message)
+        return requestReceiptResult
+    }
     override suspend fun invoicePreview(bookingId: Long) = Result.failure<com.hotelapp.staff.data.dto.InvoicePreviewDto>(UnsupportedOperationException())
     override suspend fun generateInvoice(bookingId: Long) = Result.failure<com.hotelapp.staff.data.dto.InvoiceDto>(UnsupportedOperationException())
+    override suspend fun refundDeposit(bookingId: Long, request: RefundDepositRequestDto) = Result.success(Unit)
+    override suspend fun forfeitDeposit(bookingId: Long, request: ForfeitDepositRequestDto) = Result.success(Unit)
 }
 
 class FakeEkycRepository : EkycRepository {
@@ -278,7 +334,10 @@ class FakeEkycRepository : EkycRepository {
     var detailResult: Result<EkycApplicationDetailDto> = Result.failure(UnsupportedOperationException())
     var actionResult: Result<EkycApplicationDetailDto> = Result.failure(UnsupportedOperationException())
     var codesResult: Result<List<EkycReasonCodeDto>> = Result.success(emptyList())
+    var documentBytesResult: Result<ByteArray> = Result.failure(UnsupportedOperationException("Not configured"))
+    var revealResult: Result<EkycSensitiveRevealResponseDto> = Result.failure(UnsupportedOperationException("Not configured"))
     val actionsTaken = mutableListOf<Pair<Long, EkycReviewActionRequestDto>>()
+    val revealCalls = mutableListOf<Triple<Long, String, String>>()
 
     override suspend fun dashboard(): Result<EkycDashboardMetricsDto> = Result.success(EkycDashboardMetricsDto())
     override suspend fun applications(status: String?, riskLevel: String?, search: String?, page: Long) = listResult
@@ -288,20 +347,53 @@ class FakeEkycRepository : EkycRepository {
         return actionResult
     }
     override suspend fun reasonCodes() = codesResult
+    override suspend fun fetchDocumentBytes(id: Long, kind: String): Result<ByteArray> = documentBytesResult
+    override suspend fun revealSensitive(id: Long, field: String, reason: String): Result<EkycSensitiveRevealResponseDto> {
+        revealCalls.add(Triple(id, field, reason))
+        return revealResult
+    }
 }
 
 class FakeNotificationsRepository : NotificationsRepository {
     var listResult: Result<StaffNotificationsResponseDto> = Result.success(StaffNotificationsResponseDto())
+    var markReadResult: Result<Unit> = Result.success(Unit)
+    var markAllReadResult: Result<Unit> = Result.success(Unit)
     val markedReadIds = mutableListOf<Long>()
     var markAllReadCalls = 0
 
     override suspend fun list(): Result<StaffNotificationsResponseDto> = listResult
     override suspend fun markRead(id: Long): Result<Unit> {
         markedReadIds.add(id)
-        return Result.success(Unit)
+        if (markReadResult.isSuccess) {
+            listResult.getOrNull()?.let { cur ->
+                val updatedItems = cur.items.map { item ->
+                    if (item.id == id && item.readAt == null) item.copy(readAt = "2026-06-01T12:00:00Z") else item
+                }
+                val nextUnread = updatedItems.count { it.readAt == null && it.actionPending }.toLong()
+                listResult = Result.success(
+                    cur.copy(
+                        unread = nextUnread,
+                        urgentUnread = 0L.coerceAtLeast(if (nextUnread == 0L) 0L else cur.urgentUnread),
+                        items = updatedItems,
+                    ),
+                )
+            }
+        }
+        return markReadResult
     }
     override suspend fun markAllRead(): Result<Unit> {
         markAllReadCalls += 1
-        return Result.success(Unit)
+        if (markAllReadResult.isSuccess) {
+            listResult.getOrNull()?.let { cur ->
+                listResult = Result.success(
+                    cur.copy(
+                        unread = 0L,
+                        urgentUnread = 0L,
+                        items = cur.items.map { item -> item.copy(readAt = item.readAt ?: "2026-06-01T12:00:00Z") },
+                    ),
+                )
+            }
+        }
+        return markAllReadResult
     }
 }

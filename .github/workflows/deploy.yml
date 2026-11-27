@@ -225,6 +225,12 @@ jobs:
             "$bundle_dir/database/patches/0032_full_audit_schema_fixes.sql"
           cp hotel-app-be/database/postgres/patches/0033_security_audit_hardening.sql \
             "$bundle_dir/database/patches/0033_security_audit_hardening.sql"
+          cp hotel-app-be/database/postgres/patches/0034_db_perf_integrity_hardening.sql \
+            "$bundle_dir/database/patches/0034_db_perf_integrity_hardening.sql"
+          cp hotel-app-be/database/postgres/patches/0035_bughunter_security_fixes.sql \
+            "$bundle_dir/database/patches/0035_bughunter_security_fixes.sql"
+          cp hotel-app-be/database/postgres/patches/0036_wave2_security_hardening.sql \
+            "$bundle_dir/database/patches/0036_wave2_security_hardening.sql"
           cp hotel-app-be/database/postgres/patches/0025_booking_groups.sql \
             "$bundle_dir/database/patches/0025_booking_groups.sql"
           cp deploy/db-least-privilege.sql "$bundle_dir/database/db-least-privilege.sql"
@@ -275,6 +281,9 @@ jobs:
               database/patches/0031_manager_owns_user_management.sql \
               database/patches/0032_full_audit_schema_fixes.sql \
               database/patches/0033_security_audit_hardening.sql \
+              database/patches/0034_db_perf_integrity_hardening.sql \
+              database/patches/0035_bughunter_security_fixes.sql \
+              database/patches/0036_wave2_security_hardening.sql \
               database/db-least-privilege.sql \
               > SHA256SUMS
           )
@@ -347,7 +356,7 @@ jobs:
                fi
                docker image rm \"\$release_image\" >/dev/null 2>&1 || true
              done
-             find /tmp -maxdepth 1 -name 'saliminn-*.tar.gz*' -mmin +60 -delete 2>/dev/null || true
+             find /opt/saliminn/incoming -maxdepth 1 -name 'saliminn-*.tar.gz*' -mmin +60 -delete 2>/dev/null || true
              failed=0
              for target in /tmp /opt; do
                available=\$(df --output=avail -B1 \"\$target\" | tail -n 1 | tr -d ' ')
@@ -362,20 +371,27 @@ jobs:
                exit 1
              fi"
 
-      - name: Upload release directly to the VPS
+      - name: Upload release directly to private VPS staging directory
         shell: bash
         run: |
           set -euo pipefail
-          scp \
+          archive="$RUNNER_TEMP/saliminn-$DEPLOY_SHA.tar.gz"
+          bundle_sha256=$(sha256sum "$archive" | awk '{print $1}')
+          echo "BUNDLE_SHA256=$bundle_sha256" >> "$GITHUB_ENV"
+          ssh \
             -i "$RUNNER_TEMP/vps-key" \
-            -P "$VPS_PORT" \
+            -p "$VPS_PORT" \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$RUNNER_TEMP/vps-known-hosts" \
-            "$RUNNER_TEMP/saliminn-$DEPLOY_SHA.tar.gz" \
-            "$VPS_USER@$VPS_HOST:/tmp/saliminn-$DEPLOY_SHA.tar.gz.part"
+            "$VPS_USER@$VPS_HOST" \
+            "set -euo pipefail
+             umask 077
+             sudo install -d -m 0700 -o root -g root /opt/saliminn/incoming
+             sudo sh -c 'cat > /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz.part'
+             sudo chmod 0600 /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz.part" < "$archive"
 
       # Operator settings (Turnstile keys, the PayPal webhook id) cannot live on
       # the host by hand -- reaching /opt/saliminn/secrets.env needs an
@@ -424,7 +440,9 @@ jobs:
               -o "UserKnownHostsFile=$RUNNER_TEMP/vps-known-hosts" \
               "$VPS_USER@$VPS_HOST" \
               "set -euo pipefail
+               umask 077
                sudo install -d -m 0750 -o root -g root /opt/saliminn
+               sudo install -m 0600 -o root -g root /dev/null /opt/saliminn/ci-provisioned.env
                sudo tee /opt/saliminn/ci-provisioned.env >/dev/null
                sudo chmod 0600 /opt/saliminn/ci-provisioned.env
                sudo chown root:root /opt/saliminn/ci-provisioned.env"
@@ -456,11 +474,12 @@ jobs:
             -o "UserKnownHostsFile=$RUNNER_TEMP/vps-known-hosts" \
             "$VPS_USER@$VPS_HOST" \
             "set -euo pipefail
-             trap 'rm -f /tmp/saliminn-$DEPLOY_SHA.tar.gz.part /tmp/saliminn-$DEPLOY_SHA.tar.gz' EXIT
-             mv /tmp/saliminn-$DEPLOY_SHA.tar.gz.part /tmp/saliminn-$DEPLOY_SHA.tar.gz
+             trap 'sudo rm -f /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz.part /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz' EXIT
+             sudo mv /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz.part /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz
+             echo \"$BUNDLE_SHA256  /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz\" | sudo sha256sum --check -
              sudo rm -rf -- /opt/saliminn/releases/$DEPLOY_SHA.incoming
              sudo install -d -m 0750 /opt/saliminn/releases/$DEPLOY_SHA.incoming
-             sudo tar -xzf /tmp/saliminn-$DEPLOY_SHA.tar.gz -C /opt/saliminn/releases/$DEPLOY_SHA.incoming
+             sudo tar -xzf /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz -C /opt/saliminn/releases/$DEPLOY_SHA.incoming
              sudo rm -rf -- /opt/saliminn/releases/$DEPLOY_SHA
              sudo mv /opt/saliminn/releases/$DEPLOY_SHA.incoming /opt/saliminn/releases/$DEPLOY_SHA
              sudo /bin/bash /opt/saliminn/releases/$DEPLOY_SHA/deploy.sh \
@@ -499,7 +518,7 @@ jobs:
               -o StrictHostKeyChecking=yes \
               -o "UserKnownHostsFile=$RUNNER_TEMP/vps-known-hosts" \
               "$VPS_USER@$VPS_HOST" \
-              "rm -f -- /tmp/saliminn-$DEPLOY_SHA.tar.gz.part /tmp/saliminn-$DEPLOY_SHA.tar.gz" \
+              "sudo rm -f -- /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz.part /opt/saliminn/incoming/saliminn-$DEPLOY_SHA.tar.gz /tmp/saliminn-$DEPLOY_SHA.tar.gz.part /tmp/saliminn-$DEPLOY_SHA.tar.gz" \
               || true
           fi
 

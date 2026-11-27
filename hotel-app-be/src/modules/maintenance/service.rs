@@ -252,10 +252,6 @@ pub async fn update_ticket(
     ticket_id: i64,
     input: UpdateMaintenanceTicketRequest,
 ) -> Result<MaintenanceTicket, ApiError> {
-    let existing = repository::find_ticket(pool, ticket_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("Maintenance ticket not found".to_string()))?;
-
     if let Some(category) = input.category.as_deref() {
         validate_category(category)?;
     }
@@ -264,7 +260,6 @@ pub async fn update_ticket(
     }
     if let Some(status) = input.status.as_deref() {
         validate_status(status)?;
-        validate_status_transition(&existing.status, status)?;
     }
 
     let title = match input.title {
@@ -297,10 +292,22 @@ pub async fn update_ticket(
         clear_assignee: input.clear_assignee.unwrap_or(false),
     };
 
-    let ticket = repository::patch_ticket(pool, ticket_id, &patch).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let existing = repository::find_ticket_for_update_tx(&mut tx, ticket_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Maintenance ticket not found".to_string()))?;
 
-    let _ = AuditLog::log_event(
-        pool,
+    if let Some(status) = patch.status.as_deref() {
+        validate_status_transition(&existing.status, status)?;
+    }
+
+    let ticket = repository::patch_ticket_tx(&mut tx, ticket_id, &patch).await?;
+
+    AuditLog::log_event_tx(
+        &mut tx,
         AuditEvent {
             user_id: Some(user_id),
             action: "maintenance_ticket_updated",
@@ -313,7 +320,11 @@ pub async fn update_ticket(
             ..Default::default()
         },
     )
-    .await;
+    .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let priority_escalated = existing.priority != ticket.priority
         && matches!(ticket.priority.as_str(), "critical" | "high");

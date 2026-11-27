@@ -229,6 +229,7 @@ $$;
 
 CREATE FUNCTION public.enforce_booking_tourism_tax() RETURNS trigger
     LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'public'
     AS $_$
 DECLARE
     v_is_tourist BOOLEAN := false;
@@ -238,7 +239,7 @@ BEGIN
     SELECT COALESCE(
         (
             SELECT CASE
-                WHEN trim(value) ~ '^[0-9]+(\.[0-9]+)?$' AND trim(value)::numeric > 0
+                WHEN trim(value) ~ '^[0-9]+(\.[0-9]+)?$' AND trim(value)::numeric >= 0
                     THEN trim(value)::numeric
                 ELSE NULL
             END
@@ -1330,12 +1331,13 @@ $$;
 
 CREATE FUNCTION public.validate_booking_occupancy() RETURNS trigger
     LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'public'
     AS $$
 DECLARE v_max_occupancy INTEGER; v_total_guests INTEGER;
 BEGIN
     SELECT rt.max_occupancy INTO v_max_occupancy FROM rooms r JOIN room_types rt ON r.room_type_id = rt.id WHERE r.id = NEW.room_id;
     v_total_guests := COALESCE(NEW.adults, 1) + COALESCE(NEW.children, 0);
-    IF v_total_guests > v_max_occupancy THEN
+    IF v_max_occupancy IS NOT NULL AND v_total_guests > v_max_occupancy THEN
         RAISE EXCEPTION 'Total guests (%) exceeds room maximum occupancy (%)', v_total_guests, v_max_occupancy;
     END IF;
     RETURN NEW;
@@ -1952,10 +1954,15 @@ END),
     smoking_preference character varying(20),
     booking_group_id bigint,
     group_voucher_share numeric(12,2) DEFAULT 0 NOT NULL,
+    CONSTRAINT bookings_extra_bed_charge_non_negative CHECK (((extra_bed_charge IS NULL) OR (extra_bed_charge >= (0)::numeric))),
+    CONSTRAINT bookings_extra_bed_count_non_negative CHECK (((extra_bed_count IS NULL) OR (extra_bed_count >= 0))),
     CONSTRAINT bookings_group_voucher_share_check CHECK ((group_voucher_share >= (0)::numeric)),
     CONSTRAINT bookings_payment_status_check CHECK (((payment_status)::text = ANY ((ARRAY['unpaid'::character varying, 'unpaid_deposit'::character varying, 'paid_rate'::character varying, 'partial'::character varying, 'paid'::character varying, 'refunded'::character varying, 'void'::character varying])::text[]))),
+    CONSTRAINT bookings_room_rate_non_negative CHECK ((room_rate >= (0)::numeric)),
     CONSTRAINT bookings_smoking_preference_check CHECK (((smoking_preference)::text = ANY ((ARRAY['smoking'::character varying, 'non_smoking'::character varying])::text[]))),
     CONSTRAINT bookings_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'pending_payment'::character varying, 'pending_confirmation'::character varying, 'confirmed'::character varying, 'checked_in'::character varying, 'auto_checked_in'::character varying, 'late_checkout'::character varying, 'checked_out'::character varying, 'no_show'::character varying, 'completed'::character varying, 'comp_void'::character varying, 'partial_complimentary'::character varying, 'fully_complimentary'::character varying, 'voided'::character varying])::text[]))),
+    CONSTRAINT bookings_subtotal_non_negative CHECK ((subtotal >= (0)::numeric)),
+    CONSTRAINT bookings_total_amount_non_negative CHECK ((total_amount >= (0)::numeric)),
     CONSTRAINT valid_complimentary_dates CHECK ((((complimentary_start_date IS NULL) AND (complimentary_end_date IS NULL)) OR ((complimentary_start_date IS NOT NULL) AND (complimentary_end_date IS NOT NULL) AND (complimentary_start_date >= check_in_date) AND (complimentary_end_date <= check_out_date) AND (complimentary_start_date < complimentary_end_date)))),
     CONSTRAINT valid_dates CHECK ((check_out_date >= check_in_date)),
     CONSTRAINT valid_occupancy CHECK ((((adults + children) + infants) > 0))
@@ -2499,6 +2506,20 @@ ALTER TABLE public.consent_records ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
     NO MAXVALUE
     CACHE 1
 );
+
+
+--
+-- Name: consumed_oauth_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.consumed_oauth_tokens (
+    token_hash character varying(128) NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT consumed_oauth_tokens_pkey PRIMARY KEY (token_hash)
+);
+
+CREATE INDEX idx_consumed_oauth_tokens_expires_at ON public.consumed_oauth_tokens USING btree (expires_at);
 
 
 --
@@ -3174,7 +3195,8 @@ CREATE TABLE public.guest_complimentary_credits (
     nights_available integer DEFAULT 0 NOT NULL,
     notes text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT guest_complimentary_credits_nights_non_negative CHECK ((nights_available >= 0))
 );
 
 
@@ -4396,6 +4418,7 @@ CREATE TABLE public.payments (
     voided_at timestamp with time zone,
     voided_by bigint,
     void_reversal_date date,
+    CONSTRAINT payments_amount_positive CHECK ((amount > (0)::numeric)),
     CONSTRAINT payments_payment_type_check CHECK (((payment_type)::text = ANY ((ARRAY['booking'::character varying, 'deposit'::character varying, 'service'::character varying, 'damage'::character varying, 'refund'::character varying, 'deposit_forfeited'::character varying])::text[]))),
     CONSTRAINT payments_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'processing'::character varying, 'completed'::character varying, 'failed'::character varying, 'refunded'::character varying, 'void'::character varying])::text[])))
 );
@@ -4782,7 +4805,8 @@ CREATE TABLE public.refresh_tokens (
     is_revoked boolean DEFAULT false,
     revoked_at timestamp with time zone,
     revoked_by bigint,
-    client_timezone text
+    client_timezone text,
+    previous_token_hash character varying(128)
 );
 
 
@@ -5112,7 +5136,9 @@ CREATE TABLE public.room_rates (
     price numeric(10,2) NOT NULL,
     effective_from date NOT NULL,
     effective_to date,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT room_rates_effective_range CHECK (((effective_to IS NULL) OR (effective_to >= effective_from))),
+    CONSTRAINT room_rates_price_non_negative CHECK ((price >= (0)::numeric))
 );
 
 
@@ -7146,6 +7172,20 @@ CREATE INDEX idx_audit_logs_action ON ONLY public.audit_logs USING btree (action
 
 
 --
+-- Name: idx_audit_logs_action_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_action_created ON ONLY public.audit_logs USING btree (action, created_at DESC);
+
+
+--
+-- Name: audit_logs_default_action_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_default_action_created_at_idx ON public.audit_logs_default USING btree (action, created_at DESC);
+
+
+--
 -- Name: audit_logs_default_action_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7166,18 +7206,6 @@ CREATE INDEX idx_audit_logs_created_at ON ONLY public.audit_logs USING btree (cr
 CREATE INDEX audit_logs_default_created_at_idx ON public.audit_logs_default USING btree (created_at DESC);
 
 
---
--- Name: idx_audit_logs_created_at_brin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_audit_logs_created_at_brin ON ONLY public.audit_logs USING brin (created_at);
-
-
---
--- Name: audit_logs_default_created_at_idx1; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX audit_logs_default_created_at_idx1 ON public.audit_logs_default USING brin (created_at);
 
 
 --
@@ -7209,10 +7237,38 @@ CREATE INDEX audit_logs_default_resource_type_resource_id_idx ON public.audit_lo
 
 
 --
+-- Name: idx_audit_logs_resource_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_resource_created ON ONLY public.audit_logs USING btree (resource_type, resource_id, created_at DESC);
+
+
+--
+-- Name: audit_logs_default_resource_type_resource_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_default_resource_type_resource_id_created_at_idx ON public.audit_logs_default USING btree (resource_type, resource_id, created_at DESC);
+
+
+--
 -- Name: idx_audit_logs_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_audit_logs_user_id ON ONLY public.audit_logs USING btree (user_id);
+
+
+--
+-- Name: idx_audit_logs_user_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_audit_logs_user_created ON ONLY public.audit_logs USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: audit_logs_default_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_default_user_id_created_at_idx ON public.audit_logs_default USING btree (user_id, created_at DESC);
 
 
 --
@@ -7389,12 +7445,6 @@ CREATE INDEX idx_bookings_posted_date ON public.bookings USING btree (posted_dat
 
 CREATE INDEX idx_bookings_pre_checkin_token ON public.bookings USING btree (pre_checkin_token) WHERE (pre_checkin_token IS NOT NULL);
 
-
---
--- Name: idx_bookings_room; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_bookings_room ON public.bookings USING btree (room_id);
 
 
 --
@@ -7621,12 +7671,6 @@ CREATE INDEX idx_ekyc_assigned_reviewer ON public.ekyc_verifications USING btree
 CREATE INDEX idx_ekyc_email ON public.ekyc_verifications USING btree (email);
 
 
---
--- Name: idx_ekyc_guest; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_ekyc_guest ON public.ekyc_verifications USING btree (guest_id);
-
 
 --
 -- Name: idx_ekyc_guest_latest; Type: INDEX; Schema: public; Owner: -
@@ -7733,12 +7777,6 @@ CREATE INDEX idx_email_deliveries_claim ON public.email_deliveries USING btree (
 CREATE INDEX idx_email_deliveries_guest ON public.email_deliveries USING btree (guest_id, created_at DESC);
 
 
---
--- Name: idx_guest_credits_guest_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_guest_credits_guest_id ON public.guest_complimentary_credits USING btree (guest_id);
-
 
 --
 -- Name: idx_guest_credits_room_type; Type: INDEX; Schema: public; Owner: -
@@ -7775,12 +7813,6 @@ CREATE INDEX idx_guest_notes_follow_up_open ON public.guest_notes USING btree (f
 CREATE INDEX idx_guest_notes_guest_created ON public.guest_notes USING btree (guest_id, created_at DESC);
 
 
---
--- Name: idx_guest_notes_guest_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_guest_notes_guest_id ON public.guest_notes USING btree (guest_id);
-
 
 --
 -- Name: idx_guest_portal_sessions_expires_at; Type: INDEX; Schema: public; Owner: -
@@ -7795,12 +7827,6 @@ CREATE INDEX idx_guest_portal_sessions_expires_at ON public.guest_portal_session
 
 CREATE INDEX idx_guest_portal_sessions_guest_id ON public.guest_portal_sessions USING btree (guest_id);
 
-
---
--- Name: idx_guest_preferences_guest_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_guest_preferences_guest_id ON public.guest_preferences USING btree (guest_id);
 
 
 --
@@ -7943,12 +7969,6 @@ CREATE INDEX idx_housekeeping_assigned ON public.housekeeping_tasks USING btree 
 CREATE INDEX idx_housekeeping_date ON public.housekeeping_tasks USING btree (scheduled_date);
 
 
---
--- Name: idx_housekeeping_room; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_housekeeping_room ON public.housekeeping_tasks USING btree (room_id);
-
 
 --
 -- Name: idx_housekeeping_room_date_status; Type: INDEX; Schema: public; Owner: -
@@ -8013,12 +8033,6 @@ CREATE INDEX idx_invoices_status ON public.invoices USING btree (status);
 CREATE INDEX idx_loyalty_members_status ON public.loyalty_members USING btree (status);
 
 
---
--- Name: idx_loyalty_memberships_guest; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_loyalty_memberships_guest ON public.loyalty_memberships USING btree (guest_id);
-
 
 --
 -- Name: idx_loyalty_memberships_program; Type: INDEX; Schema: public; Owner: -
@@ -8047,12 +8061,6 @@ CREATE INDEX idx_loyalty_redemptions_status ON public.loyalty_redemptions USING 
 
 CREATE INDEX idx_loyalty_rewards_status ON public.loyalty_rewards USING btree (is_active, category);
 
-
---
--- Name: idx_loyalty_tiers_program; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_loyalty_tiers_program ON public.loyalty_tiers USING btree (program_id);
 
 
 --
@@ -8117,12 +8125,6 @@ CREATE INDEX idx_night_audit_details_audit_run_id ON public.night_audit_details 
 
 CREATE INDEX idx_night_audit_details_booking_id ON public.night_audit_details USING btree (booking_id);
 
-
---
--- Name: idx_night_audit_posted_nights_date_brin; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_night_audit_posted_nights_date_brin ON public.night_audit_posted_nights USING brin (audit_date);
 
 
 --
@@ -8251,12 +8253,6 @@ CREATE INDEX idx_points_transactions_type ON public.points_transactions USING bt
 CREATE INDEX idx_posted_nights_audit_run ON public.night_audit_posted_nights USING btree (audit_run_id);
 
 
---
--- Name: idx_posted_nights_booking; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_posted_nights_booking ON public.night_audit_posted_nights USING btree (booking_id);
-
 
 --
 -- Name: idx_posted_nights_date; Type: INDEX; Schema: public; Owner: -
@@ -8328,12 +8324,6 @@ CREATE INDEX idx_rate_plans_type ON public.rate_plans USING btree (plan_type);
 CREATE INDEX idx_refresh_tokens_expires ON public.refresh_tokens USING btree (expires_at) WHERE (is_revoked = false);
 
 
---
--- Name: idx_refresh_tokens_token_hash; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_refresh_tokens_token_hash ON public.refresh_tokens USING btree (token_hash) WHERE (is_revoked = false);
-
 
 --
 -- Name: idx_refresh_tokens_user_id; Type: INDEX; Schema: public; Owner: -
@@ -8383,12 +8373,6 @@ CREATE INDEX idx_reward_redemptions_status ON public.reward_redemptions USING bt
 
 CREATE INDEX idx_role_permissions_permission_id ON public.role_permissions USING btree (permission_id);
 
-
---
--- Name: idx_role_permissions_role_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_role_permissions_role_id ON public.role_permissions USING btree (role_id);
 
 
 --
@@ -8461,12 +8445,6 @@ CREATE INDEX idx_room_history_room ON public.room_history USING btree (room_id);
 CREATE INDEX idx_room_rates_dates ON public.room_rates USING btree (effective_from, effective_to);
 
 
---
--- Name: idx_room_rates_plan; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_room_rates_plan ON public.room_rates USING btree (rate_plan_id);
-
 
 --
 -- Name: idx_room_rates_type; Type: INDEX; Schema: public; Owner: -
@@ -8481,12 +8459,6 @@ CREATE INDEX idx_room_rates_type ON public.room_rates USING btree (room_type_id)
 
 CREATE INDEX idx_room_status_log_room_created ON public.room_status_change_log USING btree (room_id, created_at DESC);
 
-
---
--- Name: idx_room_type_amenities_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_room_type_amenities_type ON public.room_type_amenities USING btree (room_type_id);
 
 
 --
@@ -8643,18 +8615,6 @@ CREATE UNIQUE INDEX teams_code_live_key ON public.teams USING btree (code) WHERE
 CREATE INDEX idx_user_guests_guest_id ON public.user_guests USING btree (guest_id);
 
 
---
--- Name: idx_user_guests_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_user_guests_user_id ON public.user_guests USING btree (user_id);
-
-
---
--- Name: idx_user_permissions_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_user_permissions_user_id ON public.user_permissions USING btree (user_id);
 
 
 --
@@ -8663,12 +8623,6 @@ CREATE INDEX idx_user_permissions_user_id ON public.user_permissions USING btree
 
 CREATE INDEX idx_user_roles_role_id ON public.user_roles USING btree (role_id);
 
-
---
--- Name: idx_user_roles_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_user_roles_user_id ON public.user_roles USING btree (user_id);
 
 
 --
@@ -8748,11 +8702,334 @@ CREATE INDEX idx_voucher_redemptions_guest_applied ON public.voucher_redemptions
 CREATE INDEX idx_vouchers_guest_status ON public.vouchers USING btree (guest_id, status, expires_at);
 
 
+
 --
--- Name: idx_vouchers_promotion_guest; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_bookings_check_out_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_vouchers_promotion_guest ON public.vouchers USING btree (promotion_id, guest_id, status);
+CREATE INDEX idx_bookings_check_out_status ON public.bookings USING btree (check_out_date, status);
+
+
+--
+-- Name: idx_bookings_created_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bookings_created_by ON public.bookings USING btree (created_by) WHERE (created_by IS NOT NULL);
+
+
+--
+-- Name: idx_bookings_guest_dates; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bookings_guest_dates ON public.bookings USING btree (guest_id, check_in_date DESC, check_out_date DESC);
+
+
+--
+-- Name: idx_bookings_pending_payment_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bookings_pending_payment_created ON public.bookings USING btree (created_at) WHERE ((status)::text = 'pending_payment'::text);
+
+
+--
+-- Name: idx_bookings_portal_request_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bookings_portal_request_id ON public.bookings USING btree (portal_request_id) WHERE (portal_request_id IS NOT NULL);
+
+
+--
+-- Name: idx_customer_ledger_payments_idempotency_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_ledger_payments_idempotency_key ON public.customer_ledger_payments USING btree (idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND (btrim((idempotency_key)::text) <> ''::text));
+
+
+--
+-- Name: idx_customer_ledger_payments_payment_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_ledger_payments_payment_date ON public.customer_ledger_payments USING btree (payment_date);
+
+
+--
+-- Name: idx_customer_ledgers_company_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_ledgers_company_created ON public.customer_ledgers USING btree (company_name, created_at DESC);
+
+
+--
+-- Name: idx_customer_ledgers_inv_pattern; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_ledgers_inv_pattern ON public.customer_ledgers USING btree (invoice_number varchar_pattern_ops);
+
+
+--
+-- Name: idx_customer_ledgers_status_due; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_ledgers_status_due ON public.customer_ledgers USING btree (status, due_date) WHERE (void_at IS NULL);
+
+
+--
+-- Name: idx_ekyc_guest_effective_submitted; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ekyc_guest_effective_submitted ON public.ekyc_verifications USING btree (guest_id, COALESCE(submitted_at, created_at) DESC, updated_at DESC, id DESC);
+
+
+--
+-- Name: idx_ekyc_idempotency_keys_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ekyc_idempotency_keys_created_at ON public.ekyc_idempotency_keys USING btree (created_at);
+
+
+--
+-- Name: idx_ekyc_status_submitted; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ekyc_status_submitted ON public.ekyc_verifications USING btree (status, submitted_at DESC);
+
+
+--
+-- Name: idx_guest_reviews_booking_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_guest_reviews_booking_id ON public.guest_reviews USING btree (booking_id) WHERE (booking_id IS NOT NULL);
+
+
+--
+-- Name: idx_guests_lower_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_guests_lower_email ON public.guests USING btree (lower(btrim((email)::text))) WHERE ((deleted_at IS NULL) AND (email IS NOT NULL));
+
+
+--
+-- Name: idx_guests_phone_digits; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_guests_phone_digits ON public.guests USING btree (regexp_replace(COALESCE((phone)::text, ''::text), '[^0-9]'::text, ''::text, 'g'::text)) WHERE ((deleted_at IS NULL) AND (phone IS NOT NULL));
+
+
+--
+-- Name: idx_guests_tags_gin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_guests_tags_gin ON public.guests USING gin (tags);
+
+
+--
+-- Name: idx_housekeeping_tasks_open_room; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_housekeeping_tasks_open_room ON public.housekeeping_tasks USING btree (room_id, created_at DESC) WHERE ((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text]));
+
+
+--
+-- Name: idx_housekeeping_tasks_status_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_housekeeping_tasks_status_created ON public.housekeeping_tasks USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_invoices_created_by_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_invoices_created_by_id ON public.invoices USING btree (created_by, id DESC) WHERE (created_by IS NOT NULL);
+
+
+--
+-- Name: idx_invoices_invoice_number_pattern; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_invoices_invoice_number_pattern ON public.invoices USING btree (invoice_number varchar_pattern_ops);
+
+
+--
+-- Name: idx_invoices_open_balance; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_invoices_open_balance ON public.invoices USING btree (((total_amount - paid_amount)) DESC) WHERE (((status)::text = ANY (ARRAY[('issued'::character varying)::text, ('overdue'::character varying)::text])) AND (total_amount > paid_amount));
+
+
+--
+-- Name: idx_loyalty_accounts_current_tier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_loyalty_accounts_current_tier_id ON public.loyalty_accounts USING btree (current_tier_id);
+
+
+--
+-- Name: idx_loyalty_transactions_member_delta; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_loyalty_transactions_member_delta ON public.loyalty_transactions USING btree (member_id) INCLUDE (available_delta);
+
+
+--
+-- Name: idx_loyalty_transactions_payment_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_loyalty_transactions_payment_id ON public.loyalty_transactions USING btree (payment_id) WHERE (payment_id IS NOT NULL);
+
+
+--
+-- Name: idx_maintenance_tickets_number_pattern; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_maintenance_tickets_number_pattern ON public.maintenance_tickets USING btree (ticket_number varchar_pattern_ops);
+
+
+--
+-- Name: idx_maintenance_tickets_status_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_maintenance_tickets_status_created ON public.maintenance_tickets USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_payment_receipt_requests_unfulfilled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payment_receipt_requests_unfulfilled ON public.payment_receipt_requests USING btree (requested_at) WHERE (uploaded_at IS NULL);
+
+
+--
+-- Name: idx_payments_booking_status_covering; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_booking_status_covering ON public.payments USING btree (booking_id, status) INCLUDE (amount, payment_type);
+
+
+--
+-- Name: idx_payments_group_payment_ref; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_group_payment_ref ON public.payments USING btree (((metadata ->> 'group_payment_ref'::text))) WHERE (metadata ? 'group_payment_ref'::text);
+
+
+--
+-- Name: idx_payments_pending_method_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_pending_method_created ON public.payments USING btree (payment_method, created_at, id) WHERE ((status)::text = 'pending'::text);
+
+
+--
+-- Name: idx_payments_refunded_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_refunded_at ON public.payments USING btree (refunded_at) WHERE (refund_amount IS NOT NULL);
+
+
+--
+-- Name: idx_rate_limit_buckets_window_start; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_rate_limit_buckets_window_start ON public.rate_limit_buckets USING btree (window_start);
+
+
+--
+-- Name: idx_refresh_tokens_revoked_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_refresh_tokens_revoked_at ON public.refresh_tokens USING btree (revoked_at) WHERE (revoked_at IS NOT NULL);
+
+
+--
+-- Name: idx_refresh_tokens_previous_token_hash; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_refresh_tokens_previous_token_hash ON public.refresh_tokens USING btree (previous_token_hash) WHERE (previous_token_hash IS NOT NULL);
+
+
+--
+-- Name: idx_room_events_room_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_room_events_room_created ON public.room_events USING btree (room_id, created_at DESC);
+
+
+--
+-- Name: idx_room_history_room_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_room_history_room_created ON public.room_history USING btree (room_id, created_at DESC);
+
+
+--
+-- Name: idx_room_rates_room_type_effective; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_room_rates_room_type_effective ON public.room_rates USING btree (room_type_id, effective_from, effective_to);
+
+
+--
+-- Name: idx_support_action_idempotency_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_support_action_idempotency_created ON public.support_action_idempotency_keys USING btree (created_at);
+
+
+--
+-- Name: idx_support_guest_req_idempotency_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_support_guest_req_idempotency_created ON public.support_guest_request_idempotency_keys USING btree (created_at);
+
+
+--
+-- Name: idx_two_factor_challenges_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_two_factor_challenges_expires_at ON public.two_factor_challenges USING btree (expires_at);
+
+
+--
+-- Name: idx_users_lower_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_users_lower_email ON public.users USING btree (lower((email)::text)) WHERE (deleted_at IS NULL);
+
+
+--
+-- Name: idx_voucher_redemptions_booking_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_voucher_redemptions_booking_id ON public.voucher_redemptions USING btree (booking_id);
+
+
+--
+-- Name: idx_voucher_redemptions_promotion_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_voucher_redemptions_promotion_status ON public.voucher_redemptions USING btree (promotion_id, status);
+
+
+--
+-- Name: idx_voucher_redemptions_voucher_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_voucher_redemptions_voucher_id ON public.voucher_redemptions USING btree (voucher_id);
+
+
+--
+-- Name: idx_vouchers_lower_code; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vouchers_lower_code ON public.vouchers USING btree (lower((code)::text));
+
+
+--
+-- Name: idx_vouchers_status_expires; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vouchers_status_expires ON public.vouchers USING btree (status, expires_at);
 
 
 --
@@ -8775,12 +9052,6 @@ CREATE UNIQUE INDEX uq_customer_ledgers_active_reversal ON public.customer_ledge
 
 CREATE UNIQUE INDEX uq_customer_ledgers_booking_room_charge ON public.customer_ledgers USING btree (booking_id) WHERE (((post_type)::text = 'room_charge'::text) AND (COALESCE(is_reversal, false) = false) AND (booking_id IS NOT NULL) AND (void_at IS NULL) AND ((status)::text <> 'void'::text));
 
-
---
--- Name: uq_guest_preferences_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_guest_preferences_key ON public.guest_preferences USING btree (guest_id, category, preference_key);
 
 
 --
@@ -8847,6 +9118,13 @@ CREATE UNIQUE INDEX ux_loyalty_tiers_code ON public.loyalty_tiers USING btree (c
 
 
 --
+-- Name: audit_logs_default_action_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_action_created ATTACH PARTITION public.audit_logs_default_action_created_at_idx;
+
+
+--
 -- Name: audit_logs_default_action_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
@@ -8859,12 +9137,6 @@ ALTER INDEX public.idx_audit_logs_action ATTACH PARTITION public.audit_logs_defa
 
 ALTER INDEX public.idx_audit_logs_created_at ATTACH PARTITION public.audit_logs_default_created_at_idx;
 
-
---
--- Name: audit_logs_default_created_at_idx1; Type: INDEX ATTACH; Schema: public; Owner: -
---
-
-ALTER INDEX public.idx_audit_logs_created_at_brin ATTACH PARTITION public.audit_logs_default_created_at_idx1;
 
 
 --
@@ -8886,6 +9158,20 @@ ALTER INDEX public.audit_logs_pkey1 ATTACH PARTITION public.audit_logs_default_p
 --
 
 ALTER INDEX public.idx_audit_logs_resource ATTACH PARTITION public.audit_logs_default_resource_type_resource_id_idx;
+
+
+--
+-- Name: audit_logs_default_resource_type_resource_id_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_resource_created ATTACH PARTITION public.audit_logs_default_resource_type_resource_id_created_at_idx;
+
+
+--
+-- Name: audit_logs_default_user_id_created_at_idx; Type: INDEX ATTACH; Schema: public; Owner: -
+--
+
+ALTER INDEX public.idx_audit_logs_user_created ATTACH PARTITION public.audit_logs_default_user_id_created_at_idx;
 
 
 --
@@ -8948,7 +9234,7 @@ CREATE TRIGGER trg_enforce_booking_tourism_tax BEFORE INSERT OR UPDATE OF guest_
 -- Name: payments trg_sync_booking_payment_status; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_sync_booking_payment_status AFTER INSERT OR DELETE OR UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION public.sync_booking_payment_status();
+CREATE TRIGGER trg_sync_booking_payment_status AFTER INSERT OR DELETE OR UPDATE OF booking_id, amount, status, payment_type, notes ON public.payments FOR EACH ROW EXECUTE FUNCTION public.sync_booking_payment_status();
 
 
 --
@@ -8983,7 +9269,7 @@ CREATE TRIGGER trigger_update_customer_ledger_timestamp BEFORE UPDATE ON public.
 -- Name: bookings trigger_validate_booking_occupancy; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trigger_validate_booking_occupancy BEFORE INSERT OR UPDATE ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.validate_booking_occupancy();
+CREATE TRIGGER trigger_validate_booking_occupancy BEFORE INSERT OR UPDATE OF room_id, adults, children ON public.bookings FOR EACH ROW EXECUTE FUNCTION public.validate_booking_occupancy();
 
 
 --
@@ -11031,7 +11317,9 @@ CREATE TABLE public.job_runs (
     detail jsonb,
     error text,
     duration_ms integer,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT job_runs_duration_non_negative CHECK ((duration_ms >= 0)),
+    CONSTRAINT job_runs_status_check CHECK (((status)::text = ANY (ARRAY[('ok'::character varying)::text, ('error'::character varying)::text])))
 );
 
 CREATE INDEX idx_job_runs_job_created ON public.job_runs USING btree (job_name, created_at DESC);
@@ -11104,6 +11392,8 @@ CREATE INDEX idx_booking_groups_guest ON public.booking_groups USING btree (gues
 CREATE INDEX idx_booking_groups_hold_expiry ON public.booking_groups USING btree (hold_expires_at)
     WHERE ((hold_expires_at IS NOT NULL) AND ((status)::text = 'active'::text));
 CREATE UNIQUE INDEX uq_booking_groups_portal_request ON public.booking_groups USING btree (guest_id, portal_request_id)
+    WHERE (portal_request_id IS NOT NULL);
+CREATE INDEX idx_booking_groups_portal_request_id ON public.booking_groups USING btree (portal_request_id)
     WHERE (portal_request_id IS NOT NULL);
 
 ALTER TABLE ONLY public.bookings

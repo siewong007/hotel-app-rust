@@ -17,7 +17,9 @@ use crate::modules::auth::models::UserSessionInfo;
 use crate::modules::auth::repository::AuthRepository;
 use crate::modules::profile::service::{location_from_timezone, mask_ip_address};
 use crate::modules::rbac::repository::RbacRepository;
-use crate::modules::rbac::service::{ensure_actor_can_manage_roles, ensure_actor_can_manage_user};
+use crate::modules::rbac::service::{
+    ensure_actor_can_manage_roles_until, ensure_actor_can_manage_user,
+};
 use crate::services::audit::AuditLog;
 use crate::utils::pagination::normalize_pagination;
 use crate::utils::sanitization::Sanitizer;
@@ -91,7 +93,7 @@ pub async fn create_user(
     }
 
     let role_ids = input.role_ids.clone().unwrap_or_default();
-    ensure_actor_can_manage_roles(pool, admin_user_id, &role_ids).await?;
+    ensure_actor_can_manage_roles_until(pool, admin_user_id, &role_ids, None).await?;
 
     let password_hash = AuthService::hash_password(&input.password)
         .await
@@ -541,7 +543,7 @@ pub async fn invite_user(
     }
 
     let role_ids = input.role_ids.clone().unwrap_or_default();
-    ensure_actor_can_manage_roles(pool, admin_user_id, &role_ids).await?;
+    ensure_actor_can_manage_roles_until(pool, admin_user_id, &role_ids, None).await?;
 
     let token = AuthService::generate_email_verification_token();
     let token_hash = AuthService::hash_email_verification_token(&token);

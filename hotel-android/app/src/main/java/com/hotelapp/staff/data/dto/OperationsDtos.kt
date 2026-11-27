@@ -1,10 +1,13 @@
 package com.hotelapp.staff.data.dto
 
 import com.hotelapp.staff.core.network.FlexibleDecimalSerializer
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class CreateBookingRequestDto(
     @SerialName("guest_id") val guestId: Long,
@@ -14,7 +17,7 @@ data class CreateBookingRequestDto(
     @SerialName("payment_method") val paymentMethod: String? = null,
     @SerialName("payment_status") val paymentStatus: String? = null,
     @SerialName("amount_paid") val amountPaid: Double? = null,
-    val source: String? = "walk_in",
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS) val source: String? = "walk_in",
     @SerialName("booking_remarks") val bookingRemarks: String? = null,
     @SerialName("special_requests") val specialRequests: String? = null,
     @SerialName("deposit_amount") val depositAmount: Double? = null,

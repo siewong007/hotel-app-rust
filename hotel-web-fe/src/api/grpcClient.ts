@@ -22,7 +22,7 @@ import { clearPortalToken } from '../features/guest-portal/api/portalTokenStore'
 import { clearBookingAccessToken } from '../features/guest-portal/api/bookingAccessTokenStore';
 import { clearCheckoutResume } from '../features/guest-portal/booking/checkoutResume';
 import { getActiveLocale } from '../i18n/localeStore';
-import { getApiBaseUrl } from '../desktop/runtimeApi';
+import { getApiBaseUrl, getDesktopClientToken } from '../desktop/runtimeApi';
 import { refreshAccessToken } from './client';
 import { queryClient } from './queryClient';
 import { invalidateDomain, type ApiDomain } from './queryInvalidation';
@@ -92,6 +92,10 @@ function invalidateOnSuccess(req: { stream: boolean; method: { name: string }; s
 
 // Exported for tests; production clients consume it via grpcTransport().
 export const grpcInterceptor: Interceptor = next => async req => {
+  const desktopToken = getDesktopClientToken();
+  if (desktopToken && !req.header.has('x-desktop-client-token')) {
+    req.header.set('x-desktop-client-token', desktopToken);
+  }
   const token = getAccessToken();
   if (token) {
     req.header.set('authorization', `Bearer ${token}`);

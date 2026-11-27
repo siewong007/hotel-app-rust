@@ -32,8 +32,8 @@ use super::service::{
     profile_incomplete_error,
 };
 use super::validation::{
-    validate_anonymous_guest, validate_client_request_id, validate_smoking_preference,
-    validate_stay,
+    validate_anonymous_client_request_id, validate_anonymous_guest, validate_client_request_id,
+    validate_smoking_preference, validate_stay,
 };
 use crate::core::db::DbPool;
 use crate::core::error::ApiError;
@@ -922,6 +922,9 @@ async fn create_group_inner(
 
     if let Some(email) = contact_email.as_deref() {
         let rooms_label = rooms_label(&group_quote);
+        let settled_by_credits = !group_quote.rooms.is_empty()
+            && group_quote.total_amount <= Decimal::ZERO
+            && group_quote.rooms.iter().all(room_settled_by_credits);
         let (subject, body_html, body_text) = portal_booking_mail(PortalBookingMail {
             guest_name: &contact_name,
             booking_number: &group.group_number,
@@ -930,7 +933,7 @@ async fn create_group_inner(
             check_out: group.check_out_date,
             currency: &group.currency,
             total: group_quote.total_amount,
-            settled_by_credits: false,
+            settled_by_credits,
             anonymous: access.is_some(),
             access_token: access.as_ref().map(|(token, _)| token.as_str()),
             locale,
@@ -1424,12 +1427,12 @@ pub async fn create_for_guest(
     if !completion.complete {
         return Err(profile_incomplete_error(completion));
     }
-    create_group_inner(
+    match create_group_inner(
         pool,
         hub,
         Booker::Guest { guest_id },
         GroupCreate {
-            request_id,
+            request_id: request_id.clone(),
             check_in_date: &request.check_in_date,
             check_out_date: &request.check_out_date,
             rooms: &request.rooms,
@@ -1444,6 +1447,25 @@ pub async fn create_for_guest(
         },
     )
     .await
+    {
+        Ok(confirmation) => Ok(confirmation),
+        Err(err) => {
+            // Concurrent retry with the same `client_request_id` hits the unique
+            // index on `(guest_id, portal_request_id)` (`23505`). Recover by
+            // replaying the winning group's confirmation cleanly.
+            if let Ok(Some(group_id)) = sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM booking_groups WHERE guest_id = $1 AND portal_request_id = $2",
+            )
+            .bind(guest_id)
+            .bind(&request_id)
+            .fetch_optional(pool)
+            .await
+            {
+                return replay(pool, group_id).await;
+            }
+            Err(err)
+        }
+    }
 }
 
 /// Multi-room checkout with no account (list price, like a single-room
@@ -1455,7 +1477,7 @@ pub async fn create_anonymous(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) -> Result<GroupBookingConfirmation, ApiError> {
-    let request_id = validate_client_request_id(&request.client_request_id)?;
+    let request_id = validate_anonymous_client_request_id(&request.client_request_id)?;
     let guest = validate_anonymous_guest(&request.guest)?;
     validate_cart_shape(&request.rooms)?;
     consent_validation::validate_locales(&request.consents)?;
@@ -1464,14 +1486,29 @@ pub async fn create_anonymous(
     // Idempotent retry keyed on request id + email (no stable guest id
     // exists for an anonymous booker). The token is hashed at rest, so a
     // replay mints a fresh one on the lead room.
-    let existing: Option<(i64, i64, NaiveDate)> = sqlx::query_as(
+    let existing: Option<(i64, i64, NaiveDate, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
         r#"
-        SELECT g.id, MIN(b.id), g.check_in_date FROM booking_groups g
+        SELECT g.id, lead.id, g.check_in_date, lead.pre_checkin_token_expires_at
+        FROM booking_groups g
         JOIN guests gu ON gu.id = g.guest_id
-        JOIN bookings b ON b.booking_group_id = g.id
+        JOIN LATERAL (
+            SELECT b.id, b.pre_checkin_token_expires_at
+            FROM bookings b
+            WHERE b.booking_group_id = g.id
+            ORDER BY b.id ASC
+            LIMIT 1
+        ) lead ON true
         WHERE g.portal_request_id = $1 AND LOWER(TRIM(gu.email)) = LOWER(TRIM($2))
           AND gu.deleted_at IS NULL
-        GROUP BY g.id, g.check_in_date
+          AND g.created_by IS NULL
+          AND lead.pre_checkin_token_expires_at > CURRENT_TIMESTAMP
+          AND NOT EXISTS (
+              SELECT 1 FROM bookings b
+              WHERE b.booking_group_id = g.id
+                AND (b.created_by IS NOT NULL
+                     OR b.status NOT IN ('pending', 'pending_payment', 'pending_confirmation')
+                     OR COALESCE(b.payment_status::text, 'unpaid') NOT IN ('unpaid', 'unpaid_deposit'))
+          )
         "#,
     )
     .bind(&request_id)
@@ -1479,10 +1516,17 @@ pub async fn create_anonymous(
     .fetch_optional(pool)
     .await
     .map_err(ApiError::from)?;
-    if let Some((group_id, lead_booking_id, check_in)) = existing {
+    if let Some((group_id, lead_booking_id, check_in, stored_expiry)) = existing {
+        let expires_at =
+            service::replay_anonymous_access_token_expiry(Utc::now(), check_in, stored_expiry)
+                .ok_or_else(|| {
+                    ApiError::Conflict(
+                        "This reservation hold has expired; please submit a new booking."
+                            .to_string(),
+                    )
+                })?;
         let mut confirmation = replay(pool, group_id).await?;
         let token = crate::modules::guest_portal::service::generate_session_token();
-        let expires_at = service::anonymous_access_token_expiry(Utc::now(), check_in);
         crate::modules::guest_portal::repository::GuestPortalRepository::update_precheckin_token(
             pool,
             lead_booking_id,

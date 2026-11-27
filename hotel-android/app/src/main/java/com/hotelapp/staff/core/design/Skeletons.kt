@@ -39,8 +39,10 @@ import androidx.compose.ui.unit.dp
 fun rememberShimmerBrush(): Brush {
     val colors = HotelTheme.colors
     val reducedMotion = rememberReducedMotion()
+    val baseColor = if (colors.isDark) colors.surfaceRaised else colors.surfaceSunken
+    val highlightColor = if (colors.isDark) colors.surfaceHover else colors.surfaceActive
     if (reducedMotion) {
-        return SolidColor(colors.surfaceRaised)
+        return SolidColor(baseColor)
     }
 
     val transition = rememberInfiniteTransition(label = "skeleton_shimmer")
@@ -56,9 +58,9 @@ fun rememberShimmerBrush(): Brush {
 
     return Brush.linearGradient(
         colors = listOf(
-            colors.surfaceRaised,
-            colors.surfaceHover,
-            colors.surfaceRaised,
+            baseColor,
+            highlightColor,
+            baseColor,
         ),
         start = Offset(progress - 360f, 0f),
         end = Offset(progress, 240f),

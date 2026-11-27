@@ -211,6 +211,29 @@ SET priority = COALESCE($2, priority),
 WHERE id = $1
 "#;
 
+pub async fn find_task_for_update_tx(
+    tx: &mut DbTransaction<'_>,
+    task_id: i64,
+) -> Result<Option<HousekeepingTask>, ApiError> {
+    let locked: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM housekeeping_tasks WHERE id = $1 FOR UPDATE")
+            .bind(task_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+    if locked.is_none() {
+        return Ok(None);
+    }
+    let query = format!("{TASK_SELECT} WHERE t.id = $1");
+    let row = sqlx::query(sqlx::AssertSqlSafe(query))
+        .bind(task_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    Ok(row.map(row_to_task))
+}
+
+#[allow(dead_code)]
 pub async fn patch_task(
     pool: &DbPool,
     task_id: i64,

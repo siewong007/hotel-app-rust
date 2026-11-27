@@ -676,21 +676,20 @@ RETURNING id
         client_message_id: &str,
     ) -> Result<Option<bool>, ApiError> {
         let sql = r#"
-SELECT CASE WHEN author_user_id = $2 THEN 1 ELSE 0 END
+SELECT COALESCE(author_user_id = $2, FALSE)
 FROM support_messages
 WHERE conversation_id = $1
   AND author_type = 'staff'
   AND client_message_id = $3
 LIMIT 1
 "#;
-        let result = sqlx::query_scalar::<_, i64>(sql)
+        sqlx::query_scalar::<_, bool>(sql)
             .bind(conversation_id)
             .bind(actor_user_id)
             .bind(client_message_id)
             .fetch_optional(pool)
             .await
-            .map_err(ApiError::from)?;
-        Ok(result.map(|belongs_to_actor| belongs_to_actor == 1))
+            .map_err(ApiError::from)
     }
 
     pub async fn find_guest_request_conversation(

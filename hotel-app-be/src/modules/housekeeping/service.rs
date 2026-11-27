@@ -212,10 +212,15 @@ pub async fn update_task(
     task_id: i64,
     input: UpdateHousekeepingTaskRequest,
 ) -> Result<HousekeepingTask, ApiError> {
-    let existing = repository::find_task(pool, task_id)
+    let patch = patch_from_update(input)?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let existing = repository::find_task_for_update_tx(&mut tx, task_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Housekeeping task not found".to_string()))?;
-    let patch = patch_from_update(input)?;
 
     if let Some(status) = patch.status.as_deref() {
         validate_status_transition(&existing.status, status)?;
@@ -225,13 +230,13 @@ pub async fn update_task(
         && patch.status.as_deref() == Some("completed")
         && matches!(existing.task_type.as_str(), "cleaning" | "checkout_clean");
 
-    if completed_cleaning {
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
-
-        repository::patch_task_tx(&mut tx, task_id, &patch).await?;
+    repository::patch_task_tx(&mut tx, task_id, &patch).await?;
+    let mut details = serde_json::json!({
+        "previous_status": existing.status,
+        "status": patch.status.as_deref().unwrap_or(&existing.status),
+        "room_id": existing.room_id,
+    });
+    let action = if completed_cleaning {
         let room_status = rooms::complete_housekeeping_cleaning_tx(
             &mut tx,
             existing.room_id,
@@ -239,51 +244,35 @@ pub async fn update_task(
             patch.notes.as_deref().or(existing.notes.as_deref()),
         )
         .await?;
+        details = serde_json::json!({
+            "room_id": existing.room_id,
+            "room_status": room_status
+        });
+        "housekeeping_task_completed"
+    } else {
+        "housekeeping_task_updated"
+    };
 
-        AuditLog::log_event_tx(
-            &mut tx,
-            AuditEvent {
-                user_id: Some(user_id),
-                action: "housekeeping_task_completed",
-                resource_type: "housekeeping",
-                resource_id: Some(task_id),
-                details: Some(serde_json::json!({
-                    "room_id": existing.room_id,
-                    "room_status": room_status
-                })),
-                ..Default::default()
-            },
-        )
-        .await?;
-
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Database(e.to_string()))?;
-
-        return repository::find_task(pool, task_id)
-            .await?
-            .ok_or_else(|| ApiError::NotFound("Housekeeping task not found".to_string()));
-    }
-
-    let task = repository::patch_task(pool, task_id, &patch).await?;
-    let _ = AuditLog::log_event(
-        pool,
+    AuditLog::log_event_tx(
+        &mut tx,
         AuditEvent {
             user_id: Some(user_id),
-            action: "housekeeping_task_updated",
+            action,
             resource_type: "housekeeping",
             resource_id: Some(task_id),
-            details: Some(serde_json::json!({
-                "previous_status": existing.status,
-                "status": task.status,
-                "room_id": task.room_id
-            })),
+            details: Some(details),
             ..Default::default()
         },
     )
-    .await;
+    .await?;
 
-    Ok(task)
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    repository::find_task(pool, task_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Housekeeping task not found".to_string()))
 }
 
 /// Staff members an assignment picker may offer: active users holding the

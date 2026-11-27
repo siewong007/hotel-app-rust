@@ -572,6 +572,7 @@ impl PaymentRepository {
             request.notes.as_deref(),
             None,
         );
+
         if let Some(transaction_reference) = request
             .transaction_reference
             .as_deref()
@@ -985,17 +986,36 @@ impl PaymentRepository {
     /// Compare-and-swap a payment to `completed`, stamping `processed_at` /
     /// `processed_by`. Guarded by `status IN ('pending','processing')` so a
     /// concurrent approval collapses to `Ok(None)` (no row) instead of
-    /// double-completing. Returns the payment id when it actually transitioned.
+    /// double-completing. If the payment's business day is already closed by a
+    /// completed night audit, advance `created_at` to noon on the first open
+    /// business day so approved delayed payments never land in a closed day.
     pub async fn mark_payment_completed_tx(
         tx: &mut DbTransaction<'_>,
         payment_id: i64,
         processed_by: Option<i64>,
     ) -> Result<Option<i64>, ApiError> {
         let sql = r#"
-                UPDATE payments
-                SET status = 'completed', processed_at = CURRENT_TIMESTAMP, processed_by = $2
-                WHERE id = $1 AND status IN ('pending', 'processing')
-                RETURNING id
+                WITH audit_ctx AS (
+                    SELECT
+                        COALESCE(
+                            NULLIF(TRIM((SELECT value FROM system_settings WHERE key = 'timezone')), ''),
+                            'UTC'
+                        ) AS zone,
+                        (SELECT MAX(n.audit_date) FROM night_audit_runs n WHERE n.status = 'completed') AS last_closed
+                )
+                UPDATE payments p
+                SET status = 'completed',
+                    processed_at = CURRENT_TIMESTAMP,
+                    processed_by = $2,
+                    created_at = CASE
+                        WHEN audit_ctx.last_closed IS NOT NULL
+                             AND (p.created_at AT TIME ZONE audit_ctx.zone)::date <= audit_ctx.last_closed
+                        THEN (((audit_ctx.last_closed + 1) + TIME '12:00:00') AT TIME ZONE audit_ctx.zone)
+                        ELSE p.created_at
+                    END
+                FROM audit_ctx
+                WHERE p.id = $1 AND p.status IN ('pending', 'processing')
+                RETURNING p.id
             "#;
         sqlx::query_scalar::<_, i64>(sql)
             .bind(payment_id)
@@ -1312,8 +1332,8 @@ impl PaymentRepository {
         Ok((items, total))
     }
 
-    pub async fn save_receipt_file(
-        pool: &DbPool,
+    pub async fn save_receipt_file_tx(
+        tx: &mut DbTransaction<'_>,
         payment_id: i64,
         path: &str,
         content_type: &str,
@@ -1323,7 +1343,7 @@ impl PaymentRepository {
             .bind(payment_id)
             .bind(path)
             .bind(content_type)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .map_err(ApiError::from)?;
         Ok(())
@@ -1813,6 +1833,26 @@ impl PaymentRepository {
         })
     }
 
+    /// Reject mutations or backdated writes targeting a business day closed by night audit.
+    pub(crate) async fn ensure_business_date_open_tx(
+        tx: &mut DbTransaction<'_>,
+        business_date: chrono::NaiveDate,
+    ) -> Result<(), ApiError> {
+        let closed: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM night_audit_runs WHERE status = 'completed' AND audit_date >= $1)",
+        )
+        .bind(business_date)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
+        if closed {
+            return Err(ApiError::BadRequest(format!(
+                "Night audit has already closed {business_date}; cannot record or modify a payment in a closed business day"
+            )));
+        }
+        Ok(())
+    }
+
     /// Read-only preview of [`Self::void_reversal_date_tx`] for one payment.
     pub async fn void_preview(
         pool: &DbPool,
@@ -1888,6 +1928,16 @@ impl PaymentRepository {
         let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
         // Lock booking row to serialize concurrent invoice generation/reconciliation.
+        let booking_exists: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM bookings WHERE id = $1 FOR UPDATE")
+                .bind(booking_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::from)?;
+        if booking_exists.is_none() {
+            return Err(ApiError::NotFound("Booking not found".to_string()));
+        }
+
         let stub_state: Option<(i64, String, bool)> = sqlx::query_as(
             "SELECT i.id, i.invoice_number, (i.line_items = '[]'::jsonb) AS is_stub \
              FROM invoices i WHERE i.booking_id = $1 ORDER BY i.created_at LIMIT 1 FOR UPDATE",
@@ -2123,6 +2173,107 @@ impl PaymentRepository {
             notes: None,
             created_at,
             updated_at: created_at,
+        })
+    }
+
+    /// Build a read-only invoice preview without inserting an `invoices` row or
+    /// consuming an invoice sequence number. If a materialized invoice already
+    /// exists for the booking, returns it as-is.
+    pub async fn preview_invoice(
+        pool: &DbPool,
+        user_id: i64,
+        booking_id: i64,
+    ) -> Result<Invoice, ApiError> {
+        let stub_state: Option<(i64, String, bool)> = sqlx::query_as(
+            "SELECT i.id, i.invoice_number, (i.line_items = '[]'::jsonb) AS is_stub \
+             FROM invoices i WHERE i.booking_id = $1 ORDER BY i.created_at LIMIT 1",
+        )
+        .bind(booking_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(ApiError::from)?;
+
+        if let Some((_existing_id, ref _existing_number, false)) = stub_state
+            && let Some(existing) = Self::enriched_invoice_by_booking_id(pool, booking_id).await?
+        {
+            return Ok(existing);
+        }
+
+        let invoice_number = match stub_state {
+            Some((_, existing_number, true)) => existing_number,
+            _ => String::new(),
+        };
+
+        let booking_details: GeneratedInvoiceBookingDetailsRow = sqlx::query_as(
+            r#"
+            SELECT b.id AS booking_id, b.guest_id,
+                   CASE
+                       WHEN NULLIF(BTRIM(g.first_name), '') IS NOT NULL
+                        AND NULLIF(BTRIM(g.last_name), '') IS NOT NULL
+                       THEN BTRIM(g.first_name) || ' ' || BTRIM(g.last_name)
+                       ELSE COALESCE(BTRIM(g.nick_name), '')
+                   END AS customer_name,
+                   g.email AS customer_email, g.phone AS customer_phone,
+                   b.check_in_date AS check_in, b.check_out_date AS check_out,
+                   r.id AS room_id, r.room_number, rt.name AS room_type,
+                   COALESCE(b.subtotal, b.total_amount + COALESCE(b.discount_amount, 0)) AS subtotal,
+                   COALESCE(b.discount_amount, 0) AS discount_amount,
+                   COALESCE(b.room_rate, 0) AS room_rate
+            FROM bookings b
+            JOIN guests g ON b.guest_id = g.id
+            JOIN rooms r ON b.room_id = r.id
+            JOIN room_types rt ON r.room_type_id = rt.id
+            WHERE b.id = $1
+            "#,
+        )
+        .bind(booking_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+
+        let summary = Self::workflow_summary_row(pool, booking_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+        let total = summary.billable_total();
+        let net_paid = summary.net_room_paid();
+        let paid_amount = net_paid.min(total);
+        let status = if net_paid >= total { "paid" } else { "draft" };
+
+        let nights = (booking_details.check_out - booking_details.check_in).num_days() as i32;
+        let tax_amount = summary.tourism_tax_amount;
+        let subtotal = booking_details.subtotal + summary.extra_bed_charge;
+        let issue_date = hotel_today(pool).await.map_err(ApiError::from)?;
+        let now = chrono::Utc::now();
+
+        Ok(Invoice {
+            id: 0,
+            uuid: uuid::Uuid::nil(),
+            invoice_number,
+            booking_id,
+            user_id: Some(user_id),
+            billing_name: booking_details.customer_name,
+            billing_address: None,
+            billing_email: booking_details.customer_email,
+            invoice_date: None,
+            issue_date,
+            due_date: None,
+            check_in_date: Some(booking_details.check_in),
+            check_out_date: Some(booking_details.check_out),
+            number_of_nights: Some(nights),
+            room_number: Some(booking_details.room_number),
+            room_type: Some(booking_details.room_type),
+            subtotal,
+            tax_amount,
+            discount_amount: booking_details.discount_amount,
+            total_amount: total,
+            paid_amount,
+            balance_due: total - paid_amount,
+            currency: "MYR".to_string(),
+            status: status.to_string(),
+            notes: None,
+            created_at: now,
+            updated_at: now,
         })
     }
 
@@ -2391,6 +2542,32 @@ impl PaymentRepository {
             final_payment_date,
         );
 
+        let parsed_payment_date = match request.payment_date.as_deref() {
+            Some(raw) => {
+                let parsed =
+                    chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").map_err(|_| {
+                        ApiError::BadRequest(format!(
+                            "Invalid payment_date '{}'. Expected YYYY-MM-DD",
+                            raw.trim()
+                        ))
+                    })?;
+                if existing_status != "completed"
+                    || request.payment_date.as_deref() != existing.payment_date.as_deref()
+                {
+                    let days = Self::payment_business_days_tx(tx, payment_id).await?;
+                    if days.is_closed(days.payment_day) {
+                        return Err(ApiError::BadRequest(format!(
+                            "Night audit has already closed {}; cannot move a payment from a closed business day",
+                            days.payment_day
+                        )));
+                    }
+                    Self::ensure_business_date_open_tx(tx, parsed).await?;
+                }
+                Some(parsed)
+            }
+            None => None,
+        };
+
         if let Some(transaction_reference) =
             final_transaction_reference.filter(|value| !value.is_empty())
             && let Some(owner_booking_id) =
@@ -2449,8 +2626,8 @@ impl PaymentRepository {
         if let Some(ref notes) = request.notes {
             query_builder = query_builder.bind(notes);
         }
-        if let Some(ref payment_date) = request.payment_date {
-            let ts = format!("{} 12:00:00", payment_date);
+        if let Some(parsed_date) = parsed_payment_date {
+            let ts = format!("{} 12:00:00", parsed_date);
             query_builder = query_builder.bind(ts);
         }
         query_builder = query_builder.bind(&fingerprint);
@@ -2657,6 +2834,7 @@ impl PaymentRepository {
     {
         let sql = "SELECT invoice_number FROM customer_ledgers \
              WHERE booking_id = $1 AND invoice_number IS NOT NULL \
+               AND status <> 'void' AND void_at IS NULL \
              ORDER BY id LIMIT 1";
 
         sqlx::query_scalar(sql)
@@ -2679,11 +2857,13 @@ impl PaymentRepository {
             sqlx::query(
                 r#"
                 INSERT INTO invoices (
-                    invoice_number, booking_id, billing_name, billing_email,
-                    subtotal, tax_amount, discount_amount, total_amount,
-                    line_items, status, invoice_type, created_by
+                    invoice_number, booking_id, bill_to_guest_id, billing_name, billing_email,
+                    subtotal, tax_amount, discount_amount, total_amount, paid_amount,
+                    currency, line_items, status, paid_at, invoice_type, created_by
                 )
-                SELECT $1, b.id,
+                SELECT $1,
+                       b.id,
+                       b.guest_id,
                        CASE
                            WHEN NULLIF(BTRIM(g.first_name), '') IS NOT NULL
                             AND NULLIF(BTRIM(g.last_name), '') IS NOT NULL
@@ -2693,15 +2873,65 @@ impl PaymentRepository {
                        g.email,
                        COALESCE(b.subtotal, b.total_amount + COALESCE(b.discount_amount, 0))
                            + COALESCE(b.extra_bed_charge, 0),
-                       COALESCE(b.tourism_tax_amount, 0),
+                       COALESCE(b.tourism_billable_amount, 0),
                        COALESCE(b.discount_amount, 0),
-                       b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0),
+                       b.total_amount + COALESCE(b.tourism_billable_amount, 0) + COALESCE(b.extra_bed_charge, 0),
+                       LEAST(
+                           net.paid,
+                           GREATEST(
+                               b.total_amount + COALESCE(b.tourism_billable_amount, 0) + COALESCE(b.extra_bed_charge, 0),
+                               0
+                           )
+                       ),
+                       COALESCE(NULLIF(BTRIM(b.currency), ''), 'MYR'),
                        '[]'::jsonb,
-                       'issued',
+                       CASE
+                           WHEN net.paid >= b.total_amount + COALESCE(b.tourism_billable_amount, 0) + COALESCE(b.extra_bed_charge, 0)
+                           THEN 'paid'
+                           ELSE 'issued'
+                       END,
+                       CASE
+                           WHEN net.paid >= b.total_amount + COALESCE(b.tourism_billable_amount, 0) + COALESCE(b.extra_bed_charge, 0)
+                           THEN CURRENT_TIMESTAMP
+                           ELSE NULL
+                       END,
                        'booking',
                        $2
                 FROM bookings b
                 INNER JOIN guests g ON b.guest_id = g.id
+                CROSS JOIN LATERAL (
+                    SELECT COALESCE(
+                        (
+                            SELECT cl.paid_amount
+                            FROM customer_ledgers cl
+                            WHERE cl.booking_id = b.id
+                              AND cl.post_type = 'room_charge'
+                              AND cl.status <> 'void'
+                              AND cl.void_at IS NULL
+                              AND COALESCE(cl.is_reversal, FALSE) = FALSE
+                            ORDER BY cl.created_at DESC
+                            LIMIT 1
+                        ),
+                        GREATEST(
+                            COALESCE((
+                                SELECT SUM(p.amount)
+                                FROM payments p
+                                WHERE p.booking_id = b.id
+                                  AND p.status = 'completed'
+                                  AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                            ), 0)
+                            - COALESCE((
+                                SELECT SUM(p.amount)
+                                FROM payments p
+                                WHERE p.booking_id = b.id
+                                  AND p.status <> 'void'
+                                  AND COALESCE(p.payment_type, 'booking') = 'refund'
+                                  AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+                            ), 0),
+                            0
+                        )
+                    ) AS paid
+                ) net
                 WHERE b.id = $3
                 "#,
             )
@@ -2731,6 +2961,14 @@ fn map_workflow_summary_row(row: &DbRow) -> PaymentWorkflowSummaryRow {
         deposit_forfeited: row_mappers::get_decimal(row, "deposit_forfeited"),
         has_failed_payment: row_mappers::get_bool(row, "has_failed_payment"),
     }
+}
+
+/// Module-level re-export for cross-domain callers (e.g. ledger payments).
+pub(crate) async fn ensure_business_date_open_tx(
+    tx: &mut DbTransaction<'_>,
+    business_date: chrono::NaiveDate,
+) -> Result<(), ApiError> {
+    PaymentRepository::ensure_business_date_open_tx(tx, business_date).await
 }
 
 #[cfg(test)]

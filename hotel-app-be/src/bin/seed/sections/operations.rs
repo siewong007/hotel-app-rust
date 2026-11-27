@@ -16,7 +16,7 @@ INSERT INTO public.housekeeping_tasks (
     scheduled_date, task_date, started_at, completed_at, notes, inspection_notes, created_by
 )
 OVERRIDING SYSTEM VALUE VALUES
-    (806001, 800313, 'cleaning',   'high',   'in_progress', 800004, (SELECT today FROM staging_ref), (SELECT today FROM staging_ref), CURRENT_TIMESTAMP - interval '1 hour', NULL, 'Checkout clean — 701', NULL, 800005),
+    (806001, 800313, 'cleaning',   'high',   'in_progress', 800004, (SELECT today FROM staging_ref), (SELECT today FROM staging_ref), ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 hour', NULL, 'Checkout clean — 701', NULL, 800005),
     (806002, 800307, 'cleaning',   'normal', 'pending',     800004, (SELECT today FROM staging_ref), (SELECT today FROM staging_ref), NULL, NULL, 'Checkout clean — 601', NULL, 800005),
     (806003, 800315, 'inspection', 'normal', 'pending',     NULL,     (SELECT today+1 FROM staging_ref), (SELECT today+1 FROM staging_ref), NULL, NULL, 'Pre-arrival inspection for 703 arrival', NULL, 800001),
     (806004, 800319, 'inspection', 'high',   'pending',     800005, (SELECT today FROM staging_ref), (SELECT today FROM staging_ref), NULL, NULL, 'VIP arrival inspection — 801', NULL, 800001),
@@ -25,7 +25,7 @@ OVERRIDING SYSTEM VALUE VALUES
     (806006, 800310, 'cleaning',   'normal', 'completed',   800004, (SELECT today-2 FROM staging_ref), (SELECT today-2 FROM staging_ref), (SELECT today-2 FROM staging_ref)::timestamptz + interval '9 hours', (SELECT today-2 FROM staging_ref)::timestamptz + interval '10 hours', NULL, 'Inspected OK', 800005),
     (806007, 800321, 'turndown',   'normal', 'completed',   800004, (SELECT today-1 FROM staging_ref), (SELECT today-1 FROM staging_ref), (SELECT today-1 FROM staging_ref)::timestamptz + interval '19 hours', (SELECT today-1 FROM staging_ref)::timestamptz + interval '20 hours', 'Turndown for VIP in 801', NULL, 800005),
     (806008, 800306, 'inspection', 'low',    'void',        NULL,     (SELECT today-3 FROM staging_ref), (SELECT today-3 FROM staging_ref), NULL, NULL, 'Superseded by room move', NULL, 800001),
-    (806009, 800306, 'cleaning',   'normal', 'in_progress', 800005, (SELECT today FROM staging_ref), (SELECT today FROM staging_ref), CURRENT_TIMESTAMP - interval '45 minutes', NULL, 'Mid-stay refresh — 506', NULL, 800005);
+    (806009, 800306, 'cleaning',   'normal', 'in_progress', 800005, (SELECT today FROM staging_ref), (SELECT today FROM staging_ref), ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '45 minutes', NULL, 'Mid-stay refresh — 506', NULL, 800005);
 
 INSERT INTO public.maintenance_tickets (
     id, room_id, ticket_number, title, description, category, priority, status,

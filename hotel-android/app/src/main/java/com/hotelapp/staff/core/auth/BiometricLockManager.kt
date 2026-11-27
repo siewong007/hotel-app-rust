@@ -15,7 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material3.Icon
@@ -25,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -49,28 +53,36 @@ object BiometricLockManager {
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
     ) {
-        val executor = ContextCompat.getMainExecutor(activity)
-        val prompt = BiometricPrompt(
-            activity,
-            executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    super.onAuthenticationSucceeded(result)
-                    onSuccess()
-                }
+        if (activity.isFinishing || activity.isDestroyed) {
+            onError("Unlock prompt unavailable right now. Tap Unlock to try again.")
+            return
+        }
+        runCatching {
+            val executor = ContextCompat.getMainExecutor(activity)
+            val prompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        onSuccess()
+                    }
 
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    super.onAuthenticationError(errorCode, errString)
-                    onError(errString.toString())
-                }
-            },
-        )
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setAllowedAuthenticators(ALLOWED_AUTHENTICATORS)
-            .build()
-        prompt.authenticate(info)
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+                        onError(errString.toString())
+                    }
+                },
+            )
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setAllowedAuthenticators(ALLOWED_AUTHENTICATORS)
+                .build()
+            prompt.authenticate(info)
+        }.onFailure { err ->
+            onError(err.message ?: "Unable to open biometric prompt.")
+        }
     }
 }
 
@@ -81,17 +93,37 @@ fun BiometricLockOverlay(
     onUnlockClick: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
+    isSigningOut: Boolean = false,
 ) {
     val colors = HotelTheme.colors
     BackHandler(enabled = true) {}
     Box(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(Unit) {}
-            .background(colors.surfaceApp)
-            .padding(28.dp),
-        contentAlignment = Alignment.Center,
+            .background(colors.surfaceApp),
     ) {
+        // Consume stray background touches in Final pass so underlying layered content
+        // never receives taps without blocking child Button clicks or vertical scroll.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Final)
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                },
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -120,13 +152,20 @@ fun BiometricLockOverlay(
             Spacer(modifier = Modifier.height(8.dp))
             HotelPrimaryButton(
                 text = "Unlock",
-                icon = Icons.Outlined.Fingerprint,
+                enabled = !isSigningOut,
                 onClick = onUnlockClick,
                 modifier = Modifier.fillMaxWidth(),
             )
-            TextButton(onClick = onSignOut) {
-                Text("Sign Out Instead", color = colors.textSecondary)
+            TextButton(
+                onClick = onSignOut,
+                enabled = !isSigningOut,
+            ) {
+                Text(
+                    text = if (isSigningOut) "Signing Out..." else "Sign Out Instead",
+                    color = colors.textSecondary,
+                )
             }
+        }
         }
     }
 }

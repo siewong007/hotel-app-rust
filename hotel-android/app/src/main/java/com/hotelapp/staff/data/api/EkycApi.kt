@@ -5,6 +5,9 @@ import com.hotelapp.staff.data.dto.EkycApplicationDetailDto
 import com.hotelapp.staff.data.dto.EkycDashboardMetricsDto
 import com.hotelapp.staff.data.dto.EkycReasonCodeDto
 import com.hotelapp.staff.data.dto.EkycReviewActionRequestDto
+import com.hotelapp.staff.data.dto.EkycSensitiveRevealRequestDto
+import com.hotelapp.staff.data.dto.EkycSensitiveRevealResponseDto
+import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -35,4 +38,16 @@ interface EkycApi {
 
     @GET("/api/ekyc/admin/reason-codes")
     suspend fun reasonCodes(): List<EkycReasonCodeDto>
+
+    @GET("/api/ekyc/admin/applications/{id}/documents/{kind}")
+    suspend fun document(
+        @Path("id") id: Long,
+        @Path("kind") kind: String,
+    ): ResponseBody
+
+    @POST("/api/ekyc/admin/applications/{id}/reveal")
+    suspend fun revealSensitive(
+        @Path("id") id: Long,
+        @Body body: EkycSensitiveRevealRequestDto,
+    ): EkycSensitiveRevealResponseDto
 }

@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 class DateFormatterTest {
@@ -50,6 +51,8 @@ class DateFormatterTest {
         assertEquals("Yesterday, 22:15", DateFormatter.formatRelativeTimestamp("2026-11-24T22:15:00Z", now, zone))
         assertEquals("10 Nov, 09:05", DateFormatter.formatRelativeTimestamp("2026-11-10T09:05:00Z", now, zone))
         assertEquals("10 Nov 2025, 09:05", DateFormatter.formatRelativeTimestamp("2025-11-10T09:05:00Z", now, zone))
+        assertEquals("11m ago", DateFormatter.formatRelativeTimestamp("2026-11-25 15:18:00.123456+00", now, zone))
+        assertEquals("Just now", DateFormatter.formatRelativeTimestamp("2026-11-25T15:30:20Z", now, zone))
         assertEquals("not-a-timestamp", DateFormatter.formatRelativeTimestamp("not-a-timestamp", now, zone))
     }
 
@@ -67,5 +70,23 @@ class DateFormatterTest {
     fun formatTodayLabel_formatsExpectedDate() {
         val now = Instant.parse("2026-11-25T08:00:00Z")
         assertEquals("Wed, 25 Nov 2026", DateFormatter.formatTodayLabel(ZoneOffset.UTC, now))
+    }
+
+    @Test
+    fun parsesColonlessOffsetsNaiveIsoWhitespaceAndExplicitZone() {
+        val zone = ZoneOffset.UTC
+        val now = Instant.parse("2026-11-25T15:30:00Z")
+
+        assertEquals("25 Nov 2026", DateFormatter.formatDate("  2026-11-25T10:15:00Z  "))
+        assertEquals(2L, DateFormatter.nightsCount("  2026-11-25 ", " 2026-11-27  "))
+        assertEquals("25 Nov – 27 Nov 2026", DateFormatter.formatDateRange(" 2026-11-25 ", " 2026-11-27 "))
+
+        assertEquals("12m ago", DateFormatter.formatRelativeTimestamp("2026-11-25T23:18:00+0800", now, zone))
+        assertEquals("12m ago", DateFormatter.formatRelativeTimestamp("2026-11-25 10:18:00-0500", now, zone))
+        assertEquals("12m ago", DateFormatter.formatRelativeTimestamp("2026-11-25T15:18:00", now, zone))
+        assertEquals("12m ago", DateFormatter.formatRelativeTimestamp("2026-11-25 15:18:00", now, zone))
+
+        assertEquals("25 Nov 2026, 18:15", DateFormatter.formatTimestamp("2026-11-25T10:15:00Z", ZoneId.of("Asia/Kuala_Lumpur")))
+        assertEquals("25 Nov 2026, 10:15", DateFormatter.formatTimestamp("2026-11-25T10:15:00Z", ZoneOffset.UTC))
     }
 }

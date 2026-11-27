@@ -85,7 +85,7 @@ export interface AuthContextType extends AuthState {
   hasRole: (role: string) => boolean;
   getRoutePolicy: (routeId: string) => RouteAccessPolicy | undefined;
   registerPasskey: (username: string, stepUp?: PasskeyStepUp) => Promise<void>;
-  loginWithPasskey: (username: string) => Promise<boolean>;
+  loginWithPasskey: (username: string, turnstileToken?: string) => Promise<boolean>;
   /** Finish a password sign-in with a passkey as its second factor. */
   completeTwoFactorWithPasskey: (mfaToken: string) => Promise<LoginResult>;
   dismissPasskeyPrompt: () => void;
@@ -759,7 +759,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  const loginWithPasskey = useCallback(async (username: string): Promise<boolean> => {
+  const loginWithPasskey = useCallback(async (username: string, turnstileToken?: string): Promise<boolean> => {
     try {
       await pendingLogoutRef.current;
 
@@ -767,7 +767,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const startResponse = await api.post('auth/passkey/login/start', {
         json: { username },
         // Callers own the failure feedback; suppress the duplicate global toast.
-        headers: { [SKIP_API_NOTIFICATION_HEADER]: 'true' },
+        headers: {
+          ...(turnstileToken ? { 'cf-turnstile-response': turnstileToken } : {}),
+          [SKIP_API_NOTIFICATION_HEADER]: 'true',
+        },
       }).json<{ challenge: string; allowCredentials: { id: string; type?: string }[] }>();
 
       const { challenge, allowCredentials } = startResponse;

@@ -66,6 +66,7 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({ onSetupComplete }) => {
   const [enableBackupCodes, setEnableBackupCodes] = useState<string[]>([]);
   const [verificationCode, setVerificationCode] = useState('');
   const [setupPassword, setSetupPassword] = useState('');
+  const [disablePassword, setDisablePassword] = useState('');
   const [disableCode, setDisableCode] = useState('');
   const [showSetupDialog, setShowSetupDialog] = useState(false);
   const [showDisableDialog, setShowDisableDialog] = useState(false);
@@ -127,21 +128,36 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({ onSetupComplete }) => {
     }
   };
 
+  const closeDisable = () => {
+    setShowDisableDialog(false);
+    setDisablePassword('');
+    setDisableCode('');
+    disableMutation.reset();
+  };
+
   const handleDisable2FA = async () => {
+    if (!disablePassword) {
+      showSnackbar(t('security.enterCurrentPassword'), 'warning');
+      return;
+    }
     if (!disableCode.trim()) {
       showSnackbar(t('twoFactorSetup.enterCurrentCode'), 'warning');
       return;
     }
 
     try {
-      await disableMutation.mutateAsync(disableCode);
-      setShowDisableDialog(false);
-      setDisableCode('');
+      await disableMutation.mutateAsync({
+        code: disableCode.trim(),
+        password: disablePassword,
+      });
+      closeDisable();
       showSnackbar(t('twoFactorSetup.disabled'), 'success');
       onSetupComplete?.();
     } catch (error) {
       console.error('Failed to disable 2FA:', error);
       showSnackbar(errorMessage(error, t('twoFactorSetup.disableFailed')), 'error');
+    } finally {
+      disableMutation.reset();
     }
   };
 
@@ -420,12 +436,22 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({ onSetupComplete }) => {
         </DialogActions>
       </Dialog>
       {/* Disable 2FA Dialog */}
-      <Dialog open={showDisableDialog} onClose={() => setShowDisableDialog(false)} fullWidth fullScreen={fullScreen}>
+      <Dialog open={showDisableDialog} onClose={closeDisable} fullWidth fullScreen={fullScreen}>
         <DialogTitle>{t('twoFactorSetup.disableDialogTitle')}</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 2 }}>
             {t('twoFactorSetup.disableConfirm')}
           </Typography>
+          <TextField
+            fullWidth
+            type="password"
+            autoComplete="current-password"
+            label={t('security.currentPassword')}
+            value={disablePassword}
+            onChange={(e) => setDisablePassword(e.target.value)}
+            autoFocus
+            sx={{ mb: 2 }}
+          />
           <TextField
             fullWidth
             label={t('twoFactorSetup.disableCodeLabel')}
@@ -436,12 +462,11 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({ onSetupComplete }) => {
               setDisableCode(e.target.value.toUpperCase().replace(/[^0-9A-F-]/g, '').slice(0, BACKUP_CODE_LENGTH))
             }
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && disableCode.trim() && !loading) {
+              if (e.key === 'Enter' && disablePassword && disableCode.trim() && !loading) {
                 e.preventDefault();
                 void handleDisable2FA();
               }
             }}
-            autoFocus
             sx={{ mb: 1 }}
             slotProps={{
               htmlInput: {
@@ -463,12 +488,12 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({ onSetupComplete }) => {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowDisableDialog(false)}>{t('common:actions.cancel')}</Button>
+          <Button onClick={closeDisable}>{t('common:actions.cancel')}</Button>
           <Button
             onClick={handleDisable2FA}
             variant="contained"
             color="error"
-            disabled={!disableCode.trim() || loading}
+            disabled={!disablePassword || !disableCode.trim() || loading}
           >
             {t('twoFactorSetup.disableTitle')}
           </Button>

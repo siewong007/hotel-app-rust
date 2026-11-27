@@ -6,9 +6,19 @@ import java.util.Locale
 
 object StatusFormatter {
 
+    private val ACRONYM_WORDS = mapOf(
+        "vip" to "VIP",
+        "ekyc" to "eKYC",
+        "ota" to "OTA",
+        "id" to "ID",
+        "qr" to "QR",
+        "2fa" to "2FA",
+    )
+
     fun humanize(raw: String?): String {
-        if (raw.isNullOrBlank()) return "Unknown"
-        return when (raw.lowercase(Locale.US)) {
+        val trimmed = raw?.trim().orEmpty()
+        if (trimmed.isEmpty()) return "Unknown"
+        return when (trimmed.lowercase(Locale.US)) {
             "auto_checked_in" -> "Auto Checked In"
             "checked_in" -> "Checked In"
             "checked_out" -> "Checked Out"
@@ -28,10 +38,16 @@ object StatusFormatter {
             "on_hold" -> "On Hold"
             "unpaid_deposit" -> "Deposit Unpaid"
             "hvac" -> "HVAC"
-            else -> raw.split('_')
+            "paypal" -> "PayPal"
+            "duitnow" -> "DuitNow"
+            "bank_transfer", "bank transfer" -> "Bank Transfer"
+            "online_banking", "online banking" -> "Online Banking"
+            "online_payment", "online payment" -> "Online Payment"
+            else -> trimmed.split(Regex("[_\\-\\s]+"))
                 .filter { it.isNotBlank() }
                 .joinToString(" ") { part ->
-                    part.lowercase(Locale.US).replaceFirstChar { ch ->
+                    val lower = part.lowercase(Locale.US)
+                    ACRONYM_WORDS[lower] ?: lower.replaceFirstChar { ch ->
                         if (ch.isLowerCase()) ch.titlecase(Locale.US) else ch.toString()
                     }
                 }
@@ -39,18 +55,18 @@ object StatusFormatter {
     }
 
     fun bookingTone(status: String?, colors: HotelExtendedColors): StatusTone =
-        when (status?.lowercase(Locale.US)) {
+        when (status?.trim()?.lowercase(Locale.US)) {
             "checked_in", "auto_checked_in" -> colors.success
             "late_checkout" -> colors.orange
-            "confirmed" -> colors.info
+            "confirmed", "partial_complimentary", "fully_complimentary" -> colors.info
             "pending", "pending_payment", "pending_confirmation" -> colors.warning
             "checked_out", "completed" -> colors.neutral
-            "cancelled", "voided", "no_show" -> colors.danger
+            "cancelled", "voided", "no_show", "comp_void" -> colors.danger
             else -> colors.neutral
         }
 
     fun roomTone(status: String?, colors: HotelExtendedColors): StatusTone =
-        when (status?.lowercase(Locale.US)) {
+        when (status?.trim()?.lowercase(Locale.US)) {
             "available" -> colors.success
             "occupied" -> colors.info
             "reserved" -> colors.violet
@@ -61,7 +77,7 @@ object StatusFormatter {
         }
 
     fun taskTone(status: String?, colors: HotelExtendedColors): StatusTone =
-        when (status?.lowercase(Locale.US)) {
+        when (status?.trim()?.lowercase(Locale.US)) {
             "pending", "open" -> colors.warning
             "in_progress" -> colors.info
             "on_hold" -> colors.orange
@@ -71,7 +87,7 @@ object StatusFormatter {
         }
 
     fun priorityTone(priority: String?, colors: HotelExtendedColors): StatusTone =
-        when (priority?.lowercase(Locale.US)) {
+        when (priority?.trim()?.lowercase(Locale.US)) {
             "urgent", "critical" -> colors.danger
             "high" -> colors.orange
             "medium", "normal" -> colors.info
@@ -80,16 +96,16 @@ object StatusFormatter {
         }
 
     fun paymentTone(paymentStatus: String?, colors: HotelExtendedColors): StatusTone =
-        when (paymentStatus?.lowercase(Locale.US)) {
+        when (paymentStatus?.trim()?.lowercase(Locale.US)) {
             "paid", "completed" -> colors.success
-            "partial", "unpaid_deposit" -> colors.warning
-            "unpaid" -> colors.danger
-            "refunded", "voided" -> colors.neutral
+            "partial", "unpaid_deposit", "pending", "processing" -> colors.warning
+            "unpaid", "failed" -> colors.danger
+            "refunded", "voided", "void" -> colors.neutral
             else -> colors.neutral
         }
 
     fun ekycTone(status: String?, colors: HotelExtendedColors): StatusTone =
-        when (status?.lowercase(Locale.US)) {
+        when (status?.trim()?.lowercase(Locale.US)) {
             "approved", "verified" -> colors.success
             "in_review", "under_review" -> colors.info
             "submitted", "pending", "automated_review", "pending_manual_review", "additional_information_required" -> colors.warning

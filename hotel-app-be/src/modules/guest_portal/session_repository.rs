@@ -36,6 +36,105 @@ const BOOKING_SEARCH_PREDICATE: &str = concat!(
     ")"
 );
 
+fn booking_summary_select(
+    guest_id_param: &str,
+    rejection_reason_col: &str,
+    rejected_at_col: &str,
+) -> String {
+    format!(
+        "b.id, b.booking_number, b.check_in_date, b.check_out_date, b.status, b.total_amount, \
+         b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) AS amount_due, \
+         b.booking_group_id, \
+         bg.group_number AS group_number, \
+         rt.name AS room_type_name, \
+         cp.id AS completed_payment_id, \
+         cp.payment_method AS completed_payment_method, \
+         cp.amount AS completed_payment_amount, \
+         EXISTS(SELECT 1 FROM voucher_redemptions vr JOIN promotions p ON p.id = vr.promotion_id \
+                WHERE vr.booking_id = b.id AND vr.status = 'applied' AND p.is_cancellable = false) AS has_non_cancellable_voucher, \
+         EXISTS(SELECT 1 FROM support_conversations sc JOIN support_events se \
+                ON se.conversation_id = sc.id AND se.event_type = 'created' \
+                WHERE sc.booking_id = b.id AND sc.guest_id = {guest_id_param} \
+                AND sc.status IN ('waiting_for_staff', 'waiting_for_guest') \
+                AND se.details->>'kind' = 'cancellation_request') AS cancellation_pending, \
+         (SELECT rp.{rejection_reason_col} FROM payments rp WHERE rp.booking_id = b.id \
+                 AND rp.status = 'void' ORDER BY rp.{rejected_at_col} DESC, rp.id DESC LIMIT 1) \
+                 AS payment_rejection_reason, \
+         (SELECT p.id FROM payments p JOIN payment_receipt_requests pr ON pr.payment_id = p.id \
+             WHERE p.booking_id = b.id AND p.status = 'pending' AND p.payment_method = 'bank_transfer' \
+                 AND pr.uploaded_at IS NULL \
+             ORDER BY pr.requested_at DESC, p.id DESC LIMIT 1) AS receipt_request_payment_id, \
+         (SELECT pr.request_message FROM payments p JOIN payment_receipt_requests pr ON pr.payment_id = p.id \
+             WHERE p.booking_id = b.id AND p.status = 'pending' AND pr.uploaded_at IS NULL \
+             ORDER BY pr.requested_at DESC LIMIT 1) AS receipt_request_message, \
+         EXISTS(SELECT 1 FROM payments p JOIN payment_receipt_requests pr ON pr.payment_id = p.id \
+             WHERE p.booking_id = b.id AND p.status = 'pending' AND pr.uploaded_at IS NOT NULL) \
+             AS receipt_uploaded"
+    )
+}
+
+fn row_to_booking_summary(row: &sqlx::postgres::PgRow) -> GuestPortalBookingSummary {
+    GuestPortalBookingSummary {
+        id: row.try_get("id").unwrap_or_default(),
+        booking_number: row.try_get("booking_number").unwrap_or_default(),
+        check_in_date: row
+            .try_get("check_in_date")
+            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
+        check_out_date: row
+            .try_get("check_out_date")
+            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
+        status: row.try_get("status").unwrap_or_default(),
+        total_amount: row_mappers::get_decimal(row, "total_amount"),
+        amount_due: row_mappers::get_decimal(row, "amount_due"),
+        completed_payment_id: row
+            .try_get::<Option<i64>, _>("completed_payment_id")
+            .ok()
+            .flatten(),
+        completed_payment_method: row
+            .try_get::<Option<String>, _>("completed_payment_method")
+            .ok()
+            .flatten(),
+        completed_payment_amount: row_mappers::get_opt_decimal(row, "completed_payment_amount"),
+        can_cancel: false,
+        cancellation_pending: row
+            .try_get::<bool, _>("cancellation_pending")
+            .unwrap_or(false),
+        cancellation_unavailable_reason: if row
+            .try_get::<bool, _>("has_non_cancellable_voucher")
+            .unwrap_or(false)
+        {
+            Some("This booking uses a non-cancellable voucher.".to_string())
+        } else {
+            None
+        },
+        payment_rejection_reason: row
+            .try_get::<Option<String>, _>("payment_rejection_reason")
+            .ok()
+            .flatten(),
+        receipt_request_payment_id: row
+            .try_get::<Option<i64>, _>("receipt_request_payment_id")
+            .ok()
+            .flatten(),
+        receipt_request_message: row
+            .try_get::<Option<String>, _>("receipt_request_message")
+            .ok()
+            .flatten(),
+        receipt_uploaded: row.try_get::<bool, _>("receipt_uploaded").unwrap_or(false),
+        booking_group_id: row
+            .try_get::<Option<i64>, _>("booking_group_id")
+            .ok()
+            .flatten(),
+        group_number: row
+            .try_get::<Option<String>, _>("group_number")
+            .ok()
+            .flatten(),
+        room_type_name: row
+            .try_get::<Option<String>, _>("room_type_name")
+            .ok()
+            .flatten(),
+    }
+}
+
 pub struct GuestPortalSessionRepository;
 
 impl GuestPortalSessionRepository {
@@ -96,22 +195,30 @@ impl GuestPortalSessionRepository {
         pool: &DbPool,
         token_hash: &str,
     ) -> Result<Option<i64>, ApiError> {
+        let now_sql = current_timestamp();
         let select_sql = format!(
             "SELECT s.guest_id FROM guest_portal_sessions s \
-             WHERE s.token_hash = {} AND s.expires_at > {} \
-               AND NOT EXISTS ( \
-                   SELECT 1 FROM users u \
-                   WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
-                     AND ( \
-                         u.deleted_at IS NOT NULL \
-                         OR u.is_active = false \
-                         OR (COALESCE(u.is_locked, false) = true AND (u.locked_until IS NULL OR u.locked_until > {})) \
-                     ) \
+             WHERE s.token_hash = {p1} AND s.expires_at > {now_sql} \
+               AND ( \
+                   NOT EXISTS ( \
+                       SELECT 1 FROM users u \
+                       WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
+                         AND ( \
+                             u.deleted_at IS NOT NULL \
+                             OR u.is_active = false \
+                             OR (COALESCE(u.is_locked, false) = true AND (u.locked_until IS NULL OR u.locked_until > {now_sql})) \
+                         ) \
+                   ) \
+                   OR EXISTS ( \
+                       SELECT 1 FROM users u \
+                       WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
+                         AND u.deleted_at IS NULL \
+                         AND u.is_active = true \
+                         AND (COALESCE(u.is_locked, false) = false OR (u.locked_until IS NOT NULL AND u.locked_until <= {now_sql})) \
+                   ) \
                ) \
              LIMIT 1",
-            param!(1),
-            current_timestamp(),
-            current_timestamp()
+            p1 = param!(1),
         );
         let row = sqlx::query(sqlx::AssertSqlSafe(&*select_sql))
             .bind(token_hash)
@@ -125,9 +232,11 @@ impl GuestPortalSessionRepository {
         let guest_id: i64 = row.try_get("guest_id").unwrap_or_default();
 
         let update_sql = format!(
-            "UPDATE guest_portal_sessions SET last_used_at = {} WHERE token_hash = {}",
-            current_timestamp(),
-            param!(1)
+            "UPDATE guest_portal_sessions SET last_used_at = {now} \
+             WHERE token_hash = {p1} \
+               AND (last_used_at IS NULL OR last_used_at < {now} - INTERVAL '60 seconds')",
+            now = current_timestamp(),
+            p1 = param!(1),
         );
         // Best-effort last_used bookkeeping; a failure here must not block reads.
         let _ = sqlx::query(sqlx::AssertSqlSafe(&*update_sql))
@@ -141,23 +250,31 @@ impl GuestPortalSessionRepository {
     /// Lightweight read-only check that a guest portal session is still
     /// active and unexpired (used by WebSocket keepalive checks).
     pub async fn is_session_active(pool: &DbPool, token_hash: &str) -> Result<bool, ApiError> {
+        let now_sql = current_timestamp();
         let select_sql = format!(
             "SELECT EXISTS( \
                 SELECT 1 FROM guest_portal_sessions s \
-                WHERE s.token_hash = {} AND s.expires_at > {} \
-                  AND NOT EXISTS ( \
-                      SELECT 1 FROM users u \
-                      WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
-                        AND ( \
-                            u.deleted_at IS NOT NULL \
-                            OR u.is_active = false \
-                            OR (COALESCE(u.is_locked, false) = true AND (u.locked_until IS NULL OR u.locked_until > {})) \
-                        ) \
+                WHERE s.token_hash = {p1} AND s.expires_at > {now_sql} \
+                  AND ( \
+                      NOT EXISTS ( \
+                          SELECT 1 FROM users u \
+                          WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
+                            AND ( \
+                                u.deleted_at IS NOT NULL \
+                                OR u.is_active = false \
+                                OR (COALESCE(u.is_locked, false) = true AND (u.locked_until IS NULL OR u.locked_until > {now_sql})) \
+                            ) \
+                      ) \
+                      OR EXISTS ( \
+                          SELECT 1 FROM users u \
+                          WHERE u.guest_id = s.guest_id AND u.user_type::text = 'guest' \
+                            AND u.deleted_at IS NULL \
+                            AND u.is_active = true \
+                            AND (COALESCE(u.is_locked, false) = false OR (u.locked_until IS NOT NULL AND u.locked_until <= {now_sql})) \
+                      ) \
                   ) \
              )",
-            param!(1),
-            current_timestamp(),
-            current_timestamp()
+            p1 = param!(1),
         );
         sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(&*select_sql))
             .bind(token_hash)
@@ -212,38 +329,17 @@ impl GuestPortalSessionRepository {
         let rejection_reason_col = "failure_reason";
         let rejected_at_col = "processed_at";
         let sql = format!(
-            "SELECT b.id, b.booking_number, b.check_in_date, b.check_out_date, b.status, b.total_amount, \
-                    b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) AS amount_due, \
-                    b.booking_group_id, \
-                    (SELECT g.group_number FROM booking_groups g WHERE g.id = b.booking_group_id) AS group_number, \
-                    (SELECT rt.name FROM rooms r JOIN room_types rt ON rt.id = r.room_type_id WHERE r.id = b.room_id) AS room_type_name, \
-                    (SELECT cp.id FROM payments cp WHERE cp.booking_id = b.id AND cp.status = 'completed' \
-                        ORDER BY cp.id DESC LIMIT 1) AS completed_payment_id, \
-                    (SELECT cp.payment_method FROM payments cp WHERE cp.booking_id = b.id AND cp.status = 'completed' \
-                        ORDER BY cp.id DESC LIMIT 1) AS completed_payment_method, \
-                    (SELECT cp.amount FROM payments cp WHERE cp.booking_id = b.id AND cp.status = 'completed' \
-                        ORDER BY cp.id DESC LIMIT 1) AS completed_payment_amount, \
-                    EXISTS(SELECT 1 FROM voucher_redemptions vr JOIN promotions p ON p.id = vr.promotion_id \
-                           WHERE vr.booking_id = b.id AND vr.status = 'applied' AND p.is_cancellable = {}) AS has_non_cancellable_voucher, \
-                    EXISTS(SELECT 1 FROM support_conversations sc JOIN support_events se \
-                           ON se.conversation_id = sc.id AND se.event_type = 'created' \
-                           WHERE sc.booking_id = b.id AND sc.guest_id = {} \
-                           AND sc.status IN ('waiting_for_staff', 'waiting_for_guest') \
-                           AND se.details->>'kind' = 'cancellation_request') AS cancellation_pending, \
-                    (SELECT rp.{rejection_reason_col} FROM payments rp WHERE rp.booking_id = b.id \
-                            AND rp.status = 'void' ORDER BY rp.{rejected_at_col} DESC, rp.id DESC LIMIT 1) \
-                            AS payment_rejection_reason, \
-                    (SELECT p.id FROM payments p JOIN payment_receipt_requests pr ON pr.payment_id = p.id \
-                        WHERE p.booking_id = b.id AND p.status = 'pending' AND p.payment_method = 'bank_transfer' \
-                            AND pr.uploaded_at IS NULL \
-                        ORDER BY pr.requested_at DESC, p.id DESC LIMIT 1) AS receipt_request_payment_id, \
-                    (SELECT pr.request_message FROM payments p JOIN payment_receipt_requests pr ON pr.payment_id = p.id \
-                        WHERE p.booking_id = b.id AND p.status = 'pending' AND pr.uploaded_at IS NULL \
-                        ORDER BY pr.requested_at DESC LIMIT 1) AS receipt_request_message, \
-                    EXISTS(SELECT 1 FROM payments p JOIN payment_receipt_requests pr ON pr.payment_id = p.id \
-                        WHERE p.booking_id = b.id AND p.status = 'pending' AND pr.uploaded_at IS NOT NULL) \
-                        AS receipt_uploaded \
-             FROM bookings b WHERE b.guest_id = {} \
+            "SELECT {} \
+             FROM bookings b \
+             LEFT JOIN booking_groups bg ON bg.id = b.booking_group_id \
+             LEFT JOIN rooms r ON r.id = b.room_id \
+             LEFT JOIN room_types rt ON rt.id = r.room_type_id \
+             LEFT JOIN LATERAL ( \
+                 SELECT cp.id, cp.payment_method, cp.amount FROM payments cp \
+                 WHERE cp.booking_id = b.id AND cp.status = 'completed' \
+                 ORDER BY cp.id DESC LIMIT 1 \
+             ) cp ON true \
+             WHERE b.guest_id = {} \
              AND COALESCE(b.booking_group_id, -b.id) IN ( \
                  SELECT unit FROM ( \
                      SELECT COALESCE(b.booking_group_id, -b.id) AS unit, \
@@ -254,8 +350,7 @@ impl GuestPortalSessionRepository {
              ORDER BY MAX(b.check_in_date) OVER (PARTITION BY COALESCE(b.booking_group_id, -b.id)) DESC, \
                       MAX(b.id) OVER (PARTITION BY COALESCE(b.booking_group_id, -b.id)) DESC, \
                       b.check_in_date DESC, b.id DESC",
-            false,
-            param!(1),
+            booking_summary_select(param!(1), rejection_reason_col, rejected_at_col),
             param!(1),
             param!(1),
             BOOKING_SEARCH_PREDICATE,
@@ -271,73 +366,79 @@ impl GuestPortalSessionRepository {
             .await
             .map_err(|e| ApiError::Database(format!("Booking list failed: {}", e)))?;
 
-        let items = rows
-            .iter()
-            .map(|row| GuestPortalBookingSummary {
-                id: row.try_get("id").unwrap_or_default(),
-                booking_number: row.try_get("booking_number").unwrap_or_default(),
-                check_in_date: row
-                    .try_get("check_in_date")
-                    .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
-                check_out_date: row
-                    .try_get("check_out_date")
-                    .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
-                status: row.try_get("status").unwrap_or_default(),
-                total_amount: row_mappers::get_decimal(row, "total_amount"),
-                amount_due: row_mappers::get_decimal(row, "amount_due"),
-                completed_payment_id: row
-                    .try_get::<Option<i64>, _>("completed_payment_id")
-                    .ok()
-                    .flatten(),
-                completed_payment_method: row
-                    .try_get::<Option<String>, _>("completed_payment_method")
-                    .ok()
-                    .flatten(),
-                completed_payment_amount: row_mappers::get_opt_decimal(
-                    row,
-                    "completed_payment_amount",
-                ),
-                can_cancel: false,
-                cancellation_pending: row
-                    .try_get::<bool, _>("cancellation_pending")
-                    .unwrap_or(false),
-                cancellation_unavailable_reason: if row
-                    .try_get::<bool, _>("has_non_cancellable_voucher")
-                    .unwrap_or(false)
-                {
-                    Some("This booking uses a non-cancellable voucher.".to_string())
-                } else {
-                    None
-                },
-                payment_rejection_reason: row
-                    .try_get::<Option<String>, _>("payment_rejection_reason")
-                    .ok()
-                    .flatten(),
-                receipt_request_payment_id: row
-                    .try_get::<Option<i64>, _>("receipt_request_payment_id")
-                    .ok()
-                    .flatten(),
-                receipt_request_message: row
-                    .try_get::<Option<String>, _>("receipt_request_message")
-                    .ok()
-                    .flatten(),
-                receipt_uploaded: row.try_get::<bool, _>("receipt_uploaded").unwrap_or(false),
-                booking_group_id: row
-                    .try_get::<Option<i64>, _>("booking_group_id")
-                    .ok()
-                    .flatten(),
-                group_number: row
-                    .try_get::<Option<String>, _>("group_number")
-                    .ok()
-                    .flatten(),
-                room_type_name: row
-                    .try_get::<Option<String>, _>("room_type_name")
-                    .ok()
-                    .flatten(),
-            })
-            .collect();
+        let items = rows.iter().map(row_to_booking_summary).collect();
 
         Ok((items, total))
+    }
+
+    /// Targeted lookup for cancelling one booking (loading its full group if it belongs to one).
+    pub async fn list_booking_unit(
+        pool: &DbPool,
+        guest_id: i64,
+        booking_id: i64,
+    ) -> Result<Vec<GuestPortalBookingSummary>, ApiError> {
+        let sql = format!(
+            "WITH target AS ( \
+                 SELECT id, booking_group_id FROM bookings WHERE id = {p2} AND guest_id = {p1} \
+             ) \
+             SELECT {} \
+             FROM bookings b \
+             LEFT JOIN booking_groups bg ON bg.id = b.booking_group_id \
+             LEFT JOIN rooms r ON r.id = b.room_id \
+             LEFT JOIN room_types rt ON rt.id = r.room_type_id \
+             LEFT JOIN LATERAL ( \
+                 SELECT cp.id, cp.payment_method, cp.amount FROM payments cp \
+                 WHERE cp.booking_id = b.id AND cp.status = 'completed' \
+                 ORDER BY cp.id DESC LIMIT 1 \
+             ) cp ON true \
+             WHERE b.guest_id = {p1} \
+               AND (b.id = {p2} OR b.booking_group_id = (SELECT booking_group_id FROM target WHERE booking_group_id IS NOT NULL)) \
+             ORDER BY b.check_in_date DESC, b.id DESC",
+            booking_summary_select(param!(1), "failure_reason", "processed_at"),
+            p1 = param!(1),
+            p2 = param!(2),
+        );
+        let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            .bind(guest_id)
+            .bind(booking_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| ApiError::Database(format!("Booking lookup failed: {}", e)))?;
+
+        Ok(rows.iter().map(row_to_booking_summary).collect())
+    }
+
+    /// Targeted lookup for cancelling an entire multi-room booking group.
+    pub async fn list_group_bookings(
+        pool: &DbPool,
+        guest_id: i64,
+        group_id: i64,
+    ) -> Result<Vec<GuestPortalBookingSummary>, ApiError> {
+        let sql = format!(
+            "SELECT {} \
+             FROM bookings b \
+             LEFT JOIN booking_groups bg ON bg.id = b.booking_group_id \
+             LEFT JOIN rooms r ON r.id = b.room_id \
+             LEFT JOIN room_types rt ON rt.id = r.room_type_id \
+             LEFT JOIN LATERAL ( \
+                 SELECT cp.id, cp.payment_method, cp.amount FROM payments cp \
+                 WHERE cp.booking_id = b.id AND cp.status = 'completed' \
+                 ORDER BY cp.id DESC LIMIT 1 \
+             ) cp ON true \
+             WHERE b.guest_id = {p1} AND b.booking_group_id = {p2} \
+             ORDER BY b.check_in_date DESC, b.id DESC",
+            booking_summary_select(param!(1), "failure_reason", "processed_at"),
+            p1 = param!(1),
+            p2 = param!(2),
+        );
+        let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            .bind(guest_id)
+            .bind(group_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| ApiError::Database(format!("Group booking lookup failed: {}", e)))?;
+
+        Ok(rows.iter().map(row_to_booking_summary).collect())
     }
 
     pub async fn find_guest_user_id(pool: &DbPool, guest_id: i64) -> Result<Option<i64>, ApiError> {

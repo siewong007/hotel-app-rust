@@ -16,7 +16,8 @@ class DeepLinkRouterTest {
         assertEquals(BookingsRoute("arriving"), DeepLinkRouter.parse("hotelstaff://bookings?view=arriving"))
         assertEquals(BookingsRoute("all"), DeepLinkRouter.parse("hotelstaff://bookings"))
         assertEquals(BookingDetailRoute(42L), DeepLinkRouter.parse("hotelstaff://booking/42"))
-        assertEquals(RoomsRoute, DeepLinkRouter.parse("hotelstaff://rooms"))
+        assertEquals(RoomsRoute(), DeepLinkRouter.parse("hotelstaff://rooms"))
+        assertEquals(RoomsRoute(focusRoomId = 12L), DeepLinkRouter.parse("hotelstaff://rooms?room_id=12"))
         assertEquals(HousekeepingRoute, DeepLinkRouter.parse("hotelstaff://housekeeping"))
         assertEquals(MaintenanceRoute, DeepLinkRouter.parse("hotelstaff://maintenance"))
         assertEquals(GuestsRoute, DeepLinkRouter.parse("hotelstaff://guests"))
@@ -33,7 +34,12 @@ class DeepLinkRouterTest {
         assertNull(DeepLinkRouter.parse(""))
         assertNull(DeepLinkRouter.parse("https://saliminn.my/bookings"))
         assertNull(DeepLinkRouter.parse("hotelstaff://booking/notanumber"))
+        assertNull(DeepLinkRouter.parse("hotelstaff://booking/0"))
+        assertNull(DeepLinkRouter.parse("hotelstaff://guest/-5"))
         assertNull(DeepLinkRouter.parse("hotelstaff://unknown"))
+        assertEquals(BookingsRoute("all"), DeepLinkRouter.parse("hotelstaff://bookings?view=bogus"))
+        assertEquals(BookingsRoute("in_house"), DeepLinkRouter.parse("hotelstaff://bookings?view=IN_HOUSE"))
+        assertEquals(PendingPaymentsRoute, DeepLinkRouter.parse("hotelstaff://payments/PENDING"))
     }
 
     @Test
@@ -46,7 +52,7 @@ class DeepLinkRouterTest {
 
         val hk = sessionWith("housekeeping", "rooms:read", "rooms:update", "housekeeping:read", "housekeeping:update", "maintenance:read", "maintenance:write")
         assertTrue(DeepLinkRouter.canAccess(DashboardRoute, hk))
-        assertTrue(DeepLinkRouter.canAccess(RoomsRoute, hk))
+        assertTrue(DeepLinkRouter.canAccess(RoomsRoute(), hk))
         assertTrue(DeepLinkRouter.canAccess(HousekeepingRoute, hk))
         assertTrue(DeepLinkRouter.canAccess(MaintenanceRoute, hk))
         assertTrue(DeepLinkRouter.canAccess(SearchRoute, hk))
@@ -60,7 +66,7 @@ class DeepLinkRouterTest {
         assertTrue(DeepLinkRouter.canAccess(EkycQueueRoute, ekyc))
         assertFalse(DeepLinkRouter.canAccess(SearchRoute, ekyc))
         assertFalse(DeepLinkRouter.canAccess(BookingsRoute("all"), ekyc))
-        assertFalse(DeepLinkRouter.canAccess(RoomsRoute, ekyc))
+        assertFalse(DeepLinkRouter.canAccess(RoomsRoute(), ekyc))
 
         val auditor = sessionWith("auditor", "payments:read", "ekyc:read", "ledgers:read")
         assertTrue(DeepLinkRouter.canAccess(PendingPaymentsRoute, auditor))
@@ -68,9 +74,18 @@ class DeepLinkRouterTest {
         assertTrue(DeepLinkRouter.canAccess(SearchRoute, auditor))
         assertFalse(DeepLinkRouter.canAccess(BookingsRoute("all"), auditor))
 
-        val superAdmin = sessionWith("super_admin", superAdmin = true)
+        val superAdmin = sessionWith(
+            "super_admin",
+            "bookings:read",
+            "ekyc:read",
+            "payments:read",
+            superAdmin = true,
+        )
         assertTrue(DeepLinkRouter.canAccess(BookingDetailRoute(9L), superAdmin))
         assertTrue(DeepLinkRouter.canAccess(EkycQueueRoute, superAdmin))
         assertTrue(DeepLinkRouter.canAccess(PendingPaymentsRoute, superAdmin))
+
+        val emptySuperAdmin = sessionWith("super_admin", superAdmin = true)
+        assertFalse(DeepLinkRouter.canAccess(BookingDetailRoute(9L), emptySuperAdmin))
     }
 }

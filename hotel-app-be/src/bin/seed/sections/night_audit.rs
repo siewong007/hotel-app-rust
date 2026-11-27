@@ -77,7 +77,7 @@ WHERE b.id BETWEEN 802001 AND 802045
 
 -- Scheduler/background job history (marker-tagged for cleanup).
 INSERT INTO public.job_runs (job_name, status, detail, duration_ms, created_at) VALUES
-    ('night_audit', 'completed', '{"staging_seed":"v1","audit_date":"recent"}'::jsonb, 4210, (SELECT today-1 FROM staging_ref)::timestamptz + interval '23 hours'),
-    ('unpaid_hold_release', 'completed', '{"staging_seed":"v1","released":0}'::jsonb, 180, (SELECT today FROM staging_ref)::timestamptz - interval '2 hours'),
-    ('payment_receipts', 'completed', '{"staging_seed":"v1","sent":1}'::jsonb, 940, (SELECT today FROM staging_ref)::timestamptz - interval '3 hours');
+    ('night_audit', 'ok', '{"staging_seed":"v1","audit_date":"recent"}'::jsonb, 4210, (SELECT today-1 FROM staging_ref)::timestamptz + interval '23 hours'),
+    ('unpaid_hold_release', 'ok', '{"staging_seed":"v1","released":0}'::jsonb, 180, (SELECT today FROM staging_ref)::timestamptz - interval '2 hours'),
+    ('payment_receipts', 'ok', '{"staging_seed":"v1","sent":1}'::jsonb, 940, (SELECT today FROM staging_ref)::timestamptz - interval '3 hours');
 "#;

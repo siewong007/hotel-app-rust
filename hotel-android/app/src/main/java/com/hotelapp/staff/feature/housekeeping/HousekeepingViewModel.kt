@@ -13,6 +13,8 @@ import com.hotelapp.staff.data.dto.HousekeepingBoardRoomDto
 import com.hotelapp.staff.data.dto.HousekeepingTaskDto
 import com.hotelapp.staff.data.dto.UpdateHousekeepingTaskRequestDto
 import com.hotelapp.staff.data.repository.HousekeepingRepository
+import com.hotelapp.staff.feature.rooms.RoomsViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +40,15 @@ data class HousekeepingUiState(
     val isMutating: Boolean = false,
     val boardRooms: List<HousekeepingBoardRoomDto> = emptyList(),
     val tasks: List<HousekeepingTaskDto> = emptyList(),
+    val isLoadingTasks: Boolean = false,
+    val totalTasks: Long = 0,
+    val tasksPage: Long = 1,
+    val isLoadingMoreTasks: Boolean = false,
+    val tasksEndReached: Boolean = false,
+    val tasksError: String? = null,
     val staff: List<AssignableStaffMemberDto> = emptyList(),
+    val isLoadingStaff: Boolean = false,
+    val staffPickerError: String? = null,
     val error: String? = null,
     val sheetError: String? = null,
     val actionError: String? = null,
@@ -59,6 +69,9 @@ class HousekeepingViewModel(
 
     private val _effects = Channel<HousekeepingEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
+
+    private var refreshJob: Job? = null
+    private var loadMoreTasksJob: Job? = null
 
     init {
         refresh()
@@ -84,7 +97,17 @@ class HousekeepingViewModel(
 
     fun setTaskFilter(filter: String) {
         if (_uiState.value.taskFilter == filter) return
-        _uiState.update { it.copy(taskFilter = filter) }
+        _uiState.update {
+            it.copy(
+                taskFilter = filter,
+                isLoadingTasks = true,
+                tasks = emptyList(),
+                totalTasks = 0,
+                tasksPage = 1,
+                tasksEndReached = false,
+                tasksError = null,
+            )
+        }
         refresh()
     }
 
@@ -92,28 +115,60 @@ class HousekeepingViewModel(
         _uiState.update { it.copy(actionNotice = null) }
     }
 
+    fun clearActionError() {
+        _uiState.update { it.copy(actionError = null) }
+    }
+
     fun clearSheetError() {
         _uiState.update { it.copy(sheetError = null) }
     }
 
+    fun retryLoadStaff() {
+        if (canUpdate) loadAssignableStaff()
+    }
+
     fun refresh(silent: Boolean = false) {
-        viewModelScope.launch {
+        if (canUpdate && _uiState.value.staff.isEmpty()) {
+            loadAssignableStaff()
+        }
+        loadMoreTasksJob?.cancel()
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             val snapshot = _uiState.value
+            val taskFilterAtDispatch = snapshot.taskFilter
             _uiState.update {
-                if (silent) it else it.copy(
-                    isLoading = it.boardRooms.isEmpty() && it.tasks.isEmpty(),
-                    isRefreshing = it.boardRooms.isNotEmpty() || it.tasks.isNotEmpty(),
-                    error = null,
-                    actionError = null,
-                )
+                if (silent) {
+                    it.copy(isLoadingMoreTasks = false)
+                } else {
+                    it.copy(
+                        isLoading = it.boardRooms.isEmpty() && it.tasks.isEmpty() && !it.isLoadingTasks,
+                        isRefreshing = it.boardRooms.isNotEmpty() || (it.tasks.isNotEmpty() && !it.isLoadingTasks),
+                        isLoadingMoreTasks = false,
+                        error = null,
+                        tasksError = null,
+                        actionError = null,
+                    )
+                }
             }
+            try {
+                coroutineScopeCompat(taskFilterAtDispatch, silent)
+            } finally {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isRefreshing = false,
+                        isLoadingTasks = false,
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun coroutineScopeCompat(taskFilterAtDispatch: String, silent: Boolean) {
+        kotlinx.coroutines.coroutineScope {
             val boardDef = async { repository.board() }
-            val (statusParam, unassignedParam) = when (snapshot.taskFilter) {
-                "unassigned" -> null to true
-                "all" -> null to null
-                else -> snapshot.taskFilter to null
-            }
-            val tasksDef = async { repository.tasks(status = statusParam, unassigned = unassignedParam) }
+            val (statusParam, unassignedParam) = taskQueryParams(taskFilterAtDispatch)
+            val tasksDef = async { repository.tasks(status = statusParam, unassigned = unassignedParam, page = 1) }
 
             val boardRes = boardDef.await()
             val tasksRes = tasksDef.await()
@@ -127,26 +182,125 @@ class HousekeepingViewModel(
 
             val firstErr = boardRes.exceptionOrNull() ?: tasksRes.exceptionOrNull()
             _uiState.update { cur ->
-                val resolvedRooms = (boardRes.getOrNull() ?: cachedBoard)?.rooms?.sortedWith(
-                    compareBy<HousekeepingBoardRoomDto> { roomPriorityRank(it.status) }.thenBy { it.roomNumber },
-                ) ?: cur.boardRooms
+                val resolvedRooms = (boardRes.getOrNull() ?: cachedBoard)?.rooms?.sortedWith { a, b ->
+                    val prio = roomPriorityRank(a.status).compareTo(roomPriorityRank(b.status))
+                    if (prio != 0) prio else RoomsViewModel.compareRoomNumbersNatural(a.roomNumber, b.roomNumber)
+                } ?: cur.boardRooms
+
+                val sameTaskFilter = cur.taskFilter == taskFilterAtDispatch
+                val taskPageRes = tasksRes.getOrNull()
+                val preservePagedScroll = sameTaskFilter && silent && taskPageRes != null && cur.tasksPage > 1 && cur.tasks.isNotEmpty()
+                val nextTasks = when {
+                    !sameTaskFilter -> cur.tasks
+                    preservePagedScroll && taskPageRes != null -> {
+                        val updatedById = taskPageRes.items.associateBy { it.id }
+                        (taskPageRes.items + cur.tasks.filter { it.id !in updatedById }).distinctBy { it.id }
+                    }
+                    taskPageRes != null -> taskPageRes.items
+                    else -> cur.tasks
+                }
+                val nextTotalTasks = if (sameTaskFilter && taskPageRes != null) taskPageRes.total else cur.totalTasks
+                val nextTasksPage = when {
+                    !sameTaskFilter -> cur.tasksPage
+                    preservePagedScroll -> cur.tasksPage
+                    taskPageRes != null -> taskPageRes.page
+                    else -> cur.tasksPage
+                }
+                val nextTasksEnd = when {
+                    !sameTaskFilter -> cur.tasksEndReached
+                    preservePagedScroll && taskPageRes != null -> nextTasks.size >= taskPageRes.total || cur.tasksEndReached
+                    taskPageRes != null -> taskPageRes.items.isEmpty() || nextTasks.size >= taskPageRes.total
+                    else -> cur.tasksEndReached
+                }
+                val nextTasksError = if (sameTaskFilter && tasksRes.isFailure && (!silent || cur.tasks.isEmpty())) {
+                    tasksRes.exceptionOrNull()?.message ?: "Failed to load housekeeping tasks."
+                } else null
+
                 cur.copy(
                     isLoading = false,
                     isRefreshing = false,
+                    isLoadingTasks = if (sameTaskFilter) false else cur.isLoadingTasks,
                     isShowingCachedData = boardRes.isFailure && (cachedBoard != null || cur.boardRooms.isNotEmpty()),
                     boardRooms = resolvedRooms,
-                    tasks = tasksRes.getOrNull()?.items ?: cur.tasks,
-                    error = if (resolvedRooms.isEmpty() && cur.tasks.isEmpty()) firstErr?.message else null,
+                    tasks = nextTasks,
+                    totalTasks = nextTotalTasks,
+                    tasksPage = nextTasksPage,
+                    tasksEndReached = nextTasksEnd,
+                    tasksError = nextTasksError,
+                    error = if (resolvedRooms.isEmpty() && nextTasks.isEmpty() && tasksRes.isFailure && boardRes.isFailure) {
+                        firstErr?.message
+                    } else if (resolvedRooms.isEmpty() && taskPageRes?.items == null && !silent) {
+                        firstErr?.message
+                    } else {
+                        null
+                    },
                 )
             }
         }
     }
 
+    fun loadMoreTasks() {
+        val s = _uiState.value
+        if (s.isLoadingMoreTasks || s.tasksEndReached || s.tasks.size >= s.totalTasks) return
+        loadMoreTasksJob?.cancel()
+        loadMoreTasksJob = viewModelScope.launch {
+            val taskFilterAtDispatch = s.taskFilter
+            _uiState.update { it.copy(isLoadingMoreTasks = true, tasksError = null) }
+            val (statusParam, unassignedParam) = taskQueryParams(taskFilterAtDispatch)
+            repository.tasks(
+                status = statusParam,
+                unassigned = unassignedParam,
+                page = s.tasksPage + 1,
+            ).onSuccess { res ->
+                _uiState.update { cur ->
+                    if (cur.taskFilter != taskFilterAtDispatch) {
+                        return@update cur.copy(isLoadingMoreTasks = false)
+                    }
+                    val combined = (cur.tasks + res.items).distinctBy { it.id }
+                    val reachedEnd = res.items.isEmpty() ||
+                        combined.size >= res.total ||
+                        combined.size == cur.tasks.size
+                    cur.copy(
+                        isLoadingMoreTasks = false,
+                        tasks = combined,
+                        totalTasks = res.total,
+                        tasksPage = res.page,
+                        tasksEndReached = reachedEnd,
+                        tasksError = null,
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update { cur ->
+                    cur.copy(
+                        isLoadingMoreTasks = false,
+                        tasksError = err.message ?: "Failed to load more tasks.",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun taskQueryParams(filter: String): Pair<String?, Boolean?> = when (filter) {
+        "unassigned" -> null to true
+        "all" -> null to null
+        else -> filter to null
+    }
+
     private fun loadAssignableStaff() {
         viewModelScope.launch {
-            repository.assignableStaff("housekeeping").onSuccess { staff ->
-                _uiState.update { it.copy(staff = staff) }
-            }
+            _uiState.update { it.copy(isLoadingStaff = true, staffPickerError = null) }
+            repository.assignableStaff("housekeeping")
+                .onSuccess { staff ->
+                    _uiState.update { it.copy(isLoadingStaff = false, staff = staff, staffPickerError = null) }
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingStaff = false,
+                            staffPickerError = err.message ?: "Unable to load assignable staff.",
+                        )
+                    }
+                }
         }
     }
 
@@ -154,7 +308,9 @@ class HousekeepingViewModel(
         val label = StatusFormatter.humanize(newStatus)
         val req = UpdateHousekeepingTaskRequestDto(status = newStatus)
         mutate(
+            taskId = taskId,
             notice = "Task marked $label.",
+            optimisticTransform = { task -> task.copy(status = newStatus) },
             offlineFallback = { offlineOps?.enqueueHousekeepingTaskUpdate(taskId, req) },
         ) {
             repository.updateTask(taskId, req)
@@ -167,9 +323,20 @@ class HousekeepingViewModel(
         } else {
             UpdateHousekeepingTaskRequestDto(assignedTo = staffId)
         }
+        val assigneeName = staffId?.let { id ->
+            _uiState.value.staff.find { it.id == id }?.displayName()
+        }
         val notice = if (staffId == null) "Task unassigned." else "Task assigned."
         mutate(
+            taskId = taskId,
             notice = notice,
+            optimisticTransform = { task ->
+                if (staffId == null) {
+                    task.copy(assignedTo = null, assignedToName = null)
+                } else {
+                    task.copy(assignedTo = staffId, assignedToName = assigneeName ?: task.assignedToName)
+                }
+            },
             offlineFallback = { offlineOps?.enqueueHousekeepingTaskUpdate(taskId, req) },
         ) { repository.updateTask(taskId, req) }
     }
@@ -182,6 +349,7 @@ class HousekeepingViewModel(
         notes: String?,
         onSuccess: () -> Unit,
     ) {
+        if (_uiState.value.isMutating) return
         viewModelScope.launch {
             _uiState.update { it.copy(isMutating = true, actionError = null, sheetError = null) }
             repository.createTask(
@@ -205,10 +373,13 @@ class HousekeepingViewModel(
     }
 
     private fun mutate(
+        taskId: Long,
         notice: String,
+        optimisticTransform: (HousekeepingTaskDto) -> HousekeepingTaskDto,
         offlineFallback: (suspend () -> Unit)? = null,
         block: suspend () -> Result<HousekeepingTaskDto>,
     ) {
+        if (_uiState.value.isMutating) return
         viewModelScope.launch {
             _uiState.update { it.copy(isMutating = true, actionError = null) }
             block()
@@ -221,7 +392,21 @@ class HousekeepingViewModel(
                     if (offlineFallback != null && offlineOps?.isQueueableNetworkFailure(err) == true) {
                         offlineFallback()
                         val queuedMsg = "Offline — housekeeping update queued for sync."
-                        _uiState.update { it.copy(isMutating = false, actionNotice = queuedMsg) }
+                        _uiState.update { cur ->
+                            cur.copy(
+                                isMutating = false,
+                                tasks = cur.tasks.map { task ->
+                                    if (task.id == taskId) optimisticTransform(task) else task
+                                },
+                                boardRooms = cur.boardRooms.map { room ->
+                                    val open = room.openTask
+                                    if (open != null && open.id == taskId) {
+                                        room.copy(openTask = optimisticTransform(open))
+                                    } else room
+                                },
+                                actionNotice = queuedMsg,
+                            )
+                        }
                         _effects.trySend(HousekeepingEffect.ShowMessage(queuedMsg))
                     } else {
                         _uiState.update { it.copy(isMutating = false, actionError = err.message) }

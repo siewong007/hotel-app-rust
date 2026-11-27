@@ -165,14 +165,14 @@ impl GuestRepository {
 
             let search_clause = format!(
                 "(CAST(id AS TEXT) {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(nick_name, '') {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(first_name, '') {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(last_name, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR nick_name {like_op} {p_search} ESCAPE '\\' \
+                 OR first_name {like_op} {p_search} ESCAPE '\\' \
+                 OR last_name {like_op} {p_search} ESCAPE '\\' \
                  OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(email, '') {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(phone, '') {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(ic_number, '') {like_op} {p_search} ESCAPE '\\' \
-                 OR COALESCE(company_name, '') {like_op} {p_search} ESCAPE '\\' \
+                 OR email {like_op} {p_search} ESCAPE '\\' \
+                 OR phone {like_op} {p_search} ESCAPE '\\' \
+                 OR ic_number {like_op} {p_search} ESCAPE '\\' \
+                 OR company_name {like_op} {p_search} ESCAPE '\\' \
                  OR EXISTS (SELECT 1 FROM users u \
                             WHERE u.guest_id = guests.id \
                               AND u.deleted_at IS NULL \
@@ -193,7 +193,7 @@ impl GuestRepository {
                 .bind(&pattern)
                 .fetch_one(pool)
                 .await
-                .unwrap_or(0);
+                .map_err(ApiError::from)?;
 
             let guests = sqlx::query_as::<_, Guest>(sqlx::AssertSqlSafe(&*data_sql))
                 .bind(&pattern)
@@ -218,7 +218,7 @@ impl GuestRepository {
             let total = sqlx::query_scalar(sqlx::AssertSqlSafe(&*count_sql))
                 .fetch_one(pool)
                 .await
-                .unwrap_or(0);
+                .map_err(ApiError::from)?;
 
             let guests = sqlx::query_as::<_, Guest>(sqlx::AssertSqlSafe(&*data_sql))
                 .bind(pagination.page_size)
@@ -715,14 +715,16 @@ impl GuestRepository {
         let query = r#"
                 WITH payment_totals AS (
                     SELECT
-                        booking_id,
-                        COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0)
+                        p.booking_id,
+                        COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount ELSE 0 END), 0)
                         - COALESCE(SUM(CASE
-                            WHEN status = 'refunded' THEN COALESCE(refund_amount, amount)
-                            ELSE COALESCE(refund_amount, 0)
+                            WHEN p.status = 'refunded' THEN COALESCE(p.refund_amount, p.amount)
+                            ELSE COALESCE(p.refund_amount, 0)
                         END), 0) AS net_paid_amount
-                    FROM payments
-                    GROUP BY booking_id
+                    FROM payments p
+                    JOIN bookings b_scope ON b_scope.id = p.booking_id
+                    WHERE b_scope.guest_id = $1
+                    GROUP BY p.booking_id
                 )
                 SELECT
                     b.id AS booking_id,
@@ -862,14 +864,16 @@ impl GuestRepository {
         let query = r#"
                 WITH payment_totals AS (
                     SELECT
-                        booking_id,
-                        COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS total_paid,
+                        p.booking_id,
+                        COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount ELSE 0 END), 0) AS total_paid,
                         COALESCE(SUM(CASE
-                            WHEN status = 'refunded' THEN COALESCE(refund_amount, amount)
-                            ELSE COALESCE(refund_amount, 0)
+                            WHEN p.status = 'refunded' THEN COALESCE(p.refund_amount, p.amount)
+                            ELSE COALESCE(p.refund_amount, 0)
                         END), 0) AS total_refunded
-                    FROM payments
-                    GROUP BY booking_id
+                    FROM payments p
+                    JOIN bookings b_scope ON b_scope.id = p.booking_id
+                    WHERE b_scope.guest_id = $1
+                    GROUP BY p.booking_id
                 ),
                 guest_bookings AS (
                     SELECT
@@ -929,14 +933,16 @@ impl GuestRepository {
         let query = r#"
                 WITH payment_totals AS (
                     SELECT
-                        booking_id,
-                        COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS total_paid,
+                        p.booking_id,
+                        COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount ELSE 0 END), 0) AS total_paid,
                         COALESCE(SUM(CASE
-                            WHEN status = 'refunded' THEN COALESCE(refund_amount, amount)
-                            ELSE COALESCE(refund_amount, 0)
+                            WHEN p.status = 'refunded' THEN COALESCE(p.refund_amount, p.amount)
+                            ELSE COALESCE(p.refund_amount, 0)
                         END), 0) AS total_refunded
-                    FROM payments
-                    GROUP BY booking_id
+                    FROM payments p
+                    JOIN bookings b_scope ON b_scope.id = p.booking_id
+                    WHERE b_scope.guest_id = $1
+                    GROUP BY p.booking_id
                 )
                 SELECT
                     b.id,

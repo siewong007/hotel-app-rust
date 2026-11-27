@@ -144,7 +144,7 @@ pub async fn booking_analytics(pool: &DbPool) -> Result<serde_json::Value, ApiEr
                 COALESCE(SUM(total_amount), 0) as revenue
             FROM bookings
             WHERE status NOT IN ('voided', 'comp_void', 'no_show')
-              AND check_in_date >= (date_trunc('month', CURRENT_DATE) - INTERVAL '5 months')
+              AND check_in_date >= (date_trunc('month', CURRENT_DATE) - INTERVAL '5 months')::date
             GROUP BY month_start
         ) trend
         ORDER BY month_start
@@ -1172,8 +1172,8 @@ async fn generate_general_journal(
         WHERE p.payment_type = 'refund'
           AND p.status = 'refunded'
           AND b.status != 'voided'
-          AND p.created_at::date >= $1
-          AND p.created_at::date <= $2
+          AND p.created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+          AND p.created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
         ORDER BY p.created_at, p.id
         "#,
     )

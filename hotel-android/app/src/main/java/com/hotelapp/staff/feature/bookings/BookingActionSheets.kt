@@ -42,10 +42,14 @@ import com.hotelapp.staff.core.design.FilterOption
 import com.hotelapp.staff.core.design.HotelModalSheetContainer
 import com.hotelapp.staff.core.design.HotelPrimaryButton
 import com.hotelapp.staff.core.design.HotelTheme
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.hotelTextFieldColors
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
 import com.hotelapp.staff.core.format.MoneyFormatter
+import com.hotelapp.staff.core.format.MoneyInputParser
+import com.hotelapp.staff.core.format.StatusFormatter
 import com.hotelapp.staff.data.dto.BookingWithDetailsDto
+import com.hotelapp.staff.data.dto.SettlementLockState
 import java.math.BigDecimal
 
 @Composable
@@ -54,22 +58,53 @@ fun CheckInModalSheet(
     currency: String,
     isSubmitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (String, String, String, String, String) -> Unit,
+    onSubmit: (String, String, String, String, String, String) -> Unit,
+    effectiveBalanceDue: BigDecimal? = booking.balanceDue,
     canCollectPayment: Boolean = true,
+    errorMessage: String? = null,
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    val balanceDue = booking.balanceDue?.takeIf { it > BigDecimal.ZERO }
-    var collectPayment by remember { mutableStateOf(false) }
-    var paymentAmount by remember {
+    var icNumber by remember { mutableStateOf("") }
+    val balanceDue = effectiveBalanceDue?.takeIf { it > BigDecimal.ZERO }
+    val isGroupBooking = !booking.groupNumber.isNullOrBlank()
+    val lockState = remember(
+        booking.source,
+        booking.bookingChannelId,
+        booking.bookingChannelName,
+        booking.bookingChannelType,
+        booking.bookingChannelSettlementMethods,
+        booking.channelPayoutRecorded,
+    ) {
+        booking.settlementLockState(allowDeskRemainder = false, paymentType = "booking")
+    }
+    val methodOptions = remember(lockState) {
+        when (lockState) {
+            is SettlementLockState.Restricted -> lockState.methods.map { FilterOption(it, StatusFormatter.humanize(it)) }
+            is SettlementLockState.Blocked -> emptyList()
+            SettlementLockState.Open -> listOf(
+                FilterOption("cash", "Cash"),
+                FilterOption("card", "Card"),
+                FilterOption("bank_transfer", "Transfer"),
+                FilterOption("duitnow", "DuitNow"),
+                FilterOption("online_banking", "Online Banking"),
+            )
+        }
+    }
+    val canOfferPayment = canCollectPayment && !isGroupBooking && lockState !is SettlementLockState.Blocked
+    var collectPayment by remember(canOfferPayment) { mutableStateOf(false) }
+    var paymentAmount by remember(balanceDue) {
         mutableStateOf(balanceDue?.toPlainString() ?: "")
     }
-    var paymentMethod by remember { mutableStateOf("cash") }
+    var paymentMethod by remember(methodOptions) {
+        mutableStateOf(methodOptions.firstOrNull()?.value ?: "cash")
+    }
 
     HotelModalSheetContainer(
+        dismissible = !isSubmitting,
         onDismiss = { if (!isSubmitting) onDismiss() },
     ) {
         Column(
@@ -86,10 +121,13 @@ fun CheckInModalSheet(
                 color = colors.textPrimary,
             )
             Text(
-                text = "Leave legal name blank if already complete on the guest profile.",
+                text = "Leave fields blank if already complete on the guest profile.",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
+            AnimatedVisibility(visible = !errorMessage.isNullOrBlank()) {
+                InlineAlertBanner(message = errorMessage.orEmpty(), tone = colors.danger)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = firstName,
@@ -126,14 +164,35 @@ fun CheckInModalSheet(
                     .fillMaxWidth()
                     .semantics { contentType = ContentType.PhoneNumber },
             )
-            if (canCollectPayment) {
+            OutlinedTextField(
+                value = icNumber,
+                onValueChange = { icNumber = it },
+                label = { Text("IC / Passport Number (if missing)") },
+                placeholder = { Text("Required by desk if not yet on file") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = hotelTextFieldColors(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (canCollectPayment && isGroupBooking) {
+                InlineAlertBanner(
+                    message = "Group booking member — collect room balance via Pay Group in the folio section.",
+                    tone = colors.info,
+                )
+            } else if (canCollectPayment && lockState is SettlementLockState.Blocked) {
+                InlineAlertBanner(
+                    message = lockState.reason,
+                    tone = colors.warning,
+                )
+            }
+            if (canOfferPayment) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .background(colors.surfaceRaised)
                         .border(1.dp, colors.borderSubtle, RoundedCornerShape(12.dp))
-                        .clickable { collectPayment = !collectPayment }
+                        .clickable(enabled = !isSubmitting) { collectPayment = !collectPayment }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -154,6 +213,7 @@ fun CheckInModalSheet(
                     }
                     Switch(
                         checked = collectPayment,
+                        enabled = !isSubmitting,
                         onCheckedChange = { collectPayment = it },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = colors.primaryContrastText,
@@ -166,6 +226,7 @@ fun CheckInModalSheet(
                         OutlinedTextField(
                             value = paymentAmount,
                             onValueChange = { paymentAmount = it },
+                            enabled = !isSubmitting,
                             label = { Text("Payment Amount ($currency)") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
@@ -173,7 +234,10 @@ fun CheckInModalSheet(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             trailingIcon = if (balanceDue != null) {
                                 {
-                                    TextButton(onClick = { paymentAmount = balanceDue.toPlainString() }) {
+                                    TextButton(
+                                        enabled = !isSubmitting,
+                                        onClick = { paymentAmount = balanceDue.toPlainString() },
+                                    ) {
                                         Text("Full", color = colors.primaryOnSurface)
                                     }
                                 }
@@ -181,34 +245,29 @@ fun CheckInModalSheet(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         FilterChipRow(
-                            options = listOf(
-                                FilterOption("cash", "Cash"),
-                                FilterOption("card", "Card"),
-                                FilterOption("bank_transfer", "Transfer"),
-                                FilterOption("duitnow", "DuitNow"),
-                                FilterOption("online_banking", "Online Banking"),
-                            ),
+                            options = methodOptions,
                             selected = paymentMethod,
-                            onSelect = { paymentMethod = it },
+                            onSelect = { if (!isSubmitting) paymentMethod = it },
                         )
                     }
                 }
             }
-            val parsedPaymentValid = !canCollectPayment || !collectPayment ||
-                ((paymentAmount.trim().toDoubleOrNull() ?: 0.0) > 0.0)
+            val parsedPaymentValid = !canOfferPayment || !collectPayment ||
+                (MoneyInputParser.parsePositiveAmount(paymentAmount) != null)
             Spacer(modifier = Modifier.height(4.dp))
             HotelPrimaryButton(
                 text = if (isSubmitting) "Checking In..." else "Confirm Check-In",
                 isLoading = isSubmitting,
-                enabled = parsedPaymentValid,
+                enabled = !isSubmitting && parsedPaymentValid,
                 icon = Icons.AutoMirrored.Outlined.Login,
                 onClick = {
-                    haptics.confirm()
+                    haptics.click()
                     onSubmit(
                         firstName,
                         lastName,
                         phone,
-                        if (canCollectPayment && collectPayment) paymentAmount else "",
+                        icNumber,
+                        if (canOfferPayment && collectPayment) paymentAmount else "",
                         paymentMethod,
                     )
                 },
@@ -225,30 +284,49 @@ fun BookingReasonDialog(
     confirmLabel: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
+    minReasonLength: Int = if (requireReason) 1 else 0,
+    isSubmitting: Boolean = false,
+    errorMessage: String? = null,
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
     var reason by remember { mutableStateOf("") }
+    val trimmedLen = reason.trim().length
+    val isValid = !requireReason || trimmedLen >= minReasonLength
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         shape = RoundedCornerShape(20.dp),
         containerColor = colors.surfaceOverlay,
         title = { Text(title, color = colors.textPrimary, style = MaterialTheme.typography.titleLarge) },
         text = {
-            OutlinedTextField(
-                value = reason,
-                onValueChange = { reason = it },
-                label = { Text(if (requireReason) "Reason (required)" else "Reason (optional)") },
-                minLines = 2,
-                shape = RoundedCornerShape(12.dp),
-                colors = hotelTextFieldColors(),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!errorMessage.isNullOrBlank()) {
+                    InlineAlertBanner(message = errorMessage, tone = colors.danger)
+                }
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    enabled = !isSubmitting,
+                    label = { Text(if (requireReason) "Reason (required)" else "Reason (optional)") },
+                    minLines = 2,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = hotelTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (requireReason && minReasonLength > 1 && trimmedLen < minReasonLength) {
+                    Text(
+                        text = "Enter at least $minReasonLength characters.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
         },
         confirmButton = {
             HotelPrimaryButton(
-                text = confirmLabel,
-                enabled = !requireReason || reason.isNotBlank(),
+                text = if (isSubmitting) "Working..." else confirmLabel,
+                isLoading = isSubmitting,
+                enabled = !isSubmitting && isValid,
                 containerColor = colors.danger.fg,
                 contentColor = colors.primaryContrastText,
                 onClick = {
@@ -258,7 +336,7 @@ fun BookingReasonDialog(
             )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
                 Text("Cancel", color = colors.textSecondary)
             }
         },

@@ -2013,6 +2013,7 @@ mod postgres_creation_tests {
         .execute(&pool)
         .await
         .unwrap();
+        hotel_app_be::core::settings_cache::clear_key("currency");
 
         let configured = hotel_app_be::modules::settings::service::hotel_currency(&pool).await;
         let db_configured: String = sqlx::query_scalar("SELECT public.hotel_currency()::text")
@@ -2066,6 +2067,7 @@ mod postgres_creation_tests {
                 .execute(&pool)
                 .await
                 .unwrap();
+            hotel_app_be::core::settings_cache::clear_key("currency");
             later_payment = sqlx::query_scalar(
                 "INSERT INTO payments (uuid, booking_id, amount, payment_method, payment_type, status) \
                  VALUES (gen_random_uuid(), $1, 10, 'Cash', 'booking', 'completed') \
@@ -2114,6 +2116,7 @@ mod postgres_creation_tests {
                 .await
                 .unwrap(),
         };
+        hotel_app_be::core::settings_cache::clear_key("currency");
         cleanup(&pool, room_id, guest_id, actor_id).await;
         sqlx::query("DELETE FROM room_types WHERE id = $1")
             .bind(room_type_id)

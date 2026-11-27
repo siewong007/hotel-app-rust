@@ -153,6 +153,13 @@ pub async fn redeem_reward_for_guest(
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let member = active_member_for_guest(pool, guest_id).await?;
     ensure_member_can_redeem(&member)?;
+    if let Some(booking_id) = input.booking_id
+        && !LoyaltyRepository::booking_belongs_to_guest(pool, booking_id, guest_id).await?
+    {
+        return Err(ApiError::BadRequest(
+            "Selected booking does not belong to this guest.".to_string(),
+        ));
+    }
 
     let reward = LoyaltyRepository::find_reward(pool, reward_id)
         .await?
@@ -214,16 +221,24 @@ pub async fn redeem_reward_for_guest(
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let locked_member = LoyaltyRepository::lock_member_account_tx(&mut tx, member.id).await?;
     ensure_member_can_redeem(&locked_member)?;
-    if locked_member.available_points < reward.points_cost {
-        return Err(ApiError::BadRequest(format!(
-            "Insufficient points. Required: {}, available: {}.",
-            reward.points_cost, locked_member.available_points
-        )));
-    }
     let locked_reward = LoyaltyRepository::find_reward_for_update_tx(&mut tx, reward.id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Reward not found.".to_string()))?;
     validate_reward_redeemable(&locked_reward, today)?;
+    if locked_reward
+        .minimum_tier_id
+        .is_some_and(|tier_id| tier_id > locked_member.tier_id)
+    {
+        return Err(ApiError::BadRequest(
+            "This reward requires a higher loyalty tier.".to_string(),
+        ));
+    }
+    if locked_member.available_points < locked_reward.points_cost {
+        return Err(ApiError::BadRequest(format!(
+            "Insufficient points. Required: {}, available: {}.",
+            locked_reward.points_cost, locked_member.available_points
+        )));
+    }
     if locked_reward.inventory_count.is_some() {
         LoyaltyRepository::decrement_reward_inventory(&mut tx, locked_reward.id).await?;
     }
@@ -392,11 +407,9 @@ pub async fn gift_points(
     }
 
     validation::validate_transaction_type("adjusted")?;
-    let member = LoyaltyRepository::member_by_id(pool, member_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("Loyalty member not found.".to_string()))?;
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let member = LoyaltyRepository::lock_member_account_tx(&mut tx, member_id).await?;
     let transaction = LoyaltyRepository::insert_transaction(
         &mut tx,
         NewTransaction {
@@ -537,11 +550,8 @@ pub async fn reject_redemption(
     let transaction_id = existing
         .transaction_id
         .ok_or_else(|| ApiError::Internal("Redemption has no points transaction.".to_string()))?;
-    let member = LoyaltyRepository::member_by_id(pool, existing.member_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("Loyalty member not found.".to_string()))?;
-
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let member = LoyaltyRepository::lock_member_account_tx(&mut tx, existing.member_id).await?;
     LoyaltyRepository::reject_redemption_status(
         &mut tx,
         redemption_id,
@@ -549,6 +559,7 @@ pub async fn reject_redemption(
         &input.reason,
     )
     .await?;
+    LoyaltyRepository::increment_reward_inventory(&mut tx, existing.reward_id).await?;
     LoyaltyRepository::insert_transaction(
         &mut tx,
         NewTransaction {
@@ -781,7 +792,11 @@ async fn award_payment_candidate(
             skipped_reason: Some("Payment is below the minimum eligible amount.".to_string()),
         });
     }
-    let Some(member) = LoyaltyRepository::member_by_guest(pool, candidate.guest_id).await? else {
+
+    let mut tx = pool.begin().await.map_err(ApiError::from)?;
+    let Some(member) =
+        LoyaltyRepository::member_by_guest_for_update_tx(&mut tx, candidate.guest_id).await?
+    else {
         return Ok(LoyaltyAwardResult {
             payment_id: candidate.payment_id,
             member_id: None,
@@ -798,7 +813,7 @@ async fn award_payment_candidate(
         });
     }
     if LoyaltyRepository::has_source_transaction(
-        pool,
+        &mut *tx,
         member.id,
         "payment",
         candidate.payment_id,
@@ -830,9 +845,12 @@ async fn award_payment_candidate(
         });
     }
 
-    let prior_booking_awards =
-        LoyaltyRepository::earned_booking_transaction_count(pool, member.id, candidate.booking_id)
-            .await?;
+    let prior_booking_awards = LoyaltyRepository::earned_booking_transaction_count(
+        &mut *tx,
+        member.id,
+        candidate.booking_id,
+    )
+    .await?;
     let nights_increment = if prior_booking_awards == 0 {
         candidate.nights
     } else {
@@ -844,14 +862,13 @@ async fn award_payment_candidate(
         "spend" => member.qualifying_spend + candidate.amount,
         _ => (member.qualifying_points + points) as f64,
     };
-    let new_tier = LoyaltyRepository::best_tier_for_metric(
-        pool,
+    let new_tier = LoyaltyRepository::best_tier_for_metric_tx(
+        &mut *tx,
         &rules.tier_qualification_metric,
         metric_value_after,
     )
     .await?;
 
-    let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let transaction = LoyaltyRepository::insert_transaction(
         &mut tx,
         NewTransaction {

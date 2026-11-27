@@ -17,7 +17,7 @@ impl PasskeyRepository {
             r#"
             SELECT id, credential_id, device_name, created_at, last_used_at
             FROM passkeys
-            WHERE user_id = $1
+            WHERE user_id = $1 AND is_active = true
             ORDER BY created_at DESC
             "#,
         )
@@ -94,7 +94,7 @@ impl PasskeyRepository {
     }
 
     pub async fn passkey_count(pool: &DbPool, user_id: i64) -> Result<i64, ApiError> {
-        sqlx::query_scalar("SELECT COUNT(*) FROM passkeys WHERE user_id = $1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM passkeys WHERE user_id = $1 AND is_active = true")
             .bind(user_id)
             .fetch_one(pool)
             .await

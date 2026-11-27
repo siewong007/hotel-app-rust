@@ -302,28 +302,33 @@ pub async fn tick_campaigns(pool: &DbPool) -> Result<usize, ApiError> {
     Ok(expanded)
 }
 
-/// Renders the per-guest body for a campaign delivery. Template render
-/// failures fall back to the campaign's own body — one odd template must not
-/// sink the whole send.
+/// Renders and sanitizes the per-guest body for a campaign delivery.
+/// Template fetch or render failures abort expansion cleanly instead of falling
+/// back to unsanitized campaign markup.
 async fn campaign_body_for_guest(
     pool: &DbPool,
     campaign: &EmailCampaign,
     guest: &AudienceGuest,
-) -> String {
-    let base = match campaign.template_id {
-        Some(template_id) => match Repo::get_template(pool, template_id).await {
-            Ok(Some(template)) => validation::render_template(
+) -> Result<String, ApiError> {
+    let rendered = match campaign.template_id {
+        Some(template_id) => {
+            let template = Repo::get_template(pool, template_id)
+                .await?
+                .ok_or_else(|| ApiError::NotFound("Campaign template not found".to_string()))?;
+            validation::render_template(
                 &template.body_html,
                 &guest_vars(guest),
                 &template.variables,
-            )
-            .unwrap_or_else(|_| campaign.body_html.clone()),
-            _ => campaign.body_html.clone(),
-        },
+            )?
+        }
         None => campaign.body_html.clone(),
     };
+    let sanitized = validation::sanitize_email_html(&rendered);
     let locale = i18n::mail_locale(pool, guest.language_preference.as_deref()).await;
-    format!("{base}{}", unsubscribe_footer_html(guest.id, locale))
+    Ok(format!(
+        "{sanitized}{}",
+        unsubscribe_footer_html(guest.id, locale)
+    ))
 }
 
 async fn expand_campaign(pool: &DbPool, campaign: &EmailCampaign) -> Result<usize, ApiError> {
@@ -340,7 +345,7 @@ async fn expand_campaign(pool: &DbPool, campaign: &EmailCampaign) -> Result<usiz
             break;
         }
         for guest in &batch {
-            let body_html = campaign_body_for_guest(pool, campaign, guest).await;
+            let body_html = campaign_body_for_guest(pool, campaign, guest).await?;
             let idempotency_key = format!("campaign:{}:guest:{}", campaign.id, guest.id);
             let mut tx = pool.begin().await.map_err(ApiError::from)?;
             Repo::insert_delivery_tx(
@@ -486,6 +491,7 @@ async fn issue_birthday_voucher(
 ) -> Result<usize, ApiError> {
     let code = generate_birthday_voucher_code();
     let expires_at = Utc::now() + chrono::Duration::days(expiry_days);
+    let locale = i18n::mail_locale(pool, guest.language_preference.as_deref()).await;
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let Some(voucher_id) = Repo::insert_birthday_voucher_tx(
         &mut tx,
@@ -506,7 +512,6 @@ async fn issue_birthday_voucher(
         return Ok(0);
     };
 
-    let locale = i18n::mail_locale(pool, guest.language_preference.as_deref()).await;
     let gift = promotion_name
         .map(str::trim)
         .filter(|name| !name.is_empty())

@@ -11,12 +11,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.KingBed
 import androidx.compose.material.icons.outlined.SmokingRooms
@@ -26,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -58,9 +62,9 @@ private fun RoomWithOccupancyDto.matchesRoomFilter(filter: String): Boolean {
     val effectiveStatus = if (isOccupied) "occupied" else rawStatus
     return when (filter) {
         "all" -> true
-        "dirty" -> rawStatus in setOf("dirty", "reserved_dirty")
-        "reserved" -> rawStatus in setOf("reserved", "reserved_dirty")
-        else -> effectiveStatus == filter || rawStatus == filter
+        "dirty" -> !isOccupied && rawStatus in setOf("dirty", "reserved_dirty")
+        "reserved" -> !isOccupied && rawStatus in setOf("reserved", "reserved_dirty")
+        else -> effectiveStatus == filter
     }
 }
 
@@ -71,12 +75,19 @@ fun RoomsScreen(
     serverConfigStore: ServerConfigStore,
     onOpenBookingDetail: (Long) -> Unit,
     onShowMessage: (String) -> Unit = {},
+    focusRoomId: Long? = null,
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val config by serverConfigStore.config.collectAsStateWithLifecycle()
     val canUpdateRooms = session.hasPermission("rooms:update")
+
+    LaunchedEffect(focusRoomId) {
+        if (focusRoomId != null) {
+            viewModel.openRoomDetail(focusRoomId)
+        }
+    }
 
     CollectEffects(viewModel.effects) { effect ->
         when (effect) {
@@ -118,6 +129,7 @@ fun RoomsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .padding(horizontal = 16.dp),
     ) {
         Spacer(modifier = Modifier.height(10.dp))
@@ -153,18 +165,25 @@ fun RoomsScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 if (filtered.isEmpty()) {
-                    EmptyStateView(
-                        title = "No rooms match filter",
-                        subtitle = "Adjust the status filter or search query.",
-                        icon = Icons.Outlined.KingBed,
-                        actionLabel = if (state.search.isNotBlank() || state.statusFilter != "all") "Reset Filter" else null,
-                        onAction = if (state.search.isNotBlank() || state.statusFilter != "all") {
-                            {
-                                viewModel.setSearch("")
-                                viewModel.setStatusFilter("all")
-                            }
-                        } else null,
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        EmptyStateView(
+                            title = "No rooms match filter",
+                            subtitle = "Adjust the status filter or search query.",
+                            icon = Icons.Outlined.KingBed,
+                            actionLabel = if (state.search.isNotBlank() || state.statusFilter != "all") "Reset Filter" else null,
+                            onAction = if (state.search.isNotBlank() || state.statusFilter != "all") {
+                                {
+                                    viewModel.setSearch("")
+                                    viewModel.setStatusFilter("all")
+                                }
+                            } else null,
+                        )
+                    }
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 156.dp),
@@ -192,6 +211,7 @@ fun RoomsScreen(
             isLoading = state.isLoadingDetail,
             isMutating = state.isMutating,
             error = state.sheetError,
+            isOfflineFallback = state.isDetailOfflineFallback,
             canUpdateRooms = canUpdateRooms,
             canReadBookings = session.hasPermission("bookings:read"),
             onDismiss = viewModel::dismissDetail,

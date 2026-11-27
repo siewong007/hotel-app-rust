@@ -38,14 +38,17 @@ pub async fn overview(pool: &DbPool) -> Result<InsightsOverview, ApiError> {
     let guests_total = queries::guests_total(pool).await?;
     let arrivals = queries::arrival_roster(pool, today).await?;
     let departures = queries::departure_roster(pool, today).await?;
-    let revenue_today = queries::revenue_for_date(pool, today).await?;
-
-    let mut revenue_last_7_days = Vec::with_capacity(7);
-    for days_ago in (0..7).rev() {
-        let date = today - chrono::Duration::days(days_ago);
-        let revenue = queries::revenue_for_date(pool, date).await?;
-        revenue_last_7_days.push(RevenuePoint { date, revenue });
-    }
+    let start = today - chrono::Duration::days(6);
+    let revenue_last_7_days: Vec<RevenuePoint> =
+        queries::revenue_for_date_range(pool, start, today)
+            .await?
+            .into_iter()
+            .map(|(date, revenue)| RevenuePoint { date, revenue })
+            .collect();
+    let revenue_today = revenue_last_7_days
+        .last()
+        .map(|point| point.revenue)
+        .unwrap_or(0.0);
 
     let occupancy_rate = if rooms.total > 0 {
         rooms.occupied as f64 / rooms.total as f64 * 100.0

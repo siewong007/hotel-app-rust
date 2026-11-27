@@ -53,12 +53,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -66,6 +68,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -390,12 +393,18 @@ fun <T> FilterChipRow(
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
+    val uniqueOptions = options.distinctBy { it.value }
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = contentPadding,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(options, key = { it.label }) { option ->
+        items(
+            uniqueOptions,
+            key = { option ->
+                option.value?.let { v -> "${v::class.qualifiedName}:$v" } ?: "__NULL__"
+            },
+        ) { option ->
             val isSelected = option.value == selected
             val displayLabel = if (option.count != null) {
                 "${option.label} · ${option.count}"
@@ -574,8 +583,8 @@ fun HotelPrimaryButton(
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = contentColor,
-            disabledContainerColor = containerColor.copy(alpha = 0.42f),
-            disabledContentColor = contentColor.copy(alpha = 0.72f),
+            disabledContainerColor = if (isLoading) containerColor.copy(alpha = 0.85f) else HotelTheme.colors.surfaceSunken,
+            disabledContentColor = if (isLoading) contentColor else HotelTheme.colors.textMuted,
         ),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         modifier = modifier.heightIn(min = 48.dp),
@@ -662,6 +671,7 @@ fun <T> HotelSegmentedControl(
     selected: T,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
@@ -669,6 +679,7 @@ fun <T> HotelSegmentedControl(
         options.forEachIndexed { index, (value, label) ->
             val isSelected = value == selected
             SegmentedButton(
+                enabled = enabled,
                 selected = isSelected,
                 onClick = {
                     if (!isSelected) {
@@ -779,10 +790,10 @@ fun HotelSnackbarHost(
         Snackbar(
             snackbarData = data,
             shape = RoundedCornerShape(14.dp),
-            containerColor = colors.surfaceOverlay,
-            contentColor = colors.textPrimary,
-            actionColor = colors.primaryOnSurface,
-            dismissActionContentColor = colors.textSecondary,
+            containerColor = if (colors.isDark) colors.surfaceOverlay else colors.textPrimary,
+            contentColor = if (colors.isDark) colors.textPrimary else colors.surfaceRaised,
+            actionColor = if (colors.isDark) colors.primaryOnSurface else Color(0xFFD8BD85),
+            dismissActionContentColor = if (colors.isDark) colors.textSecondary else colors.surfaceSunken,
         )
     }
 }
@@ -792,13 +803,22 @@ fun HotelSnackbarHost(
 fun HotelModalSheetContainer(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    dismissible: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = HotelTheme.colors
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { target -> dismissible || target != SheetValue.Hidden },
+    )
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (dismissible) onDismiss() },
         sheetState = sheetState,
+        sheetGesturesEnabled = dismissible,
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = dismissible,
+            securePolicy = SecureFlagPolicy.SecureOn,
+        ),
         containerColor = colors.surfaceOverlay,
         scrimColor = colors.scrim,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
@@ -987,15 +1007,12 @@ fun InlineAlertBanner(
             modifier = Modifier.weight(1f),
         )
         if (onDismiss != null) {
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.size(24.dp),
-            ) {
+            IconButton(onClick = onDismiss) {
                 Icon(
                     imageVector = Icons.Outlined.Close,
                     contentDescription = "Dismiss",
                     tint = tone.fg,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
@@ -1008,20 +1025,31 @@ fun ConfirmActionDialog(
     message: String,
     confirmLabel: String,
     isDestructive: Boolean = false,
+    isSubmitting: Boolean = false,
+    errorMessage: String? = null,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         shape = RoundedCornerShape(20.dp),
         containerColor = colors.surfaceOverlay,
         title = { Text(title, color = colors.textPrimary, style = MaterialTheme.typography.titleLarge) },
-        text = { Text(message, color = colors.textSecondary, style = MaterialTheme.typography.bodyMedium) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(message, color = colors.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                if (!errorMessage.isNullOrBlank()) {
+                    InlineAlertBanner(message = errorMessage, tone = colors.danger)
+                }
+            }
+        },
         confirmButton = {
             Button(
+                enabled = !isSubmitting,
                 onClick = {
+                    if (isSubmitting) return@Button
                     if (isDestructive) haptics.reject() else haptics.confirm()
                     onConfirm()
                 },
@@ -1031,11 +1059,19 @@ fun ConfirmActionDialog(
                     contentColor = colors.primaryContrastText,
                 ),
             ) {
-                Text(confirmLabel)
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.primaryContrastText,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(if (isSubmitting) "Working..." else confirmLabel)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
                 Text("Cancel", color = colors.textSecondary)
             }
         },

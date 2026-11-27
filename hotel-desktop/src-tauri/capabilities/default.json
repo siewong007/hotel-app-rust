@@ -4,7 +4,6 @@
   "description": "Default capabilities for the Hotel Management System",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "updater:default"
+    "core:default"
   ]
 }

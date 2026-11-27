@@ -80,6 +80,8 @@ data class BookingWithDetailsDto(
     @Serializable(with = FlexibleDecimalSerializer::class)
     @SerialName("price_per_night") val roomRate: BigDecimal = BigDecimal.ZERO,
     @Serializable(with = FlexibleDecimalSerializer::class)
+    @SerialName("discount_amount") val discountAmount: BigDecimal? = null,
+    @Serializable(with = FlexibleDecimalSerializer::class)
     @SerialName("total_amount") val totalAmount: BigDecimal = BigDecimal.ZERO,
     val status: String,
     @SerialName("payment_status") val paymentStatus: String? = null,
@@ -88,6 +90,8 @@ data class BookingWithDetailsDto(
     @SerialName("booking_channel_id") val bookingChannelId: Long? = null,
     @SerialName("booking_channel_name") val bookingChannelName: String? = null,
     @SerialName("booking_channel_type") val bookingChannelType: String? = null,
+    @SerialName("booking_channel_settlement_methods") val bookingChannelSettlementMethods: List<String>? = null,
+    @SerialName("channel_payout_recorded") val channelPayoutRecorded: Boolean? = null,
     @SerialName("ota_reference") val otaReference: String? = null,
     val remarks: String? = null,
     @SerialName("special_requests") val specialRequests: String? = null,
@@ -95,6 +99,7 @@ data class BookingWithDetailsDto(
     @SerialName("deposit_paid") val depositPaid: Boolean? = null,
     @Serializable(with = FlexibleDecimalSerializer::class)
     @SerialName("deposit_amount") val depositAmount: BigDecimal? = null,
+    @SerialName("deposit_refunded") val depositRefunded: Boolean? = null,
     @Serializable(with = FlexibleDecimalSerializer::class)
     @SerialName("total_paid") val totalPaid: BigDecimal? = null,
     @Serializable(with = FlexibleDecimalSerializer::class)
@@ -109,6 +114,8 @@ data class BookingWithDetailsDto(
     @Serializable(with = FlexibleDecimalSerializer::class)
     @SerialName("tourism_tax_amount") val tourismTaxAmount: BigDecimal? = null,
     @SerialName("extra_bed_count") val extraBedCount: Int? = null,
+    @Serializable(with = FlexibleDecimalSerializer::class)
+    @SerialName("extra_bed_charge") val extraBedCharge: BigDecimal? = null,
     @SerialName("invoice_number") val invoiceNumber: String? = null,
     @SerialName("cleaning_preference") val cleaningPreference: Boolean? = null,
     @SerialName("smoking_preference") val smokingPreference: String? = null,
@@ -116,6 +123,109 @@ data class BookingWithDetailsDto(
     @SerialName("created_by_name") val createdByName: String? = null,
     @SerialName("group_number") val groupNumber: String? = null,
     @SerialName("ekyc_summary") val ekycSummary: GuestEkycStatusSummaryDto? = null,
+) {
+    fun billableTotal(paymentSummary: PaymentWorkflowSummaryDto? = null): BigDecimal {
+        if (paymentSummary != null && paymentSummary.totalAmount > BigDecimal.ZERO) {
+            return paymentSummary.totalAmount
+        }
+        return totalAmount
+            .add(tourismTaxAmount ?: BigDecimal.ZERO)
+            .add(extraBedCharge ?: BigDecimal.ZERO)
+    }
+
+    /**
+     * Evaluates backend settlement-lock rules (`settlement_lock.rs`):
+     * - Non-room-charge payments (`deposit`, `service`, `damage`) are never channel-locked.
+     * - Online/OTA bookings without a configured channel (`MissingChannel`) or empty
+     *   settlement method list (`Unconfigured`) block room payments even if payout is recorded.
+     * - `allowDeskRemainder` should be `true` ONLY for single-room `/api/payments/record-payment`
+     *   (`enforce_room_payment`), and `false` for check-in & group pay (`enforce_payment`).
+     */
+    fun settlementLockState(
+        allowDeskRemainder: Boolean,
+        paymentType: String = "booking",
+    ): SettlementLockState {
+        if (!paymentType.trim().equals("booking", ignoreCase = true)) {
+            return SettlementLockState.Open
+        }
+        val sourceOnline = source?.trim().equals("online", ignoreCase = true)
+        val sourceWebsite = source?.trim().equals("website", ignoreCase = true)
+        val channelOta = bookingChannelType?.trim().equals("ota", ignoreCase = true)
+        val channelWebsite = bookingChannelType?.trim().equals("website", ignoreCase = true)
+
+        if (!sourceOnline && !sourceWebsite && !channelOta && !channelWebsite) {
+            return SettlementLockState.Open
+        }
+
+        val configured = bookingChannelSettlementMethods
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+        val hasChannel = bookingChannelId != null || !bookingChannelName.isNullOrBlank()
+
+        val restrictedMethods: List<String> = when {
+            configured.isNotEmpty() -> configured
+            channelWebsite -> listOf("bank_transfer", "paypal")
+            hasChannel -> return SettlementLockState.Blocked(
+                "Configure settlement payment methods on ${bookingChannelName ?: "this booking channel"} before recording room payment.",
+            )
+            sourceWebsite -> listOf("bank_transfer", "paypal")
+            else -> return SettlementLockState.Blocked(
+                "Assign a booking channel before recording room payment for this online reservation.",
+            )
+        }
+
+        return if (allowDeskRemainder && channelPayoutRecorded == true) {
+            SettlementLockState.Open
+        } else {
+            SettlementLockState.Restricted(restrictedMethods)
+        }
+    }
+
+    fun effectiveSettlementMethods(allowDeskRemainder: Boolean = true): List<String>? =
+        when (val lock = settlementLockState(allowDeskRemainder = allowDeskRemainder)) {
+            SettlementLockState.Open -> null
+            is SettlementLockState.Restricted -> lock.methods
+            is SettlementLockState.Blocked -> emptyList()
+        }
+}
+
+sealed interface SettlementLockState {
+    data object Open : SettlementLockState
+    data class Restricted(val methods: List<String>) : SettlementLockState
+    data class Blocked(val reason: String) : SettlementLockState
+}
+
+@Serializable
+data class BookingGroupDto(
+    val id: Long,
+    @SerialName("group_number") val groupNumber: String,
+    val status: String,
+    @SerialName("payment_status") val paymentStatus: String,
+    @SerialName("payment_method") val paymentMethod: String? = null,
+    @SerialName("room_count") val roomCount: Int = 0,
+    @Serializable(with = FlexibleDecimalSerializer::class)
+    @SerialName("total_amount") val totalAmount: BigDecimal = BigDecimal.ZERO,
+    val currency: String = "MYR",
+)
+
+@Serializable
+data class BookingGroupMemberDto(
+    @SerialName("booking_id") val bookingId: Long,
+    @SerialName("booking_number") val bookingNumber: String,
+    @SerialName("room_id") val roomId: Long,
+    @SerialName("room_number") val roomNumber: String? = null,
+    @SerialName("room_type_name") val roomTypeName: String? = null,
+    val status: String,
+    @SerialName("payment_status") val paymentStatus: String,
+    @Serializable(with = FlexibleDecimalSerializer::class)
+    @SerialName("total_amount") val totalAmount: BigDecimal = BigDecimal.ZERO,
+)
+
+@Serializable
+data class BookingGroupDetailDto(
+    val group: BookingGroupDto,
+    val rooms: List<BookingGroupMemberDto> = emptyList(),
 )
 
 @Serializable
@@ -160,6 +270,7 @@ data class CheckInGuestUpdateDto(
     @SerialName("first_name") val firstName: String? = null,
     @SerialName("last_name") val lastName: String? = null,
     val phone: String? = null,
+    @SerialName("ic_number") val icNumber: String? = null,
 )
 
 @Serializable
@@ -190,4 +301,11 @@ data class BookingCancellationRequestDto(
 @Serializable
 data class ReleaseBookingRequestDto(
     val reason: String,
+)
+
+@Serializable
+data class GroupPayRequestDto(
+    @SerialName("payment_method") val paymentMethod: String,
+    @SerialName("transaction_reference") val transactionReference: String? = null,
+    val notes: String? = null,
 )

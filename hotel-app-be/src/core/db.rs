@@ -1,10 +1,37 @@
 use super::config::DatabaseConfig;
 use sqlx::Row;
+use std::sync::{LazyLock, RwLock};
+use std::time::{Duration, Instant};
 
 pub type DbPool = sqlx::PgPool;
 pub type DbRow = sqlx::postgres::PgRow;
 pub type DbDatabase = sqlx::Postgres;
 pub type DbTransaction<'c> = sqlx::Transaction<'c, DbDatabase>;
+
+const TIMEZONE_CACHE_TTL: Duration = Duration::from_secs(30);
+static TIMEZONE_CACHE: LazyLock<RwLock<Option<(Instant, String)>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// Clear the process-local cached hotel timezone so newly opened pool
+/// connections re-read `system_settings.timezone`. Called on timezone setting
+/// mutations and cross-replica `cache_bus` notifications.
+pub fn clear_timezone_cache() {
+    if let Ok(mut guard) = TIMEZONE_CACHE.write() {
+        *guard = None;
+    }
+}
+
+fn cached_timezone() -> Option<String> {
+    let guard = TIMEZONE_CACHE.read().ok()?;
+    let (loaded_at, tz) = guard.as_ref()?;
+    (loaded_at.elapsed() < TIMEZONE_CACHE_TTL).then(|| tz.clone())
+}
+
+fn store_cached_timezone(tz: String) {
+    if let Ok(mut guard) = TIMEZONE_CACHE.write() {
+        *guard = Some((Instant::now(), tz));
+    }
+}
 
 /// Create the application's PostgreSQL connection pool.
 pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, sqlx::Error> {
@@ -12,14 +39,21 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, sqlx::Error>
     use sqlx::Executor;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use std::str::FromStr;
-    use std::time::Duration;
 
     log::info!("Connecting to PostgreSQL database");
 
-    let connect_opts = PgConnectOptions::from_str(&config.url)?.log_slow_statements(
-        log::LevelFilter::Warn,
-        Duration::from_millis(config.slow_statement_ms),
-    );
+    let connect_opts = PgConnectOptions::from_str(&config.url)?
+        .application_name("hotel-app-be")
+        .statement_cache_capacity(512)
+        .options([
+            ("lock_timeout", "10s"),
+            ("idle_in_transaction_session_timeout", "300s"),
+            ("statement_timeout", "30s"),
+        ])
+        .log_slow_statements(
+            log::LevelFilter::Warn,
+            Duration::from_millis(config.slow_statement_ms),
+        );
 
     PgPoolOptions::new()
         .max_connections(config.max_connections)
@@ -30,15 +64,24 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, sqlx::Error>
         .test_before_acquire(false)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                let tz: Option<String> =
-                    sqlx::query_scalar("SELECT value FROM system_settings WHERE key = 'timezone'")
+                let tz = match cached_timezone() {
+                    Some(tz) => tz,
+                    None => {
+                        let loaded: Option<String> = sqlx::query_scalar(
+                            "SELECT value FROM system_settings WHERE key = 'timezone'",
+                        )
                         .fetch_optional(&mut *conn)
                         .await?;
-                let tz = tz
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or("UTC");
+                        let normalized = loaded
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or("UTC")
+                            .to_string();
+                        store_cached_timezone(normalized.clone());
+                        normalized
+                    }
+                };
                 if !tz
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '/' || c == '_' || c == '+' || c == '-')
@@ -46,7 +89,7 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, sqlx::Error>
                     log::warn!("Invalid timezone value in system_settings: {}", tz);
                     conn.execute("SET timezone = 'UTC'").await?;
                 } else if let Err(err) = sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(tz)
+                    .bind(&tz)
                     .execute(&mut *conn)
                     .await
                 {
@@ -57,13 +100,6 @@ pub async fn create_pool(config: &DatabaseConfig) -> Result<DbPool, sqlx::Error>
                     );
                     conn.execute("SET timezone = 'UTC'").await?;
                 }
-                // Bound every statement on this connection. Without it one
-                // slow query holds a pooled connection indefinitely (the pool
-                // is small), cascading into healthcheck failures. 120s leaves
-                // headroom for whole-database data-transfer exports and
-                // startup DDL while still un-sticking the pool after a
-                // runaway sequential scan.
-                conn.execute("SET statement_timeout = '120s'").await?;
                 Ok(())
             })
         })

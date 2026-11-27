@@ -52,11 +52,43 @@ async fn get_profile(
 
 async fn update_profile(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(input): Json<models::UserProfileUpdate>,
 ) -> Result<Json<models::UserProfile>, ApiError> {
-    let user_id = require_auth(&headers).await?;
-    handlers::update_user_profile_handler(State(pool), Extension(user_id), Json(input)).await
+    let ip = extract_client_ip(&headers, peer_addr);
+    let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many requests. Please try again in {} seconds.",
+                retry_after
+            ),
+            retry_after,
+        ));
+    }
+    let claims = extract_claims(&headers).await?;
+    let user_id = claims
+        .sub
+        .parse::<i64>()
+        .map_err(|_| ApiError::Unauthorized("Invalid user ID in token".to_string()))?;
+    if input.email.is_some() || input.current_password.is_some() || input.totp_code.is_some() {
+        let (user_allowed, user_retry_after) = limiters
+            .reauth_user
+            .check_with_retry(user_id.to_string())
+            .await;
+        if !user_allowed {
+            return Err(ApiError::TooManyRequestsRetryAfter(
+                format!(
+                    "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+                ),
+                user_retry_after,
+            ));
+        }
+    }
+    handlers::update_user_profile_handler(State(pool), Extension(user_id), claims.sid, Json(input))
+        .await
 }
 
 async fn complete_profile(
@@ -135,12 +167,44 @@ async fn list_passkeys(
 
 async fn delete_passkey(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     path: Path<uuid::Uuid>,
+    body: Option<Json<models::PasskeyDeleteRequest>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let ip = extract_client_ip(&headers, peer_addr);
+    let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many requests. Please try again in {} seconds.",
+                retry_after
+            ),
+            retry_after,
+        ));
+    }
     let user_id = require_auth(&headers).await?;
-    crate::modules::passkey::handlers::delete_passkey_handler(State(pool), Extension(user_id), path)
-        .await
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
+    let req = body.map(|Json(req)| req).unwrap_or_default();
+    crate::modules::passkey::handlers::delete_passkey_handler(
+        State(pool),
+        Extension(user_id),
+        path,
+        Json(req),
+    )
+    .await
 }
 
 async fn update_passkey(
@@ -214,6 +278,18 @@ async fn enable_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     crate::modules::two_factor::handlers::enable_2fa_handler(State(pool), user_id, Json(input))
         .await
 }

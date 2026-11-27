@@ -257,7 +257,9 @@ pub fn build_booking_list_query(
         let first_p = param_placeholder(param_idx);
         let col_in = date_cast("b.check_in_date");
         let col_out = date_cast("b.check_out_date");
-        conditions.push(format!("({col_in} <= {last_p} AND {col_out} > {first_p})"));
+        conditions.push(format!(
+            "({col_in} <= {last_p} AND ({col_out} > {first_p} OR ({col_in} = {col_out} AND {col_in} >= {first_p})))"
+        ));
         binds.month_search_first_day = Some(ms);
         binds.month_search_last_day = Some(last_day);
     } else if let Some(ds) = params.date_search {
@@ -266,7 +268,7 @@ pub fn build_booking_list_query(
         let col_in = date_cast("b.check_in_date");
         let col_out = date_cast("b.check_out_date");
         conditions.push(format!(
-            "({col_in} <= {p} AND ({col_out} > {p} OR {col_in} = {col_out}))"
+            "({col_in} <= {p} AND ({col_out} > {p} OR ({col_in} = {col_out} AND {col_in} = {p})))"
         ));
         binds.date_search = Some(ds);
     } else {
@@ -710,9 +712,9 @@ mod tests {
         let col_out = date_cast("b.check_out_date");
 
         assert!(query.count_sql.contains(&format!(
-            "({col_in} <= {} AND {col_out} > {})",
-            param_placeholder(1),
-            param_placeholder(2)
+            "({col_in} <= {last_p} AND ({col_out} > {first_p} OR ({col_in} = {col_out} AND {col_in} >= {first_p})))",
+            last_p = param_placeholder(1),
+            first_p = param_placeholder(2),
         )));
         assert_eq!(
             query.binds.month_search_first_day,

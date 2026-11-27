@@ -169,6 +169,7 @@ export type {
   UserProfile,
   UserProfileUpdate,
   PasswordUpdate,
+  PasskeyDeleteInput,
   PasskeyInfo,
   PasskeyUpdateInput,
   UserSessionInfo,

@@ -21,8 +21,16 @@ class SyncPendingMutationsWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as? HotelStaffApp ?: return Result.failure()
         val container = app.container
+        container.serverConfigStore.loadInitial()
+        if (container.sessionManager.authState.value is AuthState.Checking) {
+            container.authRepository.restoreSession()
+        }
         if (container.sessionManager.authState.value !is AuthState.Authenticated) {
-            return Result.success()
+            return if (container.authRepository.hasStoredSession()) {
+                Result.retry()
+            } else {
+                Result.success()
+            }
         }
 
         return when (
@@ -40,7 +48,7 @@ class SyncPendingMutationsWorker(
     companion object {
         private const val UNIQUE_WORK_NAME = "hotel_sync_pending_mutations"
 
-        fun schedule(context: Context) {
+        fun schedule(context: Context, replace: Boolean = false) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
@@ -48,8 +56,14 @@ class SyncPendingMutationsWorker(
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
                 .build()
+            val policy = if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
             WorkManager.getInstance(context.applicationContext)
-                .enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+                .enqueueUniqueWork(UNIQUE_WORK_NAME, policy, request)
+        }
+
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context.applicationContext)
+                .cancelUniqueWork(UNIQUE_WORK_NAME)
         }
     }
 }

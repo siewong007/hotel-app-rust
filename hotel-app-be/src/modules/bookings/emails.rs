@@ -272,7 +272,7 @@ async fn group_source(
         LEFT JOIN rooms r ON r.id = b.room_id
         LEFT JOIN room_types rt ON rt.id = r.room_type_id
         WHERE b.booking_group_id = $1
-          AND b.status NOT IN ('cancelled', 'voided')
+          AND b.status NOT IN ('voided', 'comp_void')
         ORDER BY b.id
         "#,
     )

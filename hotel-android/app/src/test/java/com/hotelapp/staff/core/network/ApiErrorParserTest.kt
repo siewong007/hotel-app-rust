@@ -48,10 +48,11 @@ class ApiErrorParserTest {
         assertTrue(expired is TwoFactorExpiredException)
 
         val enroll = ApiErrorParser.parse(
-            401,
+            403,
             """{"error":"Enrollment required.","code":"two_factor_enrollment_required"}""",
         )
         assertTrue(enroll is TwoFactorEnrollmentRequiredException)
+        assertEquals(403, enroll.statusCode)
     }
 
     @Test

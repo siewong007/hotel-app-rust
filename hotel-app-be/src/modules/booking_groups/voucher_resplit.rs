@@ -126,10 +126,10 @@ pub async fn release_room_share_tx(
     // and has to be re-split. Anything that is not a percentage is fixed.
     let capped_percentage = kind
         .as_ref()
-        .is_some_and(|(discount_type, _, cap)| discount_type == "percentage" && cap.is_some());
+        .is_some_and(|k| k.discount_type == "percentage" && k.max_discount_amount.is_some());
     let fixed = kind
         .as_ref()
-        .is_some_and(|(discount_type, _, _)| discount_type != "percentage");
+        .is_some_and(|k| k.discount_type != "percentage");
     if share <= Decimal::ZERO || status == "voided" || (!fixed && !capped_percentage) {
         return Ok(ShareRelease::Nothing);
     }
@@ -137,41 +137,81 @@ pub async fn release_room_share_tx(
         audit_tx(tx, actor_user_id, group_id, booking_id, share, &[], share).await?;
         return Ok(ShareRelease::Dropped { share });
     }
+    let kind = kind.expect("fixed or capped percentage requires voucher kind");
+    let remaining = load_remaining_rooms_tx(
+        tx,
+        group_id,
+        booking_id,
+        kind.promotion_id,
+        kind.has_room_type_filter,
+    )
+    .await?;
+    let eligible_rooms: Vec<&RemainingGroupRoom> = remaining
+        .iter()
+        .filter(|room| room.eligible_room_type)
+        .collect();
+    let eligible_subtotal: Decimal = eligible_rooms.iter().map(|room| room.subtotal).sum();
+    let eligibility_lost = eligible_rooms.is_empty() || eligible_subtotal < kind.min_subtotal;
+
+    if eligibility_lost {
+        let any_frozen = remaining.iter().any(|room| room.frozen);
+        if !any_frozen {
+            return_unpaid_group_voucher_tx(tx, group_id).await?;
+            audit_tx(tx, actor_user_id, group_id, booking_id, share, &[], share).await?;
+            return Ok(ShareRelease::Dropped { share });
+        }
+        sqlx::query("UPDATE bookings SET group_voucher_share = 0 WHERE id = $1")
+            .bind(booking_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+        shift_allocations_tx(tx, booking_id, -share).await?;
+        let mut moves = Vec::new();
+        if capped_percentage {
+            for room in &remaining {
+                if !room.frozen && room.old_share > Decimal::ZERO {
+                    let delta = -room.old_share;
+                    adjust_room_voucher_share_tx(tx, room.id, delta).await?;
+                    shift_allocations_tx(tx, room.id, delta).await?;
+                    moves.push((room.id, delta));
+                }
+            }
+        }
+        audit_tx(
+            tx,
+            actor_user_id,
+            group_id,
+            booking_id,
+            share,
+            &moves,
+            share,
+        )
+        .await?;
+        return Ok(ShareRelease::Dropped { share });
+    }
+
     if capped_percentage {
-        let (_, percent, cap) = kind.expect("capped percentage has a voucher");
         return apply_capped_percentage_resplit_tx(
             tx,
             group_id,
             booking_id,
             actor_user_id,
             share,
-            percent,
-            cap.expect("capped percentage has a cap"),
+            kind.discount_value,
+            kind.max_discount_amount
+                .expect("capped percentage has a cap"),
+            &remaining,
         )
         .await;
     }
 
-    // Recipients: live rooms that are still entirely unpaid, with no payment
-    // in flight and no arrival. Locked in id order.
-    let recipients: Vec<(i64, Decimal)> = sqlx::query_as(
-        r#"
-        SELECT b.id, GREATEST(COALESCE(b.total_amount, 0), 0) FROM bookings b
-        WHERE b.booking_group_id = $1 AND b.id <> $2
-          AND COALESCE(b.status, 'pending') NOT IN
-              ('voided', 'checked_in', 'auto_checked_in', 'checked_out', 'completed', 'no_show')
-          AND COALESCE(b.payment_status::text, 'unpaid') IN ('unpaid', 'unpaid_deposit')
-          AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id
-                          AND p.status IN ('pending', 'processing', 'completed', 'refunded'))
-        ORDER BY b.id
-        FOR UPDATE OF b
-        "#,
-    )
-    .bind(group_id)
-    .bind(booking_id)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(ApiError::from)?;
-    let owed: Vec<Decimal> = recipients.iter().map(|(_, owed)| *owed).collect();
+    // Recipients: eligible live rooms that are still entirely unpaid, with no
+    // payment in flight and no arrival. Locked in id order above.
+    let recipients: Vec<&RemainingGroupRoom> = remaining
+        .iter()
+        .filter(|room| room.eligible_unpaid_recipient)
+        .collect();
+    let owed: Vec<Decimal> = recipients.iter().map(|room| room.total_amount).collect();
     let extras = redistribute(share, &owed);
 
     // The removed room gives its share up (it is voided right after).
@@ -183,28 +223,13 @@ pub async fn release_room_share_tx(
     shift_allocations_tx(tx, booking_id, -share).await?;
 
     let mut moves = Vec::new();
-    for ((recipient_id, _), extra) in recipients.iter().zip(&extras) {
+    for (recipient, extra) in recipients.iter().zip(&extras) {
         if extra.is_zero() {
             continue;
         }
-        sqlx::query(
-            r#"
-            UPDATE bookings SET
-                group_voucher_share = group_voucher_share + $2,
-                discount_amount = COALESCE(discount_amount, 0) + $2,
-                total_amount = total_amount - $2,
-                net_revenue = CASE WHEN net_revenue IS NULL THEN NULL ELSE net_revenue - $2 END,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $1
-            "#,
-        )
-        .bind(recipient_id)
-        .bind(extra)
-        .execute(&mut **tx)
-        .await
-        .map_err(ApiError::from)?;
-        shift_allocations_tx(tx, *recipient_id, *extra).await?;
-        moves.push((*recipient_id, *extra));
+        adjust_room_voucher_share_tx(tx, recipient.id, *extra).await?;
+        shift_allocations_tx(tx, recipient.id, *extra).await?;
+        moves.push((recipient.id, *extra));
     }
     let moved: Decimal = moves.iter().map(|(_, amount)| *amount).sum();
     let dropped = share - moved;
@@ -225,14 +250,37 @@ pub async fn release_room_share_tx(
     })
 }
 
-/// `(discount_type, discount_value, max_discount_amount)`.
+struct GroupVoucherKind {
+    promotion_id: i64,
+    discount_type: String,
+    discount_value: Decimal,
+    max_discount_amount: Option<Decimal>,
+    min_subtotal: Decimal,
+    has_room_type_filter: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct GroupVoucherKindRow {
+    promotion_id: i64,
+    discount_type: String,
+    discount_value: Decimal,
+    max_discount_amount: Option<Decimal>,
+    min_subtotal: Decimal,
+    has_room_type_filter: bool,
+}
+
 async fn group_voucher_kind_tx(
     tx: &mut DbTransaction<'_>,
     group_id: i64,
-) -> Result<Option<(String, Decimal, Option<Decimal>)>, ApiError> {
-    sqlx::query_as(
+) -> Result<Option<GroupVoucherKind>, ApiError> {
+    let row: Option<GroupVoucherKindRow> = sqlx::query_as(
         r#"
-        SELECT p.discount_type::text, p.discount_value, p.max_discount_amount
+        SELECT p.id AS promotion_id,
+               p.discount_type::text AS discount_type,
+               p.discount_value,
+               p.max_discount_amount,
+               COALESCE(p.min_subtotal, 0) AS min_subtotal,
+               EXISTS(SELECT 1 FROM promotion_room_types prt WHERE prt.promotion_id = p.id) AS has_room_type_filter
         FROM booking_groups g
         JOIN vouchers v ON v.id = g.voucher_id
         JOIN promotions p ON p.id = v.promotion_id
@@ -242,38 +290,57 @@ async fn group_voucher_kind_tx(
     .bind(group_id)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from)?;
+    Ok(row.map(|r| GroupVoucherKind {
+        promotion_id: r.promotion_id,
+        discount_type: r.discount_type,
+        discount_value: r.discount_value,
+        max_discount_amount: r.max_discount_amount,
+        min_subtotal: r.min_subtotal,
+        has_room_type_filter: r.has_room_type_filter,
+    }))
 }
 
-/// Recompute the capped percentage shares of the rooms that can still change
-/// after `booking_id` leaves. Frozen rooms keep what they have.
-async fn apply_capped_percentage_resplit_tx(
+#[derive(sqlx::FromRow)]
+struct RemainingGroupRoom {
+    id: i64,
+    subtotal: Decimal,
+    total_amount: Decimal,
+    old_share: Decimal,
+    frozen: bool,
+    eligible_room_type: bool,
+    eligible_unpaid_recipient: bool,
+}
+
+async fn load_remaining_rooms_tx(
     tx: &mut DbTransaction<'_>,
     group_id: i64,
     booking_id: i64,
-    actor_user_id: Option<i64>,
-    share: Decimal,
-    percent: Decimal,
-    cap: Decimal,
-) -> Result<ShareRelease, ApiError> {
-    sqlx::query("UPDATE bookings SET group_voucher_share = 0 WHERE id = $1")
-        .bind(booking_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(ApiError::from)?;
-    shift_allocations_tx(tx, booking_id, -share).await?;
-
-    let rows: Vec<(i64, Decimal, Decimal, bool)> = sqlx::query_as(
+    promotion_id: i64,
+    has_room_type_filter: bool,
+) -> Result<Vec<RemainingGroupRoom>, ApiError> {
+    sqlx::query_as(
         r#"
         SELECT b.id,
-               GREATEST(COALESCE(b.total_amount, 0) + COALESCE(b.group_voucher_share, 0), 0),
-               COALESCE(b.group_voucher_share, 0),
+               COALESCE(b.subtotal, 0) AS subtotal,
+               GREATEST(COALESCE(b.total_amount, 0), 0) AS total_amount,
+               COALESCE(b.group_voucher_share, 0) AS old_share,
                (COALESCE(b.status, 'pending') IN
                     ('checked_in', 'auto_checked_in', 'checked_out', 'completed', 'no_show')
                 OR COALESCE(b.payment_status::text, 'unpaid') NOT IN ('unpaid', 'unpaid_deposit', 'void', '')
                 OR EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id
-                           AND p.status IN ('pending', 'processing', 'completed', 'refunded')))
+                           AND p.status IN ('pending', 'processing', 'completed', 'refunded'))) AS frozen,
+               (NOT $4 OR prt.room_type_id IS NOT NULL) AS eligible_room_type,
+               (COALESCE(b.status, 'pending') NOT IN
+                    ('voided', 'checked_in', 'auto_checked_in', 'checked_out', 'completed', 'no_show')
+                AND COALESCE(b.payment_status::text, 'unpaid') IN ('unpaid', 'unpaid_deposit')
+                AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id
+                                AND p.status IN ('pending', 'processing', 'completed', 'refunded'))
+                AND (NOT $4 OR prt.room_type_id IS NOT NULL)) AS eligible_unpaid_recipient
         FROM bookings b
+        JOIN rooms r ON r.id = b.room_id
+        LEFT JOIN promotion_room_types prt
+          ON prt.promotion_id = $3 AND prt.room_type_id = r.room_type_id
         WHERE b.booking_group_id = $1 AND b.id <> $2
           AND COALESCE(b.status, 'pending') <> 'voided'
         ORDER BY b.id
@@ -282,52 +349,90 @@ async fn apply_capped_percentage_resplit_tx(
     )
     .bind(group_id)
     .bind(booking_id)
+    .bind(promotion_id)
+    .bind(has_room_type_filter)
     .fetch_all(&mut **tx)
     .await
+    .map_err(ApiError::from)
+}
+
+async fn adjust_room_voucher_share_tx(
+    tx: &mut DbTransaction<'_>,
+    booking_id: i64,
+    delta: Decimal,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r#"
+        UPDATE bookings SET
+            group_voucher_share = group_voucher_share + $2,
+            discount_amount = GREATEST(COALESCE(discount_amount, 0) + $2, 0),
+            total_amount = total_amount - $2,
+            net_revenue = CASE WHEN net_revenue IS NULL THEN NULL ELSE net_revenue - $2 END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        "#,
+    )
+    .bind(booking_id)
+    .bind(delta)
+    .execute(&mut **tx)
+    .await
     .map_err(ApiError::from)?;
+    Ok(())
+}
+
+/// Recompute the capped percentage shares of the rooms that can still change
+/// after `booking_id` leaves. Frozen rooms keep what they have.
+#[allow(clippy::too_many_arguments)]
+async fn apply_capped_percentage_resplit_tx(
+    tx: &mut DbTransaction<'_>,
+    group_id: i64,
+    booking_id: i64,
+    actor_user_id: Option<i64>,
+    share: Decimal,
+    percent: Decimal,
+    cap: Decimal,
+    remaining: &[RemainingGroupRoom],
+) -> Result<ShareRelease, ApiError> {
+    sqlx::query("UPDATE bookings SET group_voucher_share = 0 WHERE id = $1")
+        .bind(booking_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
+    shift_allocations_tx(tx, booking_id, -share).await?;
 
     let mut frozen_shares = Decimal::ZERO;
     let mut eligible: Vec<(i64, Decimal)> = Vec::new();
-    for (id, base, old_share, frozen) in &rows {
-        if *frozen {
-            frozen_shares += *old_share;
-        } else {
-            eligible.push((*id, *base));
+    for room in remaining {
+        if room.frozen {
+            frozen_shares += room.old_share;
+        } else if room.eligible_room_type {
+            eligible.push((room.id, room.total_amount + room.old_share));
         }
     }
     let bases: Vec<Decimal> = eligible.iter().map(|(_, base)| *base).collect();
     let new_shares = resplit_capped_percentage(percent, cap, frozen_shares, &bases);
-    let old_by_id: std::collections::BTreeMap<i64, Decimal> =
-        rows.iter().map(|(id, _, old, _)| (*id, *old)).collect();
+    let mut target_by_id: std::collections::BTreeMap<i64, Decimal> = remaining
+        .iter()
+        .filter(|room| !room.frozen)
+        .map(|room| (room.id, Decimal::ZERO))
+        .collect();
+    for ((recipient_id, _), new_share) in eligible.iter().zip(&new_shares) {
+        target_by_id.insert(*recipient_id, *new_share);
+    }
 
     let mut moves = Vec::new();
-    for ((recipient_id, _), new_share) in eligible.iter().zip(&new_shares) {
-        let old_share = old_by_id
-            .get(recipient_id)
-            .copied()
-            .unwrap_or(Decimal::ZERO);
-        let delta = *new_share - old_share;
+    for room in remaining {
+        if room.frozen {
+            continue;
+        }
+        let target_share = target_by_id.get(&room.id).copied().unwrap_or(Decimal::ZERO);
+        let delta = target_share - room.old_share;
         if delta.is_zero() {
             continue;
         }
-        sqlx::query(
-            r#"
-            UPDATE bookings SET
-                group_voucher_share = group_voucher_share + $2,
-                discount_amount = COALESCE(discount_amount, 0) + $2,
-                total_amount = total_amount - $2,
-                net_revenue = CASE WHEN net_revenue IS NULL THEN NULL ELSE net_revenue - $2 END,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $1
-            "#,
-        )
-        .bind(recipient_id)
-        .bind(delta)
-        .execute(&mut **tx)
-        .await
-        .map_err(ApiError::from)?;
-        shift_allocations_tx(tx, *recipient_id, delta).await?;
-        moves.push((*recipient_id, delta));
+        adjust_room_voucher_share_tx(tx, room.id, delta).await?;
+        shift_allocations_tx(tx, room.id, delta).await?;
+        moves.push((room.id, delta));
     }
     audit_tx(
         tx,

@@ -1,19 +1,24 @@
 package com.hotelapp.staff.data.repository
 
+import com.hotelapp.staff.core.network.HotelJson
 import com.hotelapp.staff.core.network.safeApiCall
 import com.hotelapp.staff.data.api.BookingsApi
 import com.hotelapp.staff.data.dto.BookingBoardSummaryDto
 import com.hotelapp.staff.data.dto.BookingCancellationRequestDto
 import com.hotelapp.staff.data.dto.BookingDto
+import com.hotelapp.staff.data.dto.BookingGroupDetailDto
 import com.hotelapp.staff.data.dto.BookingStatusUpdateDto
 import com.hotelapp.staff.data.dto.BookingTimelineEntryDto
 import com.hotelapp.staff.data.dto.BookingWithDetailsDto
 import com.hotelapp.staff.data.dto.CheckInAdvisoryDto
 import com.hotelapp.staff.data.dto.CheckInRequestDto
 import com.hotelapp.staff.data.dto.CreateBookingRequestDto
+import com.hotelapp.staff.data.dto.GroupPayRequestDto
 import com.hotelapp.staff.data.dto.NewReservationsResponseDto
 import com.hotelapp.staff.data.dto.PaginatedResponseDto
 import com.hotelapp.staff.data.dto.ReleaseBookingRequestDto
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.decodeFromJsonElement
 
 interface BookingsRepository {
     suspend fun summary(): Result<BookingBoardSummaryDto>
@@ -32,6 +37,13 @@ interface BookingsRepository {
     suspend fun checkOut(id: Long): Result<Unit>
     suspend fun voidBooking(id: Long, reason: String?): Result<Unit>
     suspend fun releaseHold(id: Long, reason: String): Result<Unit>
+    suspend fun groupPay(id: Long, request: GroupPayRequestDto): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Group payment not supported."))
+    suspend fun bookingGroup(id: Long): Result<BookingGroupDetailDto?> = Result.success(null)
+    suspend fun reactivate(id: Long): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Reactivate booking not supported."))
+    suspend fun groupReactivate(id: Long): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Group reactivate not supported."))
 }
 
 class DefaultBookingsRepository(
@@ -79,5 +91,24 @@ class DefaultBookingsRepository(
 
     override suspend fun releaseHold(id: Long, reason: String): Result<Unit> = safeApiCall {
         api.releaseBooking(id, ReleaseBookingRequestDto(reason = reason.trim()))
+    }
+
+    override suspend fun groupPay(id: Long, request: GroupPayRequestDto): Result<Unit> = safeApiCall {
+        api.groupPay(id, request)
+    }
+
+    override suspend fun bookingGroup(id: Long): Result<BookingGroupDetailDto?> = safeApiCall {
+        val el = api.bookingGroup(id)
+        if (el is JsonNull) null else HotelJson.decodeFromJsonElement<BookingGroupDetailDto>(el)
+    }
+
+    override suspend fun reactivate(id: Long): Result<Unit> = safeApiCall {
+        api.reactivate(id)
+        Unit
+    }
+
+    override suspend fun groupReactivate(id: Long): Result<Unit> = safeApiCall {
+        api.groupReactivate(id)
+        Unit
     }
 }

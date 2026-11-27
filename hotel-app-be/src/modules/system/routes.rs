@@ -56,6 +56,7 @@ async fn get_my_notifications(
     headers: HeaderMap,
 ) -> Result<Json<models::StaffNotificationsResponse>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::get_my_notifications_handler(State(pool), user_id).await
 }
 
@@ -65,6 +66,7 @@ async fn mark_notification_read(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::mark_notification_read_handler(State(pool), Path(id), user_id).await
 }
 
@@ -73,5 +75,6 @@ async fn mark_all_notifications_read(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = require_auth(&headers).await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::mark_all_notifications_read_handler(State(pool), user_id).await
 }

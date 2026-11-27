@@ -1717,6 +1717,22 @@ FROM (VALUES
 LEFT JOIN users u ON u.username = 'admin'
 ON CONFLICT DO NOTHING;
 
+-- ============================================================================
+-- eKYC REASON CODES (Reference Lookup)
+-- ============================================================================
+INSERT INTO public.ekyc_reason_codes (
+    code, label, category, requires_details, customer_message_template, is_active
+) VALUES
+    ('blurry_document', 'Blurry or unreadable ID document', 'document', false, 'Your ID photo was too blurry to verify clearly. Please upload a sharp, well-lit photo of your document.', true),
+    ('expired_document', 'Expired identification document', 'document', false, 'The identification document provided appears to be expired. Please submit a valid, unexpired ID or passport.', true),
+    ('incomplete_document', 'Cropped or partially obscured document', 'document', false, 'Part of your ID document was cut off or covered. Please upload the full document with all four corners visible.', true),
+    ('tampered_document', 'Suspected document alteration or forgery', 'document', true, 'We could not verify the authenticity of your submitted document. Please contact hotel support.', true),
+    ('selfie_mismatch', 'Selfie does not match ID portrait', 'biometric', false, 'Your selfie did not clearly match your ID portrait. Please take a fresh, front-facing selfie in good lighting.', true),
+    ('name_mismatch', 'Submitted details do not match ID', 'identity', true, 'The personal details entered do not match your identification document. Please review and resubmit.', true),
+    ('high_risk_escalation', 'High-risk profile requires senior review', 'risk', true, 'Your verification requires additional manual review by our compliance team.', true),
+    ('other_requires_details', 'Other reason (specify details)', 'other', true, 'Additional information is required to complete your identity verification. Please see reviewer notes.', true)
+ON CONFLICT (code) DO NOTHING;
+
 -- The revision row is deliberately the last persistent action: it certifies
 -- that schema, required data, and fresh bootstrap data all succeeded.
 INSERT INTO public.hotel_schema_revisions (

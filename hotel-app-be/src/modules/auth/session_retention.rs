@@ -191,7 +191,8 @@ const DELETE_EXPIRED_SQL: &str = "
     DELETE FROM refresh_tokens
     WHERE id IN (
         SELECT id FROM refresh_tokens
-        WHERE expires_at < CURRENT_TIMESTAMP - make_interval(days => $2)
+        WHERE is_revoked = false
+          AND expires_at < CURRENT_TIMESTAMP - make_interval(days => $2)
         LIMIT $1
     )";
 
@@ -232,6 +233,9 @@ pub async fn purge(pool: &DbPool, policy: &RetentionPolicy) -> Result<PurgeRepor
             .await
             .map_err(|error| ApiError::Database(format!("idle session revoke failed: {error}")))?
             .rows_affected();
+        if report.idle_revoked > 0 {
+            crate::core::auth::AuthService::invalidate_all_session_caches(pool).await;
+        }
     }
     if policy.revoked_days > 0 {
         report.revoked_deleted =
@@ -279,6 +283,9 @@ pub async fn enforce_session_cap(
     .execute(pool)
     .await?
     .rows_affected();
+    if revoked > 0 {
+        crate::core::auth::AuthService::invalidate_session_cache_for_user(pool, user_id).await;
+    }
     Ok(revoked)
 }
 

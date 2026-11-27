@@ -13,9 +13,9 @@ BEGIN
     -- refused anything but beta2, so `make db-pg19-tune` and the pg19-tuned
     -- Compose profile could never apply. The settings below have NOT been
     -- re-benchmarked on beta3 — run pg19_beta2_benchmark.sql before and after.
-    IF version() !~ '^PostgreSQL 19beta[23] ' THEN
+    IF current_setting('server_version_num')::integer < 190000 THEN
         RAISE EXCEPTION
-            'pg19_beta2_rollback.sql requires PostgreSQL 19 Beta 2 or Beta 3; connected to %',
+            'pg19_beta2_rollback.sql requires PostgreSQL 19+; connected to %',
             version();
     END IF;
 END;
@@ -57,9 +57,9 @@ BEGIN
 END;
 $$;
 
-DROP STATISTICS IF EXISTS stats_bookings_commercial_state;
-DROP STATISTICS IF EXISTS stats_ekyc_review_queue;
-DROP STATISTICS IF EXISTS stats_customer_ledgers_work_queue;
+DROP STATISTICS IF EXISTS public.stats_bookings_commercial_state;
+DROP STATISTICS IF EXISTS public.stats_ekyc_review_queue;
+DROP STATISTICS IF EXISTS public.stats_customer_ledgers_work_queue;
 
 DO $$
 DECLARE
@@ -68,10 +68,18 @@ BEGIN
     IF to_regclass('public.bookings') IS NOT NULL THEN
         ALTER TABLE public.bookings ALTER COLUMN status SET STATISTICS DEFAULT;
         ALTER TABLE public.bookings ALTER COLUMN payment_status SET STATISTICS DEFAULT;
+        ANALYZE public.bookings;
+    END IF;
+    IF to_regclass('public.ekyc_verifications') IS NOT NULL THEN
+        ANALYZE public.ekyc_verifications;
+    END IF;
+    IF to_regclass('public.customer_ledgers') IS NOT NULL THEN
+        ANALYZE public.customer_ledgers;
     END IF;
     IF to_regclass('public.audit_logs') IS NOT NULL THEN
         ALTER TABLE public.audit_logs ALTER COLUMN action SET STATISTICS DEFAULT;
         ALTER TABLE public.audit_logs ALTER COLUMN resource_type SET STATISTICS DEFAULT;
+        ANALYZE public.audit_logs;
     END IF;
 
     FOR target IN

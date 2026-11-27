@@ -1,7 +1,10 @@
 package com.hotelapp.staff.feature.housekeeping
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,20 +12,26 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.PersonAddAlt1
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,6 +55,7 @@ import com.hotelapp.staff.core.design.HotelOutlinedButton
 import com.hotelapp.staff.core.design.HotelPrimaryButton
 import com.hotelapp.staff.core.design.HotelPullToRefreshBox
 import com.hotelapp.staff.core.design.HotelSegmentedControl
+import com.hotelapp.staff.core.design.HotelSnackbarHost
 import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.HousekeepingSkeleton
 import com.hotelapp.staff.core.design.InlineAlertBanner
@@ -91,12 +102,14 @@ fun HousekeepingScreen(
     var assignTargetTask by remember { mutableStateOf<HousekeepingTaskDto?>(null) }
     var voidTargetTask by remember { mutableStateOf<HousekeepingTaskDto?>(null) }
     var showCreateSheet by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     CollectEffects(viewModel.effects) { effect ->
         when (effect) {
             is HousekeepingEffect.ShowMessage -> {
                 if (effect.isError) haptics.reject() else haptics.confirm()
-                onShowMessage(effect.message)
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(effect.message)
                 viewModel.clearNotice()
             }
         }
@@ -122,6 +135,7 @@ fun HousekeepingScreen(
     Scaffold(
         containerColor = colors.surfaceApp,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { HotelSnackbarHost(snackbarHostState) },
         floatingActionButton = {
             if (canCreate && state.boardRooms.isNotEmpty()) {
                 FloatingActionButton(
@@ -141,13 +155,14 @@ fun HousekeepingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(modifier = Modifier.height(10.dp))
             HotelSegmentedControl(
                 options = listOf(
                     HousekeepingMode.BOARD to "Room Board",
-                    HousekeepingMode.TASKS to "Tasks (${state.tasks.size})",
+                    HousekeepingMode.TASKS to "Tasks (${if (state.totalTasks > 0) state.totalTasks else state.tasks.size})",
                 ),
                 selected = state.mode,
                 onSelect = viewModel::setMode,
@@ -177,7 +192,11 @@ fun HousekeepingScreen(
             }
             if (state.actionError != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                InlineAlertBanner(message = state.actionError!!, tone = colors.danger)
+                InlineAlertBanner(
+                    message = state.actionError!!,
+                    tone = colors.danger,
+                    onDismiss = viewModel::clearActionError,
+                )
             }
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -194,12 +213,19 @@ fun HousekeepingScreen(
                 ) {
                     if (state.mode == HousekeepingMode.BOARD) {
                         if (filteredBoardRooms.isEmpty()) {
-                            EmptyStateView(
-                                title = "No rooms match filter",
-                                icon = Icons.Outlined.CleaningServices,
-                                actionLabel = if (state.boardFilter != "all") "Show All Rooms" else null,
-                                onAction = if (state.boardFilter != "all") { { viewModel.setBoardFilter("all") } } else null,
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                EmptyStateView(
+                                    title = "No rooms match filter",
+                                    icon = Icons.Outlined.CleaningServices,
+                                    actionLabel = if (state.boardFilter != "all") "Show All Rooms" else null,
+                                    onAction = if (state.boardFilter != "all") { { viewModel.setBoardFilter("all") } } else null,
+                                )
+                            }
                         } else {
                             LazyColumn(
                                 contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
@@ -258,17 +284,43 @@ fun HousekeepingScreen(
                             }
                         }
                     } else {
-                        if (state.tasks.isEmpty()) {
-                            EmptyStateView(
-                                title = "No housekeeping tasks",
-                                subtitle = "Adjust filter or create a new task.",
-                                icon = Icons.Outlined.CleaningServices,
-                            )
+                        if (state.isLoadingTasks && state.tasks.isEmpty()) {
+                            HousekeepingSkeleton()
+                        } else if (state.tasksError != null && state.tasks.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                ErrorStateView(
+                                    message = state.tasksError!!,
+                                    onRetry = { viewModel.refresh() },
+                                )
+                            }
+                        } else if (state.tasks.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                EmptyStateView(
+                                    title = "No housekeeping tasks",
+                                    subtitle = "Adjust filter or create a new task.",
+                                    icon = Icons.Outlined.CleaningServices,
+                                )
+                            }
                         } else {
                             LazyColumn(
                                 contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
+                                if (state.tasksError != null) {
+                                    item(key = "hk_tasks_inline_error") {
+                                        InlineAlertBanner(message = state.tasksError!!, tone = colors.danger)
+                                    }
+                                }
                                 items(state.tasks, key = { it.id }) { task ->
                                     val priorityTone = StatusFormatter.priorityTone(task.priority, colors)
                                     HotelCard(
@@ -310,6 +362,24 @@ fun HousekeepingScreen(
                                         )
                                     }
                                 }
+                                if (!state.tasksEndReached && state.tasks.size < state.totalTasks) {
+                                    item(key = "hk_tasks_load_more") {
+                                        if (state.isLoadingMoreTasks) {
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                                            }
+                                        } else {
+                                            HotelOutlinedButton(
+                                                text = "Load More (${state.tasks.size}/${state.totalTasks})",
+                                                onClick = viewModel::loadMoreTasks,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -323,6 +393,9 @@ fun HousekeepingScreen(
             title = "Assign Room ${task.roomNumber}",
             staff = state.staff,
             currentAssigneeId = task.assignedTo,
+            staffPickerError = state.staffPickerError,
+            isLoadingStaff = state.isLoadingStaff,
+            onRetryStaff = viewModel::retryLoadStaff,
             onAssign = { staffId ->
                 assignTargetTask = null
                 viewModel.assignTask(task.id, staffId)
@@ -364,6 +437,7 @@ fun HousekeepingScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskActionBlock(
     task: HousekeepingTaskDto,
@@ -383,12 +457,15 @@ private fun TaskActionBlock(
                 label = StatusFormatter.humanize(task.status),
                 tone = StatusFormatter.taskTone(task.status, colors),
             )
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = task.assignedToName?.let { "Assigned: $it" } ?: "Unassigned",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (task.assignedToName != null) colors.textSecondary else colors.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
             )
         }
         if (!task.notes.isNullOrBlank()) {
@@ -399,9 +476,10 @@ private fun TaskActionBlock(
             )
         }
         if (canUpdate && task.status in setOf("pending", "in_progress")) {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (task.status == "pending") {
                     HotelPrimaryButton(
@@ -409,7 +487,6 @@ private fun TaskActionBlock(
                         icon = Icons.Outlined.PlayArrow,
                         enabled = !isBusy,
                         onClick = { onTransition("in_progress") },
-                        modifier = Modifier.weight(1f),
                     )
                 } else if (task.status == "in_progress") {
                     HotelPrimaryButton(
@@ -419,7 +496,6 @@ private fun TaskActionBlock(
                         containerColor = colors.success.fg,
                         contentColor = colors.primaryContrastText,
                         onClick = { onTransition("completed") },
-                        modifier = Modifier.weight(1f),
                     )
                 }
                 HotelOutlinedButton(

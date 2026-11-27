@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,6 +47,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -67,12 +70,14 @@ fun SearchScreen(
     onBack: () -> Unit,
     onOpenBookingDetail: (Long) -> Unit,
     onOpenGuestDetail: (Long) -> Unit,
-    onOpenRooms: () -> Unit,
+    onOpenRooms: (Long?) -> Unit,
     session: StaffSession? = null,
     onShowMessage: (String) -> Unit = {},
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val config by serverConfigStore.config.collectAsStateWithLifecycle()
 
@@ -90,14 +95,25 @@ fun SearchScreen(
             if (canSearchLedgers) add(FilterOption("ledgers", "Ledgers"))
         }
     }
-    val placeholderText = remember(canSearchBookings, canSearchGuests, canSearchRooms, canSearchLedgers) {
-        val parts = buildList {
+    val allowedScopeLabels = remember(canSearchBookings, canSearchGuests, canSearchRooms, canSearchLedgers) {
+        buildList {
             if (canSearchBookings) add("bookings")
             if (canSearchGuests) add("guests")
             if (canSearchRooms) add("rooms")
-            if (canSearchLedgers) add("ledgers")
+            if (canSearchLedgers) add("company ledgers")
         }
-        if (parts.isEmpty()) "Search property records..." else "Search ${parts.joinToString(", ")}..."
+    }
+    val placeholderText = remember(allowedScopeLabels) {
+        if (allowedScopeLabels.isEmpty()) "Search property records..." else "Search ${allowedScopeLabels.joinToString(", ")}..."
+    }
+    val emptyResultsHint = remember(canSearchBookings, canSearchGuests, canSearchRooms, canSearchLedgers) {
+        val hints = buildList {
+            if (canSearchBookings) add("booking #")
+            if (canSearchGuests) add("guest name or phone")
+            if (canSearchRooms) add("room number")
+            if (canSearchLedgers) add("company name")
+        }
+        if (hints.isEmpty()) "Try a different search term." else "Try another ${hints.joinToString(", ")}."
     }
 
     Scaffold(
@@ -114,7 +130,11 @@ fun SearchScreen(
                         SearchBarDefaults.InputField(
                             query = state.query,
                             onQueryChange = viewModel::setQuery,
-                            onSearch = { viewModel.submitSearch() },
+                            onSearch = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                viewModel.submitSearch()
+                            },
                             expanded = false,
                             onExpandedChange = {},
                             placeholder = {
@@ -167,6 +187,7 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp),
         ) {
             if (state.isLoading) {
@@ -224,14 +245,18 @@ fun SearchScreen(
                     }
                     EmptyStateView(
                         title = "Command Search",
-                        subtitle = "Type at least 2 characters to search bookings, guests, rooms, and company ledgers.",
+                        subtitle = if (allowedScopeLabels.isEmpty()) {
+                            "Type at least 2 characters to search property records."
+                        } else {
+                            "Type at least 2 characters to search ${allowedScopeLabels.joinToString(", ")}."
+                        },
                         icon = Icons.Outlined.Search,
                     )
                 }
                 state.hasSearched && state.groups.isEmpty() && !state.isLoading -> {
                     EmptyStateView(
                         title = "No matching records",
-                        subtitle = "Try another booking #, guest name, phone, or room number.",
+                        subtitle = emptyResultsHint,
                         icon = Icons.Outlined.Search,
                     )
                 }
@@ -267,14 +292,17 @@ fun SearchScreen(
                                             "rooms" -> canSearchRooms
                                             else -> false
                                         }
+                                        val isRowClickable = canOpenGroup || group.type == "ledgers"
                                         ListItem(
-                                            modifier = Modifier.clickable {
+                                            modifier = Modifier.clickable(enabled = isRowClickable) {
+                                                keyboardController?.hide()
+                                                focusManager.clearFocus()
                                                 haptics.click()
                                                 viewModel.saveCurrentSearchToHistory()
                                                 when (group.type) {
-                                                    "bookings" -> if (canSearchBookings) onOpenBookingDetail(hit.id)
-                                                    "guests" -> if (canSearchGuests) onOpenGuestDetail(hit.id)
-                                                    "rooms" -> if (canSearchRooms) onOpenRooms()
+                                                    "bookings" -> onOpenBookingDetail(hit.id)
+                                                    "guests" -> onOpenGuestDetail(hit.id)
+                                                    "rooms" -> onOpenRooms(hit.id)
                                                     else -> onShowMessage("Company ledger details are available in the web portal.")
                                                 }
                                             },

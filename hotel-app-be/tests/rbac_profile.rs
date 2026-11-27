@@ -16,14 +16,17 @@ use hotel_app_be::core::error::ApiError;
 use hotel_app_be::core::middleware;
 use hotel_app_be::core::rbac_cache;
 use hotel_app_be::models::{
-    AssignPermissionInput, AssignRoleInput, InviteUserInput, LoginRequest, PasswordUpdateInput,
-    RegenerateBackupCodesRequest, RoleInput, RolePermissionIdsInput, TwoFactorDisableRequest,
-    TwoFactorEnableRequest, TwoFactorSetupRequest, TwoFactorVerifyRequest, UserCreateInput,
-    UserRoleIdsInput,
+    AssignPermissionInput, AssignRoleInput, InviteUserInput, LoginRequest, PasskeyDeleteRequest,
+    PasswordUpdateInput, RegenerateBackupCodesRequest, RoleInput, RolePermissionIdsInput,
+    TwoFactorDisableRequest, TwoFactorEnableRequest, TwoFactorSetupRequest, TwoFactorVerifyRequest,
+    UserCreateInput, UserProfileUpdate, UserRoleIdsInput,
 };
 use hotel_app_be::modules::auth::service as auth_service;
+use hotel_app_be::modules::passkey::service as passkey_service;
 use hotel_app_be::modules::profile::service as profile_service;
 use hotel_app_be::modules::rbac::service as rbac_service;
+use hotel_app_be::modules::teams::models::{TeamCreateInput, TeamRoleIdsInput};
+use hotel_app_be::modules::teams::service as teams_service;
 use hotel_app_be::modules::two_factor::service as two_factor_service;
 use hotel_app_be::modules::users::service as users_service;
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -209,6 +212,28 @@ async fn cleanup_rbac_fixture(pool: &PgPool, user_ids: &[i64], role_ids: &[i64])
         .execute(pool)
         .await
         .unwrap();
+    sqlx::query("DELETE FROM passkeys WHERE user_id = ANY($1)")
+        .bind(user_ids)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM passkey_challenges WHERE user_id = ANY($1)")
+        .bind(user_ids)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM two_factor_challenges WHERE user_id = ANY($1)")
+        .bind(user_ids)
+        .execute(pool)
+        .await
+        .unwrap();
+    for uid in user_ids {
+        sqlx::query("DELETE FROM rate_limit_buckets WHERE bucket LIKE $1")
+            .bind(format!("totp_used:{uid}:%"))
+            .execute(pool)
+            .await
+            .unwrap();
+    }
     sqlx::query(
         "DELETE FROM audit_logs \
          WHERE user_id = ANY($1) \
@@ -916,11 +941,12 @@ async fn postgres_two_factor_status_verify_and_disable_lifecycle_with_live_totp(
         "an incorrect TOTP code must be rejected, got {wrong_verify:?}"
     );
 
+    let verify_code = totp.generate_current().to_string();
     let verify_result = two_factor_service::verify_2fa_code(
         &pool,
         user_id,
         TwoFactorVerifyRequest {
-            code: totp.generate_current().to_string(),
+            code: verify_code.clone(),
         },
     )
     .await;
@@ -929,11 +955,31 @@ async fn postgres_two_factor_status_verify_and_disable_lifecycle_with_live_totp(
         "a valid live TOTP code should verify, got {verify_result:?}"
     );
 
+    // Replaying the same TOTP step immediately must be rejected (F-04 single-use).
+    let replay_verify = two_factor_service::verify_2fa_code(
+        &pool,
+        user_id,
+        TwoFactorVerifyRequest { code: verify_code },
+    )
+    .await;
+    assert!(
+        matches!(replay_verify, Err(ApiError::Unauthorized(_))),
+        "replaying a used TOTP code must be rejected, got {replay_verify:?}"
+    );
+
+    // Clear used-step buckets to advance past the verify step without sleeping 30s.
+    sqlx::query("DELETE FROM rate_limit_buckets WHERE bucket LIKE $1")
+        .bind(format!("totp_used:{user_id}:%"))
+        .execute(&pool)
+        .await
+        .unwrap();
+
     let disable_wrong = two_factor_service::disable_2fa(
         &pool,
         user_id,
         TwoFactorDisableRequest {
             code: "000000".to_string(),
+            password: Some(password.to_string()),
         },
     )
     .await;
@@ -942,15 +988,31 @@ async fn postgres_two_factor_status_verify_and_disable_lifecycle_with_live_totp(
         "disabling with an invalid code must be rejected, got {disable_wrong:?}"
     );
 
+    let live_code = totp.generate_current().to_string();
+    let wrong_password_disable = two_factor_service::disable_2fa(
+        &pool,
+        user_id,
+        TwoFactorDisableRequest {
+            code: live_code.clone(),
+            password: Some("WrongPassword!123".to_string()),
+        },
+    )
+    .await;
+    assert!(
+        matches!(wrong_password_disable, Err(ApiError::Forbidden(_))),
+        "disabling with a wrong password must be forbidden without spending TOTP, got {wrong_password_disable:?}"
+    );
+
     two_factor_service::disable_2fa(
         &pool,
         user_id,
         TwoFactorDisableRequest {
-            code: totp.generate_current().to_string(),
+            code: live_code,
+            password: Some(password.to_string()),
         },
     )
     .await
-    .expect("disabling with a valid live TOTP code should succeed");
+    .expect("disabling with the right password and unspent live TOTP code should succeed");
 
     let status_after = two_factor_service::get_2fa_status(&pool, user_id)
         .await
@@ -1238,6 +1300,11 @@ async fn postgres_two_factor_setup_enable_regenerate_and_recovery_code_disable()
     );
 
     // --- regenerate_backup_codes: exercises update_recovery_codes ------------
+    sqlx::query("DELETE FROM rate_limit_buckets WHERE bucket LIKE $1")
+        .bind(format!("totp_used:{user_id}:%"))
+        .execute(&pool)
+        .await
+        .unwrap();
     let regen_code = totp.generate_current().to_string();
     let regen = two_factor_service::regenerate_backup_codes(
         &pool,
@@ -1281,12 +1348,28 @@ async fn postgres_two_factor_setup_enable_regenerate_and_recovery_code_disable()
         user_id,
         TwoFactorDisableRequest {
             code: original_backup_codes[0].clone(),
+            password: Some(password.to_string()),
         },
     )
     .await;
     assert!(
         matches!(disable_revoked, Err(ApiError::BadRequest(_))),
         "a rotated-away recovery code must not disable 2FA, got {disable_revoked:?}"
+    );
+
+    // A wrong password must fail before consuming the recovery code...
+    let disable_wrong_password = two_factor_service::disable_2fa(
+        &pool,
+        user_id,
+        TwoFactorDisableRequest {
+            code: new_backup_codes[0].clone(),
+            password: Some("WrongPassword!123".to_string()),
+        },
+    )
+    .await;
+    assert!(
+        matches!(disable_wrong_password, Err(ApiError::Forbidden(_))),
+        "disabling with a wrong password must be forbidden without spending the recovery code, got {disable_wrong_password:?}"
     );
 
     // ...while a current recovery code must consume itself (update_recovery_codes)
@@ -1296,6 +1379,7 @@ async fn postgres_two_factor_setup_enable_regenerate_and_recovery_code_disable()
         user_id,
         TwoFactorDisableRequest {
             code: new_backup_codes[0].clone(),
+            password: Some(password.to_string()),
         },
     )
     .await
@@ -2105,4 +2189,557 @@ async fn postgres_two_factor_enrollment_requires_existing_password() {
         Err(ApiError::Forbidden(_))
     ));
     cleanup_rbac_fixture(&pool, &[user_id], &[]).await;
+}
+
+/// Helper to purge any leftover team row (by unique `code`) before/after tests.
+async fn cleanup_team_fixture(pool: &PgPool, team_code: &str) {
+    if let Some(team_id) = sqlx::query_scalar::<_, i64>("SELECT id FROM teams WHERE code = $1")
+        .bind(team_code)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+    {
+        sqlx::query("DELETE FROM team_roles WHERE team_id = $1")
+            .bind(team_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM team_members WHERE team_id = $1")
+            .bind(team_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM audit_logs WHERE resource_type = 'team' AND resource_id = $1")
+            .bind(team_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM teams WHERE id = $1")
+            .bind(team_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+}
+
+/// F-01 regression: an actor whose qualifying role expires cannot mint permanent
+/// role-permission or team-role grants, and succeeds once the role is non-expiring.
+#[tokio::test]
+async fn postgres_expiring_role_holder_cannot_grant_permanent_team_or_role_permissions() {
+    let Some(pool) = setup_pg_pool().await else {
+        return;
+    };
+    let actor_id = 922_001;
+    let actor_role = 922_101;
+    let target_role = 922_102;
+    let team_code = "rbac922_f01_team";
+
+    cleanup_team_fixture(&pool, team_code).await;
+    cleanup_rbac_fixture(&pool, &[actor_id], &[actor_role, target_role]).await;
+
+    upsert_test_user(
+        &pool,
+        actor_id,
+        "rbac922_f01_actor",
+        "rbac922-f01-actor@hotel.local",
+        "S3cure!Passw0rd-F01",
+    )
+    .await;
+    upsert_custom_role(&pool, actor_role, "rbac922_f01_actor_role", 80).await;
+    upsert_custom_role(&pool, target_role, "rbac922_f01_target_role", 50).await;
+
+    let hk_read = permission_id(&pool, "housekeeping:read").await;
+    let hk_update = permission_id(&pool, "housekeeping:update").await;
+    sqlx::query(
+        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2), ($1, $3) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(actor_role)
+    .bind(hk_read)
+    .bind(hk_update)
+    .execute(&pool)
+    .await
+    .unwrap();
+    set_role_permission_fixture(&pool, target_role, hk_read).await;
+
+    assign_user_role_fixture(&pool, actor_id, actor_role).await;
+    sqlx::query(
+        "UPDATE user_roles SET expires_at = CURRENT_TIMESTAMP + INTERVAL '1 hour' \
+         WHERE user_id = $1 AND role_id = $2",
+    )
+    .bind(actor_id)
+    .bind(actor_role)
+    .execute(&pool)
+    .await
+    .unwrap();
+    rbac_cache::clear_all();
+
+    let team = teams_service::create_team(
+        &pool,
+        actor_id,
+        TeamCreateInput {
+            code: team_code.to_string(),
+            name: "RBAC 922 F01 Team".to_string(),
+            description: None,
+        },
+    )
+    .await
+    .expect("team fixture must be created");
+
+    let assign_perm = rbac_service::assign_permission_to_role(
+        &pool,
+        actor_id,
+        AssignPermissionInput {
+            role_id: target_role,
+            permission_id: hk_update,
+        },
+    )
+    .await;
+    assert!(
+        matches!(assign_perm, Err(ApiError::Forbidden(_))),
+        "expiring role holder must not grant permanent role permissions: {assign_perm:?}"
+    );
+
+    let replace_perms = rbac_service::replace_role_permissions(
+        &pool,
+        actor_id,
+        target_role,
+        RolePermissionIdsInput {
+            permission_ids: vec![hk_read, hk_update],
+        },
+    )
+    .await;
+    assert!(
+        matches!(replace_perms, Err(ApiError::Forbidden(_))),
+        "expiring role holder must not replace permanent role permissions: {replace_perms:?}"
+    );
+
+    let replace_team = teams_service::replace_team_roles(
+        &pool,
+        actor_id,
+        team.id,
+        TeamRoleIdsInput {
+            role_ids: vec![target_role],
+        },
+    )
+    .await;
+    assert!(
+        matches!(replace_team, Err(ApiError::Forbidden(_))),
+        "expiring role holder must not confer permanent team roles: {replace_team:?}"
+    );
+
+    // Removing the expiry makes the same grants valid.
+    sqlx::query("UPDATE user_roles SET expires_at = NULL WHERE user_id = $1 AND role_id = $2")
+        .bind(actor_id)
+        .bind(actor_role)
+        .execute(&pool)
+        .await
+        .unwrap();
+    rbac_cache::clear_all();
+
+    rbac_service::assign_permission_to_role(
+        &pool,
+        actor_id,
+        AssignPermissionInput {
+            role_id: target_role,
+            permission_id: hk_update,
+        },
+    )
+    .await
+    .expect("permanent role holder must be allowed to assign permission");
+    rbac_service::replace_role_permissions(
+        &pool,
+        actor_id,
+        target_role,
+        RolePermissionIdsInput {
+            permission_ids: vec![hk_read, hk_update],
+        },
+    )
+    .await
+    .expect("permanent role holder must be allowed to replace role permissions");
+    teams_service::replace_team_roles(
+        &pool,
+        actor_id,
+        team.id,
+        TeamRoleIdsInput {
+            role_ids: vec![target_role],
+        },
+    )
+    .await
+    .expect("permanent role holder must be allowed to set team roles");
+
+    cleanup_team_fixture(&pool, team_code).await;
+    cleanup_rbac_fixture(&pool, &[actor_id], &[actor_role, target_role]).await;
+}
+
+/// F-04 regression: deleting a passkey requires full step-up (password + live
+/// unspent TOTP when 2FA is active), failed password never burns the TOTP step,
+/// and success records `passkey_deleted`.
+#[tokio::test]
+async fn postgres_delete_passkey_requires_step_up_authentication() {
+    let Some(pool) = setup_pg_pool().await else {
+        return;
+    };
+    let user_id = 922_002;
+    let username = "rbac922_passkey".to_string();
+    let email = "rbac922-passkey@hotel.local".to_string();
+    let password = "S3cure!Passw0rd-Pk1";
+
+    cleanup_rbac_fixture(&pool, &[user_id], &[]).await;
+    upsert_test_user(&pool, user_id, &username, &email, password).await;
+
+    let (secret, _) = AuthService::generate_totp_secret(&username, "Hotel App Test")
+        .expect("generating a TOTP secret must succeed");
+    sqlx::query("UPDATE users SET two_factor_enabled = true, two_factor_secret = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(&secret)
+        .execute(&pool)
+        .await
+        .unwrap();
+    hotel_app_be::modules::passkey::repository::PasskeyRepository::insert_passkey(
+        &pool,
+        user_id,
+        b"cred-rbac-922002",
+        b"pk-rbac-922002",
+        0,
+        "F04 Test Key",
+    )
+    .await
+    .unwrap();
+    let passkeys = passkey_service::list_passkeys(&pool, user_id)
+        .await
+        .unwrap();
+    let passkey_id = passkeys[0].id;
+    let totp = build_totp(&secret);
+
+    // Missing credentials must fail.
+    let missing = passkey_service::delete_passkey(
+        &pool,
+        user_id,
+        passkey_id,
+        PasskeyDeleteRequest::default(),
+    )
+    .await;
+    assert!(
+        matches!(missing, Err(ApiError::Unauthorized(_))),
+        "passkey deletion without step-up must fail: {missing:?}"
+    );
+
+    // Password alone is insufficient while 2FA is active.
+    let password_only = passkey_service::delete_passkey(
+        &pool,
+        user_id,
+        passkey_id,
+        PasskeyDeleteRequest {
+            password: Some(password.to_string()),
+            totp_code: None,
+        },
+    )
+    .await;
+    assert!(
+        matches!(password_only, Err(ApiError::Unauthorized(_))),
+        "passkey deletion without TOTP must fail when 2FA is enabled: {password_only:?}"
+    );
+
+    // Wrong password + live TOTP must fail WITHOUT consuming the TOTP step.
+    let live_code = totp.generate_current().to_string();
+    let wrong_pw = passkey_service::delete_passkey(
+        &pool,
+        user_id,
+        passkey_id,
+        PasskeyDeleteRequest {
+            password: Some("WrongPassword!123".to_string()),
+            totp_code: Some(live_code.clone()),
+        },
+    )
+    .await;
+    assert!(
+        matches!(wrong_pw, Err(ApiError::Unauthorized(_))),
+        "passkey deletion with wrong password must fail: {wrong_pw:?}"
+    );
+
+    // Right password + the exact same unspent TOTP step succeeds once.
+    passkey_service::delete_passkey(
+        &pool,
+        user_id,
+        passkey_id,
+        PasskeyDeleteRequest {
+            password: Some(password.to_string()),
+            totp_code: Some(live_code),
+        },
+    )
+    .await
+    .expect("passkey deletion with valid password and unspent TOTP must succeed");
+
+    assert!(
+        passkey_service::list_passkeys(&pool, user_id)
+            .await
+            .unwrap()
+            .is_empty(),
+        "passkey must be deleted"
+    );
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE user_id = $1 AND action = 'passkey_deleted'",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1);
+
+    cleanup_rbac_fixture(&pool, &[user_id], &[]).await;
+}
+
+/// F-08 regression: `is_guest_only_user` ignores expired direct roles,
+/// recognizes active team-conferred staff roles, and reverts when the team is
+/// deactivated.
+#[tokio::test]
+async fn postgres_is_guest_only_user_respects_expiry_and_team_roles() {
+    let Some(pool) = setup_pg_pool().await else {
+        return;
+    };
+    let user_id = 922_003;
+    let expired_staff_role = 922_103;
+    let team_staff_role = 922_104;
+    let team_code = "rbac922_f08_team";
+
+    cleanup_team_fixture(&pool, team_code).await;
+    cleanup_rbac_fixture(&pool, &[user_id], &[expired_staff_role, team_staff_role]).await;
+
+    upsert_test_user(
+        &pool,
+        user_id,
+        "rbac922_f08_guest",
+        "rbac922-f08-guest@hotel.local",
+        "S3cure!Passw0rd-F08",
+    )
+    .await;
+    sqlx::query("UPDATE users SET user_type = 'guest' WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let guest_role_id = role_id_by_name(&pool, "guest").await;
+    assign_user_role_fixture(&pool, user_id, guest_role_id).await;
+
+    upsert_custom_role(&pool, expired_staff_role, "rbac922_f08_exp_role", 50).await;
+    upsert_custom_role(&pool, team_staff_role, "rbac922_f08_team_role", 50).await;
+    rbac_cache::clear_all();
+
+    assert!(
+        middleware::is_guest_only_user(&pool, user_id)
+            .await
+            .unwrap(),
+        "guest user with only guest role must be guest-only"
+    );
+
+    // Expired direct staff role must not promote the account out of guest-only.
+    assign_user_role_fixture(&pool, user_id, expired_staff_role).await;
+    sqlx::query(
+        "UPDATE user_roles SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 minute' \
+         WHERE user_id = $1 AND role_id = $2",
+    )
+    .bind(user_id)
+    .bind(expired_staff_role)
+    .execute(&pool)
+    .await
+    .unwrap();
+    rbac_cache::clear_all();
+    assert!(
+        middleware::is_guest_only_user(&pool, user_id)
+            .await
+            .unwrap(),
+        "expired direct staff role must leave user guest-only"
+    );
+
+    // An active team conferring a non-guest role clears guest-only.
+    let team = teams_service::create_team(
+        &pool,
+        user_id,
+        TeamCreateInput {
+            code: team_code.to_string(),
+            name: "RBAC 922 F08 Team".to_string(),
+            description: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO team_roles (team_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(team.id)
+        .bind(team_staff_role)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO team_members (team_id, user_id, is_lead) VALUES ($1, $2, false) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(team.id)
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    rbac_cache::clear_all();
+    assert!(
+        !middleware::is_guest_only_user(&pool, user_id)
+            .await
+            .unwrap(),
+        "active team staff role must clear guest-only status"
+    );
+
+    // Deactivating the team withdraws the effective staff role.
+    sqlx::query("UPDATE teams SET is_active = false WHERE id = $1")
+        .bind(team.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    rbac_cache::clear_all();
+    assert!(
+        middleware::is_guest_only_user(&pool, user_id)
+            .await
+            .unwrap(),
+        "deactivating the team must restore guest-only status"
+    );
+
+    cleanup_team_fixture(&pool, team_code).await;
+    cleanup_rbac_fixture(&pool, &[user_id], &[expired_staff_role, team_staff_role]).await;
+}
+
+/// F-09 regression: staff email change requires step-up before email
+/// uniqueness (preventing email probing), preserves `is_verified = true`,
+/// revokes sibling sessions while keeping the caller's `current_session_id`
+/// active, and logs `profile_email_updated`.
+#[tokio::test]
+async fn postgres_staff_email_change_requires_step_up_preserves_verified_and_revokes_other_sessions()
+ {
+    let Some(pool) = setup_pg_pool().await else {
+        return;
+    };
+    ensure_test_app_config();
+
+    let user_id = 922_004;
+    let other_user = 922_005;
+    let username = "rbac922_email_user".to_string();
+    let old_email = "rbac922-email-old@hotel.local";
+    let taken_email = "rbac922-email-taken@hotel.local";
+    let new_email = "rbac922-email-new@hotel.local";
+    let password = "S3cure!Passw0rd-Email1";
+
+    cleanup_rbac_fixture(&pool, &[user_id, other_user], &[]).await;
+    upsert_test_user(&pool, user_id, &username, old_email, password).await;
+    upsert_test_user(
+        &pool,
+        other_user,
+        "rbac922_email_other",
+        taken_email,
+        "S3cure!Passw0rd-Email2",
+    )
+    .await;
+
+    let (auth_other, _) = auth_service::login(
+        &pool,
+        LoginRequest {
+            username: username.clone(),
+            password: password.to_string(),
+            totp_code: None,
+        },
+        Some("127.0.0.1"),
+        Some("rbac922-agent-other"),
+        None,
+    )
+    .await
+    .expect("first session login must succeed");
+    let (auth_current, _) = auth_service::login(
+        &pool,
+        LoginRequest {
+            username,
+            password: password.to_string(),
+            totp_code: None,
+        },
+        Some("127.0.0.2"),
+        Some("rbac922-agent-current"),
+        None,
+    )
+    .await
+    .expect("second session login must succeed");
+
+    let sid_other = AuthService::verify_jwt(&auth_other.access_token)
+        .unwrap()
+        .sid
+        .unwrap();
+    let sid_current = AuthService::verify_jwt(&auth_current.access_token)
+        .unwrap()
+        .sid
+        .unwrap();
+
+    // Missing step-up fails with Unauthorized even against a taken email.
+    let unauthenticated_probe = profile_service::update_user_profile_with_context(
+        &pool,
+        user_id,
+        Some(&sid_current),
+        UserProfileUpdate {
+            full_name: None,
+            email: Some(taken_email.to_string()),
+            phone: None,
+            avatar_url: None,
+            current_password: None,
+            totp_code: None,
+        },
+    )
+    .await;
+    assert!(
+        matches!(unauthenticated_probe, Err(ApiError::Unauthorized(_))),
+        "email change without step-up must fail before uniqueness check: {unauthenticated_probe:?}"
+    );
+    assert!(
+        AuthService::is_session_active(&pool, user_id, &sid_other)
+            .await
+            .unwrap()
+    );
+
+    // Valid step-up updates email, keeps is_verified=true, revokes sibling sessions,
+    // keeps current session active, and records audit event.
+    let updated = profile_service::update_user_profile_with_context(
+        &pool,
+        user_id,
+        Some(&sid_current),
+        UserProfileUpdate {
+            full_name: None,
+            email: Some(new_email.to_string()),
+            phone: None,
+            avatar_url: None,
+            current_password: Some(password.to_string()),
+            totp_code: None,
+        },
+    )
+    .await
+    .expect("staff email change with valid step-up must succeed");
+
+    assert_eq!(updated.email, new_email);
+    assert!(updated.is_verified, "is_verified must remain true");
+    assert!(
+        AuthService::is_session_active(&pool, user_id, &sid_current)
+            .await
+            .unwrap(),
+        "caller's current session must stay active"
+    );
+    assert!(
+        !AuthService::is_session_active(&pool, user_id, &sid_other)
+            .await
+            .unwrap(),
+        "sibling sessions must be revoked on email change"
+    );
+
+    let revoked_flag: Option<String> = sqlx::query_scalar(
+        "SELECT details->>'other_sessions_revoked' FROM audit_logs \
+         WHERE user_id = $1 AND action = 'profile_email_updated' \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(revoked_flag.as_deref(), Some("true"));
+
+    cleanup_rbac_fixture(&pool, &[user_id, other_user], &[]).await;
 }

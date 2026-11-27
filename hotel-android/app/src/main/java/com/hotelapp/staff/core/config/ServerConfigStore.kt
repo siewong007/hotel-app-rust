@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -55,25 +56,48 @@ object ServerUrlNormalizer {
 
         val defaultPort = if (parsed.isHttps) 443 else 80
         val portSuffix = if (parsed.port != defaultPort) ":${parsed.port}" else ""
-        val pathPart = parsed.encodedPath.trimEnd('/')
-        return Result.success("${parsed.scheme}://${parsed.host}$portSuffix$pathPart")
+        var pathPart = parsed.encodedPath.trimEnd('/')
+        if (pathPart.equals("/api", ignoreCase = true) || pathPart.equals("/health", ignoreCase = true)) {
+            pathPart = ""
+        } else if (pathPart.endsWith("/api", ignoreCase = true)) {
+            pathPart = pathPart.dropLast(4).trimEnd('/')
+        } else if (pathPart.endsWith("/health", ignoreCase = true)) {
+            pathPart = pathPart.dropLast(7).trimEnd('/')
+        }
+        val formattedHost = if (':' in parsed.host) "[${parsed.host}]" else parsed.host
+        return Result.success("${parsed.scheme}://$formattedHost$portSuffix$pathPart")
     }
 }
 
-class ServerConfigStore(context: Context) {
+interface ServerConfigGateway {
+    fun currentBaseUrl(): String
+    suspend fun setServerUrl(rawUrl: String): Result<String>
+    suspend fun updateBranding(
+        hotelName: String?,
+        currency: String?,
+        timezone: String?,
+        resetMissing: Boolean = false,
+    )
+}
+
+class ServerConfigStore(context: Context) : ServerConfigGateway {
     private val dataStore = context.applicationContext.configDataStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _config = MutableStateFlow(ServerConfig())
     val config: StateFlow<ServerConfig> = _config.asStateFlow()
 
+    private val _isLoaded = MutableStateFlow(false)
+    val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
+
     @Volatile
     private var cachedBaseUrl: String = BuildConfig.DEFAULT_SERVER_URL
 
     init {
         scope.launch {
-            val prefs = dataStore.data.first()
-            applyPreferences(prefs)
+            dataStore.data.collect { prefs ->
+                applyPreferences(prefs)
+            }
         }
     }
 
@@ -82,9 +106,9 @@ class ServerConfigStore(context: Context) {
         return applyPreferences(prefs)
     }
 
-    fun currentBaseUrl(): String = cachedBaseUrl
+    override fun currentBaseUrl(): String = cachedBaseUrl
 
-    suspend fun setServerUrl(rawUrl: String): Result<String> {
+    override suspend fun setServerUrl(rawUrl: String): Result<String> {
         val normalized = ServerUrlNormalizer.normalize(rawUrl)
         val url = normalized.getOrElse { return Result.failure(it) }
         cachedBaseUrl = url
@@ -103,21 +127,21 @@ class ServerConfigStore(context: Context) {
         dataStore.edit { prefs ->
             prefs[KEY_THEME] = preference.name
         }
-        _config.value = _config.value.copy(themePreference = preference)
+        _config.update { it.copy(themePreference = preference) }
     }
 
     suspend fun setBiometricLockEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[KEY_BIOMETRIC_LOCK] = enabled
         }
-        _config.value = _config.value.copy(biometricLockEnabled = enabled)
+        _config.update { it.copy(biometricLockEnabled = enabled) }
     }
 
     suspend fun setOsNotificationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[KEY_OS_NOTIFICATIONS] = enabled
         }
-        _config.value = _config.value.copy(osNotificationsEnabled = enabled)
+        _config.update { it.copy(osNotificationsEnabled = enabled) }
     }
 
     suspend fun addRecentSearch(query: String) {
@@ -136,7 +160,7 @@ class ServerConfigStore(context: Context) {
         dataStore.edit { prefs ->
             prefs.remove(KEY_RECENT_SEARCHES)
         }
-        _config.value = _config.value.copy(recentSearches = emptyList())
+        _config.update { it.copy(recentSearches = emptyList()) }
     }
 
     suspend fun getLastAuthenticatedUserId(): Long? = dataStore.data.first()[KEY_LAST_USER_ID]
@@ -151,21 +175,43 @@ class ServerConfigStore(context: Context) {
         }
     }
 
-    suspend fun updateBranding(
+    suspend fun getLastAuthenticatedPrincipal(): String? = dataStore.data.first()[KEY_LAST_PRINCIPAL]
+
+    suspend fun setLastAuthenticatedPrincipal(principal: String?) {
+        dataStore.edit { prefs ->
+            if (principal.isNullOrBlank()) {
+                prefs.remove(KEY_LAST_PRINCIPAL)
+                prefs.remove(KEY_LAST_USER_ID)
+            } else {
+                prefs[KEY_LAST_PRINCIPAL] = principal
+            }
+        }
+    }
+
+    override suspend fun updateBranding(
         hotelName: String?,
         currency: String?,
         timezone: String?,
+        resetMissing: Boolean,
     ) {
+        val resolvedName = hotelName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: if (resetMissing) DEFAULT_HOTEL_NAME else null
+        val resolvedCurrency = currency?.trim()?.takeIf { it.isNotEmpty() }?.uppercase()
+            ?: if (resetMissing) DEFAULT_CURRENCY else null
+        val resolvedTimezone = timezone?.trim()?.takeIf { it.isNotEmpty() }
+            ?: if (resetMissing) DEFAULT_TIMEZONE else null
         dataStore.edit { prefs ->
-            if (!hotelName.isNullOrBlank()) prefs[KEY_HOTEL_NAME] = hotelName.trim()
-            if (!currency.isNullOrBlank()) prefs[KEY_CURRENCY] = currency.trim().uppercase()
-            if (!timezone.isNullOrBlank()) prefs[KEY_TIMEZONE] = timezone.trim()
+            if (resolvedName != null) prefs[KEY_HOTEL_NAME] = resolvedName else if (resetMissing) prefs.remove(KEY_HOTEL_NAME)
+            if (resolvedCurrency != null) prefs[KEY_CURRENCY] = resolvedCurrency else if (resetMissing) prefs.remove(KEY_CURRENCY)
+            if (resolvedTimezone != null) prefs[KEY_TIMEZONE] = resolvedTimezone else if (resetMissing) prefs.remove(KEY_TIMEZONE)
         }
-        _config.value = _config.value.copy(
-            hotelName = hotelName?.takeIf { it.isNotBlank() } ?: _config.value.hotelName,
-            currency = currency?.takeIf { it.isNotBlank() }?.uppercase() ?: _config.value.currency,
-            hotelTimezone = timezone?.takeIf { it.isNotBlank() } ?: _config.value.hotelTimezone,
-        )
+        _config.update { cur ->
+            cur.copy(
+                hotelName = resolvedName ?: cur.hotelName,
+                currency = resolvedCurrency ?: cur.currency,
+                hotelTimezone = resolvedTimezone ?: cur.hotelTimezone,
+            )
+        }
     }
 
     private fun applyPreferences(prefs: Preferences): ServerConfig {
@@ -179,14 +225,15 @@ class ServerConfigStore(context: Context) {
             serverUrl = url,
             recentUrls = decodeLines(prefs[KEY_RECENT_URLS]),
             themePreference = theme,
-            hotelName = prefs[KEY_HOTEL_NAME] ?: "Hotel PMS",
-            currency = prefs[KEY_CURRENCY] ?: "MYR",
-            hotelTimezone = prefs[KEY_TIMEZONE] ?: "Asia/Kuala_Lumpur",
+            hotelName = prefs[KEY_HOTEL_NAME] ?: DEFAULT_HOTEL_NAME,
+            currency = prefs[KEY_CURRENCY] ?: DEFAULT_CURRENCY,
+            hotelTimezone = prefs[KEY_TIMEZONE] ?: DEFAULT_TIMEZONE,
             recentSearches = decodeLines(prefs[KEY_RECENT_SEARCHES]),
             biometricLockEnabled = prefs[KEY_BIOMETRIC_LOCK] ?: false,
             osNotificationsEnabled = prefs[KEY_OS_NOTIFICATIONS] ?: false,
         )
         _config.value = loaded
+        _isLoaded.value = true
         return loaded
     }
 
@@ -194,6 +241,9 @@ class ServerConfigStore(context: Context) {
         raw?.split('\n')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
 
     companion object {
+        private const val DEFAULT_HOTEL_NAME = "Hotel PMS"
+        private const val DEFAULT_CURRENCY = "MYR"
+        private const val DEFAULT_TIMEZONE = "Asia/Kuala_Lumpur"
         private val KEY_SERVER_URL = stringPreferencesKey("server_url")
         private val KEY_RECENT_URLS = stringPreferencesKey("recent_urls")
         private val KEY_THEME = stringPreferencesKey("theme_preference")
@@ -204,5 +254,6 @@ class ServerConfigStore(context: Context) {
         private val KEY_BIOMETRIC_LOCK = booleanPreferencesKey("biometric_lock_enabled")
         private val KEY_OS_NOTIFICATIONS = booleanPreferencesKey("os_notifications_enabled")
         private val KEY_LAST_USER_ID = longPreferencesKey("last_authenticated_user_id")
+        private val KEY_LAST_PRINCIPAL = stringPreferencesKey("last_authenticated_principal")
     }
 }

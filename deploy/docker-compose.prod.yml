@@ -19,6 +19,11 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  # NOTE (PG19 upgrade path): Production currently runs `postgres:19beta3` to match
+  # the initialized PG19 data directory (`postgres_data`). Major versions cannot be
+  # downgraded in place without a pg_dump/pg_restore maintenance window; upgrade to
+  # `postgres:19` GA (pinned by digest) as soon as upstream ships, or migrate via
+  # pg_dump/pg_restore to a GA release during a scheduled window.
   postgres:
     image: postgres:19beta3
     container_name: ${POSTGRES_CONTAINER_NAME:-saliminn-db}
@@ -85,6 +90,14 @@ services:
     mem_limit: ${POSTGRES_MEM_LIMIT:-256m}
     cpus: ${POSTGRES_CPUS:-0.30}
     pids_limit: 256
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 60s
@@ -187,6 +200,11 @@ services:
     mem_limit: ${BACKEND_MEM_LIMIT:-384m}
     cpus: ${BACKEND_CPUS:-0.45}
     pids_limit: 256
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 30s
@@ -214,6 +232,14 @@ services:
     mem_limit: ${FRONTEND_MEM_LIMIT:-64m}
     cpus: ${FRONTEND_CPUS:-0.10}
     pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /run:rw,noexec,nosuid,size=4m,uid=1000,gid=1000,mode=0755
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=1000,gid=1000,mode=0755
+      - /var/log/nginx:rw,noexec,nosuid,size=16m,uid=1000,gid=1000,mode=0755
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 15s

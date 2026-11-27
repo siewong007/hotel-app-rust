@@ -34,6 +34,51 @@ fn sanitize_ota_reference(value: Option<&str>) -> Option<String> {
     })
 }
 
+fn validate_non_negative_charge(value: Option<f64>, field: &str) -> Result<(), ApiError> {
+    if let Some(amount) = value
+        && (!amount.is_finite() || amount < 0.0)
+    {
+        return Err(ApiError::BadRequest(format!(
+            "{field} must be non-negative"
+        )));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_non_negative_booking_charges(
+    room_rate_override: Option<f64>,
+    extra_bed_charge: Option<f64>,
+    extra_bed_count: Option<i32>,
+    commission_value_override: Option<f64>,
+    tourism_tax_amount: Option<f64>,
+    late_checkout_penalty: Option<f64>,
+    deposit_amount: Option<f64>,
+    amount_paid: Option<f64>,
+    total_amount: Option<f64>,
+    rate_override_weekday: Option<f64>,
+    rate_override_weekend: Option<f64>,
+) -> Result<(), ApiError> {
+    validate_non_negative_charge(room_rate_override, "room_rate_override")?;
+    validate_non_negative_charge(extra_bed_charge, "extra_bed_charge")?;
+    if let Some(count) = extra_bed_count
+        && count < 0
+    {
+        return Err(ApiError::BadRequest(
+            "extra_bed_count must be non-negative".to_string(),
+        ));
+    }
+    validate_non_negative_charge(commission_value_override, "commission_value_override")?;
+    validate_non_negative_charge(tourism_tax_amount, "tourism_tax_amount")?;
+    validate_non_negative_charge(late_checkout_penalty, "late_checkout_penalty")?;
+    validate_non_negative_charge(deposit_amount, "deposit_amount")?;
+    validate_non_negative_charge(amount_paid, "amount_paid")?;
+    validate_non_negative_charge(total_amount, "total_amount")?;
+    validate_non_negative_charge(rate_override_weekday, "rate_override_weekday")?;
+    validate_non_negative_charge(rate_override_weekend, "rate_override_weekend")?;
+    Ok(())
+}
+
 /// Normalize and validate an explicit per-booking commission override —
 /// the columns are free text in the schema, so values are checked here.
 fn commission_override_config(
@@ -288,31 +333,44 @@ fn billable_nights(check_in: NaiveDate, check_out: NaiveDate) -> i32 {
     std::cmp::max((check_out - check_in).num_days() as i32, 1)
 }
 
-async fn canonical_tourism_tax_for_guest(
-    pool: &DbPool,
+pub(super) async fn canonical_tourism_tax_for_guest_tx<'e, E>(
+    executor: E,
     guest_id: i64,
     check_in: NaiveDate,
     check_out: NaiveDate,
-) -> Result<(bool, Decimal), ApiError> {
+    tourism_tax_rate: Decimal,
+) -> Result<(bool, Decimal), ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let tourism_type_query = "SELECT tourism_type::text FROM guests WHERE id = $1";
 
     let tourism_type: Option<String> = sqlx::query_scalar(tourism_type_query)
         .bind(guest_id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?
         .flatten();
 
     let is_tourist = tourism_type.as_deref() == Some("foreign");
     let tourism_tax_amount = if is_tourist {
-        let rate =
-            settings_cache::get_positive_decimal(pool, "tourism_tax_rate", Decimal::from(10)).await;
-        rate * Decimal::from(billable_nights(check_in, check_out))
+        tourism_tax_rate * Decimal::from(billable_nights(check_in, check_out))
     } else {
         Decimal::ZERO
     };
 
     Ok((is_tourist, tourism_tax_amount))
+}
+
+pub(super) async fn canonical_tourism_tax_for_guest(
+    pool: &DbPool,
+    guest_id: i64,
+    check_in: NaiveDate,
+    check_out: NaiveDate,
+) -> Result<(bool, Decimal), ApiError> {
+    let rate =
+        settings_cache::get_positive_decimal(pool, "tourism_tax_rate", Decimal::from(10)).await;
+    canonical_tourism_tax_for_guest_tx(pool, guest_id, check_in, check_out, rate).await
 }
 
 pub async fn get_booking_timeline_handler(
@@ -634,6 +692,7 @@ async fn auto_post_company_ledger(
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM customer_ledgers \
          WHERE booking_id = $1 AND post_type = 'room_charge' \
+         AND status <> 'void' AND void_at IS NULL \
          AND COALESCE(is_reversal, false) = false)",
     )
     .bind(booking_id)
@@ -1025,86 +1084,89 @@ mod checkout_payment_guard_tests {
     }
 }
 
-async fn booking_revenue_for_date(pool: &DbPool, date: NaiveDate) -> Result<f64, ApiError> {
-    // Single definition lives in modules::insights::queries.
-    crate::modules::insights::queries::revenue_for_date(pool, date).await
-}
-
 pub async fn get_booking_stats_handler(
     State(pool): State<DbPool>,
 ) -> Result<Json<BookingStats>, ApiError> {
     let today = hotel_today(&pool).await?;
 
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE status != 'voided'")
-        .fetch_one(&pool)
-        .await
-        .unwrap_or(0);
-
-    let checked_in: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE status = 'checked_in'")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0);
-
-    let confirmed: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE status = 'confirmed'")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0);
-
-    // Arrivals, upcoming and active counts include every room-holding
-    // reservation — unpaid (`pending_payment`) and awaiting-confirmation
-    // website bookings hold their room too.
-    let today_check_ins: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT COUNT(*) FROM bookings WHERE status IN ({ROOM_HOLDING_RESERVATION_STATUSES_SQL}) AND check_in_date::date = $1"
+    let stats_row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE status != 'voided') AS total,
+            COUNT(*) FILTER (WHERE status = 'checked_in') AS checked_in,
+            COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+            COUNT(*) FILTER (
+                WHERE status IN ({ROOM_HOLDING_RESERVATION_STATUSES_SQL})
+                  AND check_in_date::date = $1
+            ) AS today_check_ins,
+            COUNT(*) FILTER (
+                WHERE status IN ('checked_in', 'auto_checked_in', 'checked_out', 'completed')
+                  AND check_out_date::date = $1
+            ) AS today_check_outs,
+            COUNT(*) FILTER (WHERE status IN ({ROOM_HOLDING_RESERVATION_STATUSES_SQL})) AS pending,
+            COUNT(*) FILTER (
+                WHERE status IN ({ROOM_HOLDING_RESERVATION_STATUSES_SQL}, 'checked_in', 'auto_checked_in')
+            ) AS active,
+            COALESCE(SUM(total_amount) FILTER (WHERE status != 'voided'), 0) AS total_revenue
+        FROM bookings
+        "#
     )))
     .bind(today)
     .fetch_one(&pool)
     .await
-    .unwrap_or(0);
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    let today_check_outs: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bookings WHERE status IN ('checked_in', 'auto_checked_in', 'checked_out', 'completed') AND check_out_date::date = $1"
-    ).bind(today).fetch_one(&pool).await.unwrap_or(0);
-
-    let pending: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT COUNT(*) FROM bookings WHERE status IN ({ROOM_HOLDING_RESERVATION_STATUSES_SQL})"
-    )))
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0);
-
-    let active: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT COUNT(*) FROM bookings WHERE status IN ({ROOM_HOLDING_RESERVATION_STATUSES_SQL}, 'checked_in', 'auto_checked_in')"
-    )))
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0);
-
-    let total_revenue = sqlx::query(
-        "SELECT COALESCE(SUM(total_amount), 0) AS revenue FROM bookings WHERE status != 'voided'",
+    let start_date = today - Duration::days(6);
+    let daily_rows = sqlx::query(
+        r#"
+        WITH bounds AS (
+            SELECT
+                d::date AS date,
+                (d::date::timestamp AT TIME ZONE current_setting('TimeZone')) AS day_start,
+                ((d::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone')) AS day_end
+            FROM generate_series($1::date, $2::date, interval '1 day') AS d
+        ),
+        window_bookings AS (
+            SELECT created_at, total_amount
+            FROM bookings
+            WHERE status != 'voided'
+              AND created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+              AND created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+        )
+        SELECT
+            bounds.date,
+            COALESCE(SUM(wb.total_amount), 0) AS revenue
+        FROM bounds
+        LEFT JOIN window_bookings wb
+          ON wb.created_at >= bounds.day_start
+         AND wb.created_at < bounds.day_end
+        GROUP BY bounds.date
+        ORDER BY bounds.date ASC
+        "#,
     )
-    .fetch_one(&pool)
+    .bind(start_date)
+    .bind(today)
+    .fetch_all(&pool)
     .await
-    .map(|row| decimal_to_f64(row_mappers::get_decimal(&row, "revenue")))
-    .unwrap_or(0.0);
+    .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    let mut revenue_last_7_days = Vec::with_capacity(7);
-    for days_ago in (0..7).rev() {
-        let date = today - Duration::days(days_ago);
-        let revenue = booking_revenue_for_date(&pool, date).await.unwrap_or(0.0);
-        revenue_last_7_days.push(BookingRevenuePoint { date, revenue });
-    }
+    let revenue_last_7_days = daily_rows
+        .iter()
+        .map(|row| BookingRevenuePoint {
+            date: row.get("date"),
+            revenue: decimal_to_f64(row_mappers::get_decimal(row, "revenue")),
+        })
+        .collect();
 
     Ok(Json(BookingStats {
-        total,
-        checked_in,
-        confirmed,
-        today_check_ins,
-        today_check_outs,
-        pending,
-        active,
-        total_revenue,
+        total: stats_row.get("total"),
+        checked_in: stats_row.get("checked_in"),
+        confirmed: stats_row.get("confirmed"),
+        today_check_ins: stats_row.get("today_check_ins"),
+        today_check_outs: stats_row.get("today_check_outs"),
+        pending: stats_row.get("pending"),
+        active: stats_row.get("active"),
+        total_revenue: decimal_to_f64(row_mappers::get_decimal(&stats_row, "total_revenue")),
         revenue_last_7_days,
     }))
 }
@@ -1114,11 +1176,13 @@ pub async fn create_booking_handler(
     Extension(user_id): Extension<i64>,
     Json(input): Json<BookingInput>,
 ) -> Result<Json<Booking>, ApiError> {
+    let tourism_tax_rate =
+        settings_cache::get_positive_decimal(&pool, "tourism_tax_rate", Decimal::from(10)).await;
     let mut tx = pool
         .begin()
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
-    let booking = create_booking_tx(&pool, &mut tx, user_id, &input).await?;
+    let booking = create_booking_tx(&mut tx, user_id, &input, tourism_tax_rate).await?;
     tx.commit()
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
@@ -1138,11 +1202,25 @@ pub async fn create_booking_handler(
 /// caller-owned transaction, so a multi-room group can create every room
 /// atomically. Post-commit work lives in `after_booking_created`.
 pub(crate) async fn create_booking_tx(
-    pool: &DbPool,
     tx: &mut DbTransaction<'_>,
     user_id: i64,
     input: &BookingInput,
+    tourism_tax_rate: Decimal,
 ) -> Result<Booking, ApiError> {
+    validate_non_negative_booking_charges(
+        input.room_rate_override,
+        input.extra_bed_charge,
+        input.extra_bed_count,
+        input.commission_value_override,
+        input.tourism_tax_amount,
+        input.late_checkout_penalty,
+        input.deposit_amount,
+        input.amount_paid,
+        None,
+        None,
+        None,
+    )?;
+
     let check_in = parse_date_flexible(&input.check_in_date)
         .map_err(|_| ApiError::BadRequest("Invalid check-in date. Use YYYY-MM-DD".to_string()))?;
     let check_out = parse_date_flexible(&input.check_out_date)
@@ -1228,8 +1306,14 @@ pub(crate) async fn create_booking_tx(
         ));
     }
 
-    let (is_tourist, tourism_tax_amount) =
-        canonical_tourism_tax_for_guest(pool, input.guest_id, check_in, check_out).await?;
+    let (is_tourist, tourism_tax_amount) = canonical_tourism_tax_for_guest_tx(
+        &mut **tx,
+        input.guest_id,
+        check_in,
+        check_out,
+        tourism_tax_rate,
+    )
+    .await?;
 
     let nights = (check_out - check_in).num_days() as i32;
     let is_hourly = nights == 0; // Same-day check-in/check-out = hourly booking
@@ -1301,9 +1385,10 @@ pub(crate) async fn create_booking_tx(
     let mut net_revenue: Option<Decimal> = None;
     let mut channel_pricing_snapshot: Option<serde_json::Value> = None;
     if let Some(channel_id) = input.booking_channel_id {
-        let channel = crate::modules::booking_channels::repository::find_by_id(pool, channel_id)
-            .await
-            .map_err(|_| ApiError::BadRequest("Unknown booking channel".to_string()))?;
+        let channel =
+            crate::modules::booking_channels::repository::find_by_id(&mut **tx, channel_id)
+                .await
+                .map_err(|_| ApiError::BadRequest("Unknown booking channel".to_string()))?;
 
         // Explicit commission terms on the booking win over dated rules and
         // channel defaults (e.g. terms copied from an OTA statement).
@@ -1316,35 +1401,34 @@ pub(crate) async fn create_booking_tx(
                 input.commission_scope_override.as_deref(),
             )?
         } else {
-            crate::modules::booking_channels::service::commission_config_for(
-                pool, &channel, check_in,
+            crate::modules::booking_channels::service::commission_config_for_with(
+                &mut **tx, &channel, check_in,
             )
             .await?
         };
 
         let staff_priced = input.daily_rates.is_some() || input.room_rate_override.is_some();
         // Per-night source rates: rate-plan band → weekday/weekend → base.
-        let mut sources: Vec<(NaiveDate, Decimal)> = Vec::new();
-        let mut date = check_in;
-        while date < check_out {
-            sources.push((
-                date,
-                crate::modules::booking_channels::service::source_rate_for(
-                    pool,
-                    room_type_id,
-                    date,
-                    input.rate_plan_id,
-                )
-                .await?,
-            ));
-            date += Duration::days(1);
-        }
-        if is_hourly {
-            sources.push((check_in, room_rate));
-        }
+        let sources: Vec<(NaiveDate, Decimal)> = if is_hourly {
+            vec![(check_in, room_rate)]
+        } else {
+            let mut stay_dates = Vec::new();
+            let mut date = check_in;
+            while date < check_out {
+                stay_dates.push(date);
+                date += Duration::days(1);
+            }
+            crate::modules::booking_channels::service::source_rates_for_stay_conn(
+                &mut *tx,
+                room_type_id,
+                &stay_dates,
+                input.rate_plan_id,
+            )
+            .await?
+        };
 
-        let nights = crate::modules::booking_channels::service::resolve_channel_nights(
-            pool,
+        let nights = crate::modules::booking_channels::service::resolve_channel_nights_with(
+            &mut **tx,
             channel_id,
             room_type_id,
             input.rate_plan_id,
@@ -1649,6 +1733,20 @@ pub async fn update_booking_handler(
         ));
     }
 
+    validate_non_negative_booking_charges(
+        input.room_rate_override,
+        input.extra_bed_charge,
+        input.extra_bed_count,
+        input.commission_value_override,
+        input.tourism_tax_amount,
+        input.late_checkout_penalty,
+        input.deposit_amount,
+        None,
+        input.total_amount,
+        input.rate_override_weekday,
+        input.rate_override_weekend,
+    )?;
+
     let new_room_id = if let Some(ref room_id_str) = input.room_id {
         room_id_str
             .parse::<i64>()
@@ -1746,7 +1844,7 @@ pub async fn update_booking_handler(
             SELECT EXISTS(
                 SELECT 1 FROM bookings
                 WHERE room_id = $1 AND id != $4
-                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
+                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'late_checkout', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
                 AND ((check_in_date <= $2 AND check_out_date > $2)
                     OR (check_in_date < $3 AND check_out_date >= $3)
                     OR (check_in_date >= $2 AND check_out_date <= $3))
@@ -1973,21 +2071,24 @@ pub async fn update_booking_handler(
             }
         };
 
-        let mut sources: Vec<(NaiveDate, Decimal)> = Vec::new();
+        let mut dates: Vec<NaiveDate> = Vec::new();
         let mut date = check_in;
         while date < check_out {
-            sources.push((
-                date,
-                crate::modules::booking_channels::service::source_rate_for(
-                    &pool,
-                    new_room_type_id,
-                    date,
-                    effective_rate_plan,
-                )
-                .await?,
-            ));
+            dates.push(date);
             date += Duration::days(1);
         }
+        let mut sources: Vec<(NaiveDate, Decimal)> = if dates.is_empty() {
+            Vec::new()
+        } else {
+            let mut conn = pool.acquire().await.map_err(ApiError::from)?;
+            crate::modules::booking_channels::service::source_rates_for_stay_conn(
+                &mut conn,
+                new_room_type_id,
+                &dates,
+                effective_rate_plan,
+            )
+            .await?
+        };
         if check_in == check_out {
             sources.push((
                 check_in,
@@ -2076,17 +2177,27 @@ pub async fn update_booking_handler(
 
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
 
+    // Acquire group lock BEFORE booking row lock (canonical lock order matching
+    // group checkout / guest cancellation) so concurrent updates/cancels cannot deadlock.
+    let expected_group_id = booking_group_id(&mut *tx, booking_id).await?;
+    if let Some(group_id) = expected_group_id {
+        crate::modules::booking_groups::repository::BookingGroupRepository::lock_tx(
+            &mut tx, group_id,
+        )
+        .await?;
+    }
+
     // Acquire row lock inside the transaction before re-running conflict and
     // checkout-balance guards so concurrent edits/payments/voids serialize cleanly.
-    let locked_status: Option<String> =
-        sqlx::query_scalar("SELECT status FROM bookings WHERE id = $1 FOR UPDATE")
+    let locked_row: Option<(String, Option<i64>)> =
+        sqlx::query_as("SELECT status, booking_group_id FROM bookings WHERE id = $1 FOR UPDATE")
             .bind(booking_id)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
-    let locked_status =
-        locked_status.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
-    if locked_status != existing_booking.status {
+    let (locked_status, locked_group_id) =
+        locked_row.ok_or_else(|| ApiError::NotFound("Booking not found".to_string()))?;
+    if locked_status != existing_booking.status || locked_group_id != expected_group_id {
         return Err(ApiError::Conflict(
             "Booking status changed concurrently; please refresh and retry.".to_string(),
         ));
@@ -2098,7 +2209,7 @@ pub async fn update_booking_handler(
             SELECT EXISTS(
                 SELECT 1 FROM bookings
                 WHERE room_id = $1 AND id != $4
-                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
+                AND status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'late_checkout', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary') AND status != 'voided'
                 AND ((check_in_date <= $2 AND check_out_date > $2)
                     OR (check_in_date < $3 AND check_out_date >= $3)
                     OR (check_in_date >= $2 AND check_out_date <= $3))
@@ -2128,6 +2239,31 @@ pub async fn update_booking_handler(
         billable_total,
     )
     .await?;
+
+    // Must release voucher shares BEFORE setting status = 'voided' and BEFORE
+    // voiding payments (`release_room_share_tx` aborts on `status == "voided"`
+    // and inspects live payments to decide whether the share is frozen).
+    if existing_booking.status != "voided" && new_status == "voided" {
+        if locked_group_id.is_some() {
+            crate::modules::booking_groups::voucher_resplit::return_voucher_if_final_room_tx(
+                &mut tx, booking_id,
+            )
+            .await?;
+            crate::modules::booking_groups::voucher_resplit::release_room_share_tx(
+                &mut tx,
+                booking_id,
+                Some(user_id),
+            )
+            .await?;
+        } else {
+            crate::modules::booking_groups::voucher_resplit::return_unpaid_single_room_voucher_tx(
+                &mut tx,
+                booking_id,
+                input.remarks.as_deref().unwrap_or("Booking voided"),
+            )
+            .await?;
+        }
+    }
 
     let booking: Booking = {
         let rate_override_decimal = input.room_rate_override.and_then(Decimal::from_f64_retain);
@@ -2257,32 +2393,9 @@ pub async fn update_booking_handler(
 
         match updated_status {
             "voided" => {
-                // Void all linked payments, return unused voucher/credits, and
-                // refresh group totals inside the same transaction.
-                let group_id = booking_group_id(&mut *tx, booking_id).await?;
-                if let Some(group_id) = group_id {
-                    crate::modules::booking_groups::repository::BookingGroupRepository::lock_tx(
-                        &mut tx, group_id,
-                    )
-                    .await?;
-                    crate::modules::booking_groups::voucher_resplit::return_voucher_if_final_room_tx(
-                        &mut tx, booking_id,
-                    )
-                    .await?;
-                    crate::modules::booking_groups::voucher_resplit::release_room_share_tx(
-                        &mut tx,
-                        booking_id,
-                        Some(user_id),
-                    )
-                    .await?;
-                } else {
-                    crate::modules::booking_groups::voucher_resplit::return_unpaid_single_room_voucher_tx(
-                        &mut tx,
-                        booking_id,
-                        input.remarks.as_deref().unwrap_or("Booking voided"),
-                    )
-                    .await?;
-                }
+                // Void all linked payments/ledgers, restore credits, and refresh
+                // group totals inside the same transaction (voucher resplit
+                // already ran above before `status` flipped to `'voided'`).
                 void_booking_payments_tx(&mut tx, booking_id).await?;
                 void_booking_ledgers_tx(
                     &mut tx,
@@ -2294,7 +2407,7 @@ pub async fn update_booking_handler(
                 let _ = restore_complimentary_credits_tx(&mut tx, &booking).await?;
                 crate::modules::payments::service::recompute_payment_status_tx(&mut tx, booking_id)
                     .await?;
-                if let Some(group_id) = group_id {
+                if let Some(group_id) = locked_group_id {
                     crate::modules::booking_groups::repository::BookingGroupRepository::refresh_totals_tx(
                         &mut tx, group_id,
                     )
@@ -3394,7 +3507,7 @@ pub async fn apply_guest_update_tx(
     }
 
     // Only the timestamp bump means no real field change was requested.
-    if params.is_empty() {
+    if updates.len() <= 1 {
         return Ok(());
     }
 

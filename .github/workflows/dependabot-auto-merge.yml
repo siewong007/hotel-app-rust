@@ -39,19 +39,23 @@ jobs:
 
       - name: Enable auto-merge
         if: |
-          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
-          steps.meta.outputs.update-type == 'version-update:semver-minor'
+          (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+           steps.meta.outputs.update-type == 'version-update:semver-minor') &&
+          steps.meta.outputs.package-ecosystem != 'github-actions' &&
+          steps.meta.outputs.package-ecosystem != 'docker'
         run: gh pr merge --auto --merge "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Explain why a major was left alone
+      - name: Explain why PR was left for manual review
         if: |
-          steps.meta.outputs.update-type != 'version-update:semver-patch' &&
-          steps.meta.outputs.update-type != 'version-update:semver-minor'
+          (steps.meta.outputs.update-type != 'version-update:semver-patch' &&
+           steps.meta.outputs.update-type != 'version-update:semver-minor') ||
+          steps.meta.outputs.package-ecosystem == 'github-actions' ||
+          steps.meta.outputs.package-ecosystem == 'docker'
         env:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
         run: |
-          echo "update-type='${UPDATE_TYPE}' is not patch or minor." >> "$GITHUB_STEP_SUMMARY"
-          echo "Left open for manual review." >> "$GITHUB_STEP_SUMMARY"
+          echo "ecosystem='${ECOSYSTEM}', update-type='${UPDATE_TYPE}' left open for manual review." >> "$GITHUB_STEP_SUMMARY"

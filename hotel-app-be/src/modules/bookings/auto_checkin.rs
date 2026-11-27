@@ -51,8 +51,29 @@ pub async fn attach_guest_ekyc_summaries(
     pool: &DbPool,
     guests: &mut [Guest],
 ) -> Result<(), ApiError> {
+    if guests.is_empty() {
+        return Ok(());
+    }
+
+    let guest_ids: Vec<i64> = guests
+        .iter()
+        .map(|guest| guest.id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let records_by_guest: std::collections::HashMap<i64, GuestEkycSummaryRecord> =
+        EkycRepository::latest_guest_summary_records(pool, &guest_ids)
+            .await?
+            .into_iter()
+            .map(|record| (record.guest_id, record))
+            .collect();
+
     for guest in guests {
-        attach_guest_ekyc_summary(pool, guest).await?;
+        guest.ekyc_summary = records_by_guest
+            .get(&guest.id)
+            .map(summary_from_record)
+            .unwrap_or_else(|| GuestEkycStatusSummary::not_submitted(guest.id));
     }
     Ok(())
 }
@@ -88,21 +109,84 @@ pub async fn attach_booking_ekyc_summaries(
             .map(|record| (record.guest_id, record))
             .collect();
 
-    for booking in bookings {
-        let mut summary = records_by_guest
-            .get(&booking.guest_id)
-            .map(summary_from_record)
-            .unwrap_or_else(|| GuestEkycStatusSummary::not_submitted(booking.guest_id));
-        apply_booking_constraints(
-            pool,
-            &mut summary,
-            &booking.status,
-            booking.check_in_date,
-            booking.check_out_date,
-            booking.room_id,
-        )
-        .await?;
-        booking.ekyc_summary = summary;
+    let summaries: Vec<GuestEkycStatusSummary> = bookings
+        .iter()
+        .map(|booking| {
+            records_by_guest
+                .get(&booking.guest_id)
+                .map(summary_from_record)
+                .unwrap_or_else(|| GuestEkycStatusSummary::not_submitted(booking.guest_id))
+        })
+        .collect();
+
+    if summaries.iter().any(|s| s.can_auto_checkin) {
+        let today = hotel_today(pool).await?;
+        let mut candidate_room_ids: std::collections::HashSet<i64> =
+            std::collections::HashSet::new();
+        let mut candidate_guest_ids: std::collections::HashSet<i64> =
+            std::collections::HashSet::new();
+
+        for (booking, summary) in bookings.iter().zip(summaries.iter()) {
+            if summary.can_auto_checkin
+                && booking_status_block_reason(&booking.status).is_none()
+                && booking.check_in_date <= today
+                && booking.check_out_date >= today
+            {
+                candidate_room_ids.insert(booking.room_id);
+                candidate_guest_ids.insert(booking.guest_id);
+            }
+        }
+
+        let room_statuses: std::collections::HashMap<i64, String> = if candidate_room_ids.is_empty()
+        {
+            std::collections::HashMap::new()
+        } else {
+            let room_ids: Vec<i64> = candidate_room_ids.into_iter().collect();
+            sqlx::query_as::<_, (i64, String)>(
+                "SELECT id, status FROM rooms WHERE id = ANY($1) AND status IS NOT NULL",
+            )
+            .bind(&room_ids)
+            .fetch_all(pool)
+            .await
+            .map_err(ApiError::from)?
+            .into_iter()
+            .collect()
+        };
+
+        let guest_ic_numbers: std::collections::HashMap<i64, String> =
+            if candidate_guest_ids.is_empty() {
+                std::collections::HashMap::new()
+            } else {
+                let gids: Vec<i64> = candidate_guest_ids.into_iter().collect();
+                sqlx::query_as::<_, (i64, String)>(
+                    "SELECT id, ic_number FROM guests WHERE id = ANY($1) AND ic_number IS NOT NULL",
+                )
+                .bind(&gids)
+                .fetch_all(pool)
+                .await
+                .map_err(ApiError::from)?
+                .into_iter()
+                .collect()
+            };
+
+        for (booking, summary) in bookings.iter_mut().zip(summaries) {
+            let mut summary = summary;
+            apply_booking_constraints_preloaded(
+                today,
+                &mut summary,
+                &booking.status,
+                booking.check_in_date,
+                booking.check_out_date,
+                booking.room_id,
+                &room_statuses,
+                &guest_ic_numbers,
+            );
+            booking.ekyc_summary = summary;
+        }
+    } else {
+        for (booking, summary) in bookings.iter_mut().zip(summaries) {
+            booking.ekyc_summary = summary;
+        }
     }
     Ok(())
 }
@@ -334,6 +418,62 @@ async fn apply_booking_constraints(
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_booking_constraints_preloaded(
+    today: NaiveDate,
+    summary: &mut GuestEkycStatusSummary,
+    booking_status: &str,
+    check_in_date: NaiveDate,
+    check_out_date: NaiveDate,
+    room_id: i64,
+    room_statuses: &std::collections::HashMap<i64, String>,
+    guest_ic_numbers: &std::collections::HashMap<i64, String>,
+) {
+    if !summary.can_auto_checkin {
+        return;
+    }
+
+    if let Some((code, reason)) = booking_status_block_reason(booking_status) {
+        block(summary, code, reason);
+        return;
+    }
+
+    if check_in_date > today {
+        block(
+            summary,
+            "opens_on_check_in_date",
+            format!("Auto check-in opens on {}.", check_in_date),
+        );
+        return;
+    }
+    if check_out_date < today {
+        block(
+            summary,
+            "stay_dates_passed",
+            "Booking stay dates have passed.".to_string(),
+        );
+        return;
+    }
+
+    if let Some(room_status) = room_statuses.get(&room_id)
+        && let Some((code, reason)) = room_status_block_reason(room_status)
+    {
+        block(summary, code, reason);
+        return;
+    }
+
+    let has_identity_document = guest_ic_numbers
+        .get(&summary.guest_id)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !has_identity_document {
+        block(
+            summary,
+            "identity_document_required",
+            "Add your IC or passport number to your details to check in online.".to_string(),
+        );
+    }
 }
 
 fn summary_from_record(record: &GuestEkycSummaryRecord) -> GuestEkycStatusSummary {

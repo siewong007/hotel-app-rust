@@ -1,12 +1,57 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { apiUrl, getApiBaseUrl, resolveApiRequestUrl } from './runtimeApi';
+import {
+  apiUrl,
+  getApiBaseUrl,
+  getDesktopClientToken,
+  getDesktopStatus,
+  resolveApiRequestUrl,
+  restartApp,
+  setDesktopClientToken,
+  setRuntimeApiBaseUrl,
+} from './runtimeApi';
 
 describe('runtime API base resolution', () => {
   afterEach(() => {
     window.history.replaceState({}, '', '/');
+    setRuntimeApiBaseUrl('');
     window.sessionStorage.clear();
+    setDesktopClientToken(null);
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     vi.unstubAllEnvs();
+  });
+
+  it('stores desktop_client_token in memory on getDesktopStatus without touching storage', async () => {
+    vi.stubEnv('VITE_APP_TARGET', 'tauri');
+    const invoke = vi.fn().mockResolvedValue({
+      backend_running: true,
+      backend_starting: false,
+      backend_url: 'http://127.0.0.1:3030',
+      data_directory: '/tmp/hotel',
+      version: '0.3.0',
+      desktop_client_token: 'secret-desktop-tok',
+    });
+    (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+
+    await getDesktopStatus();
+    expect(getDesktopClientToken()).toBe('secret-desktop-tok');
+    expect(window.sessionStorage.getItem('desktopClientToken')).toBeNull();
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('passes accessToken to restart_app IPC command', async () => {
+    vi.stubEnv('VITE_APP_TARGET', 'tauri');
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+
+    await restartApp();
+    expect(invoke).toHaveBeenCalledWith('restart_app', { accessToken: null });
   });
 
   it('uses the browser origin dynamically for a production web build without an override', () => {

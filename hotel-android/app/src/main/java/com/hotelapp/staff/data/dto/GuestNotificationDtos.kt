@@ -31,9 +31,11 @@ data class GuestDto(
     @SerialName("last_stay_date") val lastStayDate: String? = null,
 ) {
     fun displayName(): String {
-        val first = firstName?.trim().orEmpty()
-        val last = lastName?.trim().orEmpty()
-        return if (first.isNotEmpty() && last.isNotEmpty()) "$first $last" else nickName.ifBlank { "Guest #$id" }
+        val full = listOfNotNull(
+            firstName?.trim()?.takeIf { it.isNotEmpty() },
+            lastName?.trim()?.takeIf { it.isNotEmpty() },
+        ).joinToString(" ")
+        return full.ifBlank { nickName.trim().ifBlank { "Guest #$id" } }
     }
 }
 
@@ -80,11 +82,21 @@ data class GuestProfileBookingDto(
 )
 
 @Serializable
+data class GuestSensitiveProfileDto(
+    @SerialName("date_of_birth") val dateOfBirth: String? = null,
+    @SerialName("id_type") val idType: String? = null,
+    @SerialName("id_number") val idNumber: String? = null,
+    @SerialName("id_expiry") val idExpiry: String? = null,
+    @SerialName("id_country") val idCountry: String? = null,
+)
+
+@Serializable
 data class GuestProfileDto(
     val guest: GuestDto,
     val summary: GuestSummaryDto,
     @SerialName("ekyc_summary") val ekycSummary: GuestEkycStatusSummaryDto,
     val reservations: List<GuestProfileBookingDto> = emptyList(),
+    val sensitive: GuestSensitiveProfileDto? = null,
 )
 
 @Serializable

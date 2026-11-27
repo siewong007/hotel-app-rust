@@ -13,9 +13,9 @@ BEGIN
     -- refused anything but beta2, so `make db-pg19-tune` and the pg19-tuned
     -- Compose profile could never apply. The settings below have NOT been
     -- re-benchmarked on beta3 — run pg19_beta2_benchmark.sql before and after.
-    IF version() !~ '^PostgreSQL 19beta[23] ' THEN
+    IF current_setting('server_version_num')::integer < 190000 THEN
         RAISE EXCEPTION
-            'pg19_beta2_benchmark.sql requires PostgreSQL 19 Beta 2 or Beta 3; connected to %',
+            'pg19_beta2_benchmark.sql requires PostgreSQL 19+; connected to %',
             version();
     END IF;
 END;
@@ -45,7 +45,11 @@ EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
 SELECT 1
 FROM public.bookings b
 WHERE b.room_id = (SELECT MIN(id) FROM public.rooms)
-  AND b.status IN ('confirmed', 'pending', 'checked_in', 'auto_checked_in')
+  AND b.status IN (
+      'pending', 'pending_payment', 'pending_confirmation', 'confirmed',
+      'checked_in', 'auto_checked_in', 'late_checkout',
+      'partial_complimentary', 'fully_complimentary'
+  )
   AND b.check_out_date > CURRENT_DATE
   AND b.check_in_date < CURRENT_DATE + 7
 LIMIT 1;
@@ -58,7 +62,49 @@ WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'
 ORDER BY created_at DESC
 LIMIT 100;
 
-SELECT * FROM pg_stat_lock ORDER BY wait_time DESC, waits DESC;
+EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
+SELECT id, booking_id, status, amount
+FROM public.payments
+WHERE metadata->>'group_payment_ref' = 'GRP-STG-0001';
+
+EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
+SELECT id, nick_name, email
+FROM public.guests
+WHERE nick_name ILIKE '%aisha%' OR email ILIKE '%aisha%'
+ORDER BY created_at DESC
+LIMIT 25;
+
+EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
+SELECT invoice_number
+FROM public.invoices
+WHERE invoice_number LIKE 'INV-' || to_char(CURRENT_DATE, 'YYYYMM') || '-%'
+ORDER BY invoice_number DESC
+LIMIT 1;
+
+EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
+SELECT COUNT(*) AS arriving_or_checked_out
+FROM public.bookings
+WHERE check_out_date = CURRENT_DATE
+  AND status NOT IN ('voided', 'comp_void', 'no_show');
+
+EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
+SELECT * FROM public.room_current_occupancy;
+
+EXPLAIN (ANALYZE, BUFFERS, IO, SETTINGS, TIMING OFF, SUMMARY ON)
+SELECT status, COUNT(*), COALESCE(SUM(amount), 0)
+FROM public.customer_ledgers
+WHERE void_at IS NULL
+GROUP BY status;
+
+DO $$
+BEGIN
+    IF to_regclass('pg_catalog.pg_stat_lock') IS NOT NULL THEN
+        RAISE NOTICE 'pg_stat_lock available';
+    ELSE
+        RAISE NOTICE 'pg_stat_lock unavailable on this PostgreSQL 19 build';
+    END IF;
+END;
+$$;
 
 SELECT backend_type, object, context, reads, read_time, writes, write_time
 FROM pg_stat_io

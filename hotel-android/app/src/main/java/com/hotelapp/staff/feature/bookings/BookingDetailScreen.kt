@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,6 +74,7 @@ import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.HotelTooltipIconButton
 import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.KeyValueRow
+import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
 import com.hotelapp.staff.core.design.copyToClipboard
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
@@ -102,17 +105,22 @@ fun BookingDetailScreen(
     val config by serverConfigStore.config.collectAsStateWithLifecycle()
     val currency = config.currency
     val canUpdate = session.hasPermission("bookings:update")
+    val canDelete = session.hasPermission("bookings:delete")
     val canReadPayments = session.hasPermission("payments:read")
     val canCreatePayments = session.hasPermission("payments:create")
+    val canRefundPayments = session.hasPermission("payments:refund")
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val isEmbeddedPane = onBack == null
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     var showCheckInSheet by remember { mutableStateOf(false) }
     var showCheckOutConfirm by remember { mutableStateOf(false) }
+    var showReactivateConfirm by remember { mutableStateOf(false) }
     var showRecordPaymentSheet by remember { mutableStateOf(false) }
     var showReasonDialog by remember { mutableStateOf<String?>(null) }
+    var depositDialogMode by remember { mutableStateOf<String?>(null) }
 
     fun copyAndNotify(label: String, value: String) {
         if (copyToClipboard(context, label, value)) {
@@ -135,13 +143,17 @@ fun BookingDetailScreen(
         }
     }
 
+    OnResumeRefreshEffect { viewModel.refresh(silent = true) }
+
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = colors.surfaceApp,
+        contentWindowInsets = if (isEmbeddedPane) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         snackbarHost = { HotelSnackbarHost(snackbarHostState) },
         topBar = {
             Column {
                 TopAppBar(
+                    windowInsets = if (isEmbeddedPane) WindowInsets(0, 0, 0, 0) else TopAppBarDefaults.windowInsets,
                     title = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -191,11 +203,17 @@ fun BookingDetailScreen(
                                         appendLine("Room: ${b.roomNumber} (${b.roomType})")
                                         appendLine("Stay: ${DateFormatter.formatDateRangeWithNights(b.checkInDate, b.checkOutDate)}")
                                         appendLine("Status: ${StatusFormatter.humanize(b.status)}")
-                                        appendLine("Total: ${MoneyFormatter.format(b.totalAmount, currency)}")
-                                        val bal = b.balanceDue ?: BigDecimal.ZERO
+                                        val billable = b.billableTotal(state.paymentSummary)
+                                        appendLine("Total: ${MoneyFormatter.format(billable, currency)}")
+                                        val bal = state.paymentSummary?.balanceDue ?: b.balanceDue ?: BigDecimal.ZERO
                                         append("Balance Due: ${MoneyFormatter.format(bal, currency)}")
                                     }
-                                    sharePlainText(context, "Booking ${b.bookingNumber}", summaryText)
+                                    if (!sharePlainText(context, "Booking ${b.bookingNumber}", summaryText)) {
+                                        scope.launch {
+                                            snackbarHostState.currentSnackbarData?.dismiss()
+                                            snackbarHostState.showSnackbar("No compatible app found to share summary.")
+                                        }
+                                    }
                                 },
                             ) {
                                 Icon(
@@ -227,14 +245,35 @@ fun BookingDetailScreen(
         },
         bottomBar = {
             val booking = state.booking
-            if (booking != null && canUpdate) {
+            if (booking != null && (canUpdate || canDelete)) {
+                val paidTotal = state.paymentSummary?.totalPaid ?: booking.totalPaid ?: BigDecimal.ZERO
                 BookingActionBottomBar(
                     status = booking.status,
+                    totalPaid = paidTotal,
+                    canUpdate = canUpdate,
+                    canDelete = canDelete,
                     isBusy = state.isSubmittingAction,
-                    onCheckIn = { showCheckInSheet = true },
-                    onCheckOut = { showCheckOutConfirm = true },
-                    onRelease = { showReasonDialog = "release" },
-                    onVoid = { showReasonDialog = "void" },
+                    applyNavigationBarsPadding = !isEmbeddedPane,
+                    onCheckIn = {
+                        viewModel.clearFeedback()
+                        showCheckInSheet = true
+                    },
+                    onCheckOut = {
+                        viewModel.clearFeedback()
+                        showCheckOutConfirm = true
+                    },
+                    onRelease = {
+                        viewModel.clearFeedback()
+                        showReasonDialog = "release"
+                    },
+                    onVoid = {
+                        viewModel.clearFeedback()
+                        showReasonDialog = "void"
+                    },
+                    onReactivate = {
+                        viewModel.clearFeedback()
+                        showReactivateConfirm = true
+                    },
                 )
             }
         },
@@ -260,6 +299,15 @@ fun BookingDetailScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        if (!state.refreshError.isNullOrBlank()) {
+                            item {
+                                InlineAlertBanner(
+                                    message = state.refreshError!!,
+                                    tone = colors.warning,
+                                    onDismiss = { viewModel.clearRefreshError() },
+                                )
+                            }
+                        }
                         if (state.advisory?.needsAttention == true && !state.advisory?.message.isNullOrBlank()) {
                             item {
                                 InlineAlertBanner(
@@ -399,14 +447,31 @@ fun BookingDetailScreen(
                         }
 
                         item {
-                            val totalPaid = b.totalPaid ?: BigDecimal.ZERO
-                            val totalAmount = b.totalAmount
-                            val balance = b.balanceDue ?: BigDecimal.ZERO
-                            val paidRatio = if (totalAmount > BigDecimal.ZERO) {
-                                (totalPaid.toFloat() / totalAmount.toFloat()).coerceIn(0f, 1f)
+                            val totalPaid = state.paymentSummary?.totalPaid ?: b.totalPaid ?: BigDecimal.ZERO
+                            val billableTotal = b.billableTotal(state.paymentSummary)
+                            val balance = state.paymentSummary?.balanceDue ?: b.balanceDue ?: BigDecimal.ZERO
+                            val paidRatio = if (billableTotal > BigDecimal.ZERO) {
+                                (totalPaid.toFloat() / billableTotal.toFloat()).coerceIn(0f, 1f)
                             } else {
                                 if (balance <= BigDecimal.ZERO) 1f else 0f
                             }
+                            val summary = state.paymentSummary
+                            val depCollected = summary?.depositCollected
+                                ?: if (b.depositPaid == true) (b.depositAmount ?: BigDecimal.ZERO) else BigDecimal.ZERO
+                            val depRefunded = summary?.depositRefunded ?: BigDecimal.ZERO
+                            val depForfeited = summary?.depositForfeited ?: BigDecimal.ZERO
+                            val heldDeposit = if (summary != null) {
+                                (summary.depositCollected - summary.depositRefunded - summary.depositForfeited)
+                                    .coerceAtLeast(BigDecimal.ZERO)
+                            } else if (b.depositPaid == true && b.depositRefunded != true) {
+                                (b.depositAmount ?: BigDecimal.ZERO).coerceAtLeast(BigDecimal.ZERO)
+                            } else {
+                                BigDecimal.ZERO
+                            }
+                            val activeDeposit = (b.depositAmount ?: BigDecimal.ZERO)
+                                .takeIf { it > BigDecimal.ZERO }
+                                ?: depCollected.takeIf { it > BigDecimal.ZERO }
+                            val canResolveDeposit = canRefundPayments && heldDeposit > BigDecimal.ZERO
 
                             HotelCard {
                                 Row(
@@ -467,20 +532,69 @@ fun BookingDetailScreen(
 
                                 Spacer(modifier = Modifier.height(10.dp))
                                 KeyValueRow("Nightly Rate", MoneyFormatter.format(b.roomRate, currency))
-                                KeyValueRow("Total Amount", MoneyFormatter.format(totalAmount, currency))
+                                KeyValueRow("Room Charges", MoneyFormatter.format(b.totalAmount, currency))
                                 b.tourismTaxAmount?.takeIf { it > BigDecimal.ZERO }?.let {
                                     KeyValueRow("Tourism Tax", MoneyFormatter.format(it, currency))
                                 }
-                                b.extraBedCount?.takeIf { it > 0 }?.let {
-                                    KeyValueRow("Extra Beds", it.toString())
+                                b.extraBedCount?.takeIf { it > 0 }?.let { beds ->
+                                    val bedFee = b.extraBedCharge?.takeIf { it > BigDecimal.ZERO }
+                                    val valueText = if (bedFee != null) {
+                                        "$beds (${MoneyFormatter.format(bedFee, currency)})"
+                                    } else {
+                                        beds.toString()
+                                    }
+                                    KeyValueRow("Extra Beds", valueText)
+                                }
+                                if (billableTotal.compareTo(b.totalAmount) != 0) {
+                                    KeyValueRow("Billable Total", MoneyFormatter.format(billableTotal, currency))
                                 }
                                 KeyValueRow("Total Paid", MoneyFormatter.format(totalPaid, currency), valueColor = colors.success.fg)
                                 b.totalRefunded?.takeIf { it > BigDecimal.ZERO }?.let {
                                     KeyValueRow("Total Refunded", MoneyFormatter.format(it, currency))
                                 }
-                                b.depositAmount?.takeIf { it > BigDecimal.ZERO }?.let {
-                                    val depLabel = if (b.depositPaid == true) "Paid" else "Held / Unpaid"
-                                    KeyValueRow("Deposit ($depLabel)", MoneyFormatter.format(it, currency))
+                                activeDeposit?.let { depAmt ->
+                                    val depLabel = when {
+                                        heldDeposit > BigDecimal.ZERO && (depRefunded > BigDecimal.ZERO || depForfeited > BigDecimal.ZERO) -> "Held"
+                                        heldDeposit > BigDecimal.ZERO -> "Paid"
+                                        depForfeited > BigDecimal.ZERO && depRefunded <= BigDecimal.ZERO -> "Forfeited"
+                                        b.depositRefunded == true || depRefunded > BigDecimal.ZERO -> "Refunded"
+                                        else -> "Held / Unpaid"
+                                    }
+                                    val shownAmount = if (heldDeposit > BigDecimal.ZERO) heldDeposit else depAmt
+                                    KeyValueRow("Deposit ($depLabel)", MoneyFormatter.format(shownAmount, currency))
+                                    if (depRefunded > BigDecimal.ZERO && heldDeposit > BigDecimal.ZERO) {
+                                        KeyValueRow("Deposit Refunded", MoneyFormatter.format(depRefunded, currency))
+                                    }
+                                    if (depForfeited > BigDecimal.ZERO && heldDeposit > BigDecimal.ZERO) {
+                                        KeyValueRow("Deposit Forfeited", MoneyFormatter.format(depForfeited, currency))
+                                    }
+                                }
+                                if (canResolveDeposit) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        HotelOutlinedButton(
+                                            text = "Refund Deposit",
+                                            enabled = !state.isSubmittingAction,
+                                            onClick = {
+                                                viewModel.clearFeedback()
+                                                depositDialogMode = "refund"
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        HotelOutlinedButton(
+                                            text = "Forfeit Deposit",
+                                            isDestructive = true,
+                                            enabled = !state.isSubmittingAction,
+                                            onClick = {
+                                                viewModel.clearFeedback()
+                                                depositDialogMode = "forfeit"
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
                                 }
                                 b.paymentMethod?.takeIf { it.isNotBlank() }?.let {
                                     KeyValueRow("Payment Method", StatusFormatter.humanize(it))
@@ -494,15 +608,22 @@ fun BookingDetailScreen(
                             }
                         }
 
-                        if (canReadPayments) {
+                        if (canReadPayments || canCreatePayments) {
+                            val canPayThisBooking = canCreatePayments &&
+                                b.status.lowercase() !in setOf("voided", "cancelled", "comp_void", "no_show")
                             item {
                                 PaymentHistoryCard(
                                     payments = state.payments,
                                     summary = state.paymentSummary,
                                     currency = currency,
-                                    canCreatePayment = canCreatePayments,
+                                    canCreatePayment = canPayThisBooking,
+                                    canReadPayment = canReadPayments,
                                     isLoadingInvoice = state.isLoadingInvoice,
-                                    onRecordPayment = { showRecordPaymentSheet = true },
+                                    isGroupBooking = !b.groupNumber.isNullOrBlank(),
+                                    onRecordPayment = {
+                                        viewModel.clearFeedback()
+                                        showRecordPaymentSheet = true
+                                    },
                                     onOpenInvoice = { viewModel.openInvoicePreview() },
                                 )
                             }
@@ -572,12 +693,17 @@ fun BookingDetailScreen(
     if (showCheckInSheet && state.booking != null) {
         CheckInModalSheet(
             booking = state.booking!!,
+            effectiveBalanceDue = state.paymentSummary?.balanceDue ?: state.booking!!.balanceDue,
             currency = currency,
             isSubmitting = state.isSubmittingAction,
             canCollectPayment = canCreatePayments,
-            onDismiss = { showCheckInSheet = false },
-            onSubmit = { first, last, phone, amt, method ->
-                viewModel.checkIn(first, last, phone, amt, method) {
+            errorMessage = state.actionError,
+            onDismiss = {
+                viewModel.clearFeedback()
+                showCheckInSheet = false
+            },
+            onSubmit = { first, last, phone, icNumber, amt, method ->
+                viewModel.checkIn(first, last, phone, icNumber, amt, method) {
                     showCheckInSheet = false
                 }
             },
@@ -589,11 +715,41 @@ fun BookingDetailScreen(
             title = "Check Out Guest",
             message = "Complete check-out for ${state.booking?.guestName} (Room ${state.booking?.roomNumber})?",
             confirmLabel = "Check Out",
+            isSubmitting = state.isSubmittingAction,
+            errorMessage = state.actionError,
             onConfirm = {
-                showCheckOutConfirm = false
-                viewModel.checkOut()
+                viewModel.checkOut {
+                    showCheckOutConfirm = false
+                }
             },
-            onDismiss = { showCheckOutConfirm = false },
+            onDismiss = {
+                viewModel.clearFeedback()
+                showCheckOutConfirm = false
+            },
+        )
+    }
+
+    if (showReactivateConfirm) {
+        val isGroup = !state.booking?.groupNumber.isNullOrBlank()
+        ConfirmActionDialog(
+            title = if (isGroup) "Reactivate Group Booking" else "Reactivate Booking",
+            message = if (isGroup) {
+                "Reactivate all rooms in group ${state.booking?.groupNumber} and restore their reservations?"
+            } else {
+                "Reactivate voided booking ${state.booking?.bookingNumber} for Room ${state.booking?.roomNumber}?"
+            },
+            confirmLabel = "Reactivate",
+            isSubmitting = state.isSubmittingAction,
+            errorMessage = state.actionError,
+            onConfirm = {
+                viewModel.reactivateBooking {
+                    showReactivateConfirm = false
+                }
+            },
+            onDismiss = {
+                viewModel.clearFeedback()
+                showReactivateConfirm = false
+            },
         )
     }
 
@@ -601,29 +757,103 @@ fun BookingDetailScreen(
         BookingReasonDialog(
             title = if (mode == "release") "Release Unpaid Hold" else "Void Booking",
             requireReason = mode == "release",
+            minReasonLength = if (mode == "release") 4 else 0,
             confirmLabel = if (mode == "release") "Release Room" else "Void Booking",
+            isSubmitting = state.isSubmittingAction,
+            errorMessage = state.actionError,
             onConfirm = { reason ->
-                showReasonDialog = null
                 if (mode == "release") {
-                    viewModel.releaseHold(reason) {}
+                    viewModel.releaseHold(reason) { showReasonDialog = null }
                 } else {
-                    viewModel.voidBooking(reason) {}
+                    viewModel.voidBooking(reason) { showReasonDialog = null }
                 }
             },
-            onDismiss = { showReasonDialog = null },
+            onDismiss = {
+                viewModel.clearFeedback()
+                showReasonDialog = null
+            },
         )
     }
 
     if (showRecordPaymentSheet && state.booking != null) {
+        val currentBooking = state.booking!!
         RecordPaymentSheet(
-            defaultAmount = state.paymentSummary?.balanceDue ?: state.booking?.balanceDue,
+            booking = currentBooking,
+            defaultAmount = state.paymentSummary?.balanceDue ?: currentBooking.balanceDue,
+            groupDetail = state.groupDetail,
             currency = currency,
             isSubmitting = state.isSubmittingAction,
-            onDismiss = { showRecordPaymentSheet = false },
-            onSubmit = { amountText, method, reference, notes ->
-                viewModel.recordPayment(amountText, method, reference, notes) {
+            errorMessage = state.actionError,
+            onDismiss = {
+                viewModel.clearFeedback()
+                showRecordPaymentSheet = false
+            },
+            onSubmit = { amountText, method, paymentType, reference, notes, idempotencyKey ->
+                viewModel.recordPayment(
+                    amountText = amountText,
+                    method = method,
+                    reference = reference,
+                    notes = notes,
+                    paymentType = paymentType,
+                    idempotencyKey = idempotencyKey,
+                ) {
                     showRecordPaymentSheet = false
                 }
+            },
+        )
+    }
+
+    depositDialogMode?.let { mode ->
+        val summary = state.paymentSummary
+        val currentBooking = state.booking
+        val heldDeposit = summary?.let {
+            (it.depositCollected - it.depositRefunded - it.depositForfeited).coerceAtLeast(BigDecimal.ZERO)
+        } ?: currentBooking?.depositAmount?.takeIf { currentBooking.depositPaid == true && currentBooking.depositRefunded != true }
+            ?: BigDecimal.ZERO
+        val isOnlineOrWebsite = currentBooking?.source.equals("online", true) ||
+            currentBooking?.source.equals("website", true) ||
+            currentBooking?.bookingChannelType.equals("ota", true) ||
+            currentBooking?.bookingChannelType.equals("website", true)
+        val depositTenders = state.payments
+            .filter {
+                it.paymentType.equals("deposit", true) &&
+                    it.voidedAt == null &&
+                    !it.paymentStatus.equals("void", true) &&
+                    !it.paymentStatus.equals("voided", true) &&
+                    !it.paymentStatus.equals("rejected", true)
+            }
+            .map { it.paymentMethod.trim().lowercase() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        val allowedRefundMethods = if (isOnlineOrWebsite && depositTenders.isNotEmpty()) depositTenders else emptyList()
+        DepositActionDialog(
+            isForfeit = mode == "forfeit",
+            heldDeposit = heldDeposit,
+            currency = currency,
+            isSubmitting = state.isSubmittingAction,
+            errorMessage = state.actionError,
+            refundMethodOptions = allowedRefundMethods,
+            onConfirm = { amount, method, reasonOrNote, reference ->
+                if (mode == "forfeit") {
+                    viewModel.forfeitDeposit(
+                        amount = amount,
+                        maxHeld = heldDeposit,
+                        reason = reasonOrNote,
+                        notes = "",
+                    ) { depositDialogMode = null }
+                } else {
+                    viewModel.refundDeposit(
+                        amount = amount,
+                        maxHeld = heldDeposit,
+                        method = method,
+                        note = reasonOrNote,
+                        reference = reference,
+                    ) { depositDialogMode = null }
+                }
+            },
+            onDismiss = {
+                viewModel.clearFeedback()
+                depositDialogMode = null
             },
         )
     }
@@ -633,19 +863,22 @@ fun BookingDetailScreen(
             invoice = invoice,
             canCreateInvoice = canCreatePayments,
             isLoading = state.isLoadingInvoice,
+            errorMessage = state.invoiceError,
             onDismiss = { viewModel.dismissInvoicePreview() },
             onGenerateOfficial = { viewModel.generateOfficialInvoice() },
             onPrint = {
                 InvoicePdfPrinter.printInvoice(context, config.hotelName, invoice)
                     .onFailure { err ->
-                        scope.launch { snackbarHostState.showSnackbar(err.message ?: "Unable to print invoice.") }
+                        viewModel.reportInvoiceError(err.message ?: "Unable to print invoice.")
                     }
             },
             onSharePdf = {
-                InvoicePdfPrinter.shareInvoicePdf(context, config.hotelName, invoice)
-                    .onFailure { err ->
-                        scope.launch { snackbarHostState.showSnackbar(err.message ?: "Unable to share invoice PDF.") }
-                    }
+                scope.launch {
+                    InvoicePdfPrinter.shareInvoicePdf(context, config.hotelName, invoice)
+                        .onFailure { err ->
+                            viewModel.reportInvoiceError(err.message ?: "Unable to share invoice PDF.")
+                        }
+                }
             },
         )
     }
@@ -809,19 +1042,26 @@ private fun TimelineItemRow(
 @Composable
 private fun BookingActionBottomBar(
     status: String,
+    totalPaid: BigDecimal,
+    canUpdate: Boolean,
+    canDelete: Boolean,
     isBusy: Boolean,
+    applyNavigationBarsPadding: Boolean = true,
     onCheckIn: () -> Unit,
     onCheckOut: () -> Unit,
     onRelease: () -> Unit,
     onVoid: () -> Unit,
+    onReactivate: () -> Unit,
 ) {
     val colors = HotelTheme.colors
-    val canCheckIn = status == "confirmed"
-    val canCheckOut = status in setOf("checked_in", "auto_checked_in", "late_checkout")
-    val canRelease = status == "pending_payment"
-    val canVoid = status !in setOf("checked_out", "completed", "voided", "cancelled")
+    val normalized = status.lowercase()
+    val canCheckIn = canUpdate && normalized in setOf("confirmed", "partial_complimentary", "fully_complimentary")
+    val canCheckOut = canUpdate && normalized in setOf("checked_in", "auto_checked_in", "late_checkout")
+    val canRelease = canUpdate && normalized == "pending_payment" && totalPaid <= BigDecimal.ZERO
+    val canVoid = (canUpdate || canDelete) && normalized !in setOf("checked_out", "completed", "voided", "cancelled", "comp_void", "no_show")
+    val canReactivate = canUpdate && normalized == "voided"
 
-    if (!canCheckIn && !canCheckOut && !canVoid) return
+    if (!canCheckIn && !canCheckOut && !canRelease && !canVoid && !canReactivate) return
 
     Surface(color = colors.surfaceBase, tonalElevation = 0.dp) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -829,20 +1069,36 @@ private fun BookingActionBottomBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
+                    .then(if (applyNavigationBarsPadding) Modifier.navigationBarsPadding() else Modifier)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (canVoid) {
+                if (canRelease) {
                     HotelOutlinedButton(
-                        text = if (canRelease) "Release Hold" else "Void",
+                        text = "Release Hold",
                         isDestructive = true,
                         enabled = !isBusy,
-                        onClick = if (canRelease) onRelease else onVoid,
+                        onClick = onRelease,
                         modifier = Modifier.weight(1f),
                     )
                 }
-                if (canCheckIn) {
+                if (canVoid) {
+                    HotelOutlinedButton(
+                        text = "Void",
+                        isDestructive = true,
+                        enabled = !isBusy,
+                        onClick = onVoid,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (canReactivate) {
+                    HotelPrimaryButton(
+                        text = "Reactivate",
+                        isLoading = isBusy,
+                        onClick = onReactivate,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (canCheckIn) {
                     HotelPrimaryButton(
                         text = "Check In",
                         icon = Icons.AutoMirrored.Outlined.Login,

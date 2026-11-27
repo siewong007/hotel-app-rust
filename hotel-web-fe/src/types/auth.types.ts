@@ -58,6 +58,13 @@ export interface UserProfileUpdate {
   email?: string;
   phone?: string;
   avatar_url?: string;
+  current_password?: string;
+  totp_code?: string;
+}
+
+export interface PasskeyDeleteInput {
+  password?: string;
+  totp_code?: string;
 }
 
 export interface PasswordUpdate {
@@ -123,6 +130,7 @@ export interface TwoFactorEnableRequest {
 
 export interface TwoFactorDisableRequest {
   code: string;
+  password?: string;
 }
 
 export interface TwoFactorVerifyRequest {

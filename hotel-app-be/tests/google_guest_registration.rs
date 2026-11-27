@@ -51,6 +51,7 @@ fn test_identity(label: &str) -> GoogleIdentity {
         email_verified: true,
         given_name: Some("Aisha".to_string()),
         family_name: Some("Rahman".to_string()),
+        expiry: i64::MAX,
     }
 }
 

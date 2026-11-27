@@ -32,6 +32,8 @@ const COUNTED_TABLES: &[(&str, &str)] = &[
     ("rate plans", "rate_plans"),
     ("guests", "guests"),
     ("companies", "companies"),
+    ("booking channels", "booking_channels"),
+    ("booking groups", "booking_groups"),
     ("bookings", "bookings"),
     ("booking guests", "booking_guests"),
     ("payments", "payments"),
@@ -39,11 +41,14 @@ const COUNTED_TABLES: &[(&str, &str)] = &[
     ("city ledger entries", "customer_ledgers"),
     ("housekeeping tasks", "housekeeping_tasks"),
     ("maintenance tickets", "maintenance_tickets"),
+    ("room history", "room_history"),
     ("night audit runs", "night_audit_runs"),
     ("promotions", "promotions"),
     ("vouchers", "vouchers"),
     ("email deliveries", "email_deliveries"),
     ("loyalty members", "loyalty_members"),
+    ("support conversations", "support_conversations"),
+    ("ekyc verifications", "ekyc_verifications"),
     ("staff notifications", "staff_notifications"),
     ("audit events", "audit_logs"),
 ];
@@ -51,22 +56,27 @@ const COUNTED_TABLES: &[(&str, &str)] = &[
 async fn run_section(key: &str, tx: &mut Tx<'_>) -> Result<(), sqlx::Error> {
     match key {
         "core" => sections::core::seed(tx).await,
+        "channels" => sections::channels::seed(tx).await,
         "rooms_state" => sections::rooms_state::seed(tx).await,
-        "bookings_history" => sections::bookings_history::seed(tx).await,
         "bookings_ops" => sections::bookings_ops::seed(tx).await,
         "bookings_matrix" => sections::bookings_matrix::seed(tx).await,
+        "bookings_history" => sections::bookings_history::seed(tx).await,
         "anonymous" => sections::anonymous::seed(tx).await,
         "availability" => sections::availability::seed(tx).await,
-        "finance" => sections::finance::seed(tx).await,
+        "booking_groups" => sections::booking_groups::seed(tx).await,
         "operations" => sections::operations::seed(tx).await,
         "night_audit" => sections::night_audit::seed(tx).await,
+        "finance" => sections::finance::seed(tx).await,
         "marketing" => sections::marketing::seed(tx).await,
         "loyalty" => sections::loyalty::seed(tx).await,
         "guest_access" => sections::guest_access::seed(tx).await,
         "auth_extra" => sections::auth_extra::seed(tx).await,
+        "support" => sections::support::seed(tx).await,
         "notifications" => sections::notifications::seed(tx).await,
         "webhook_fixtures" => sections::webhook_fixtures::seed(tx).await,
         "audit" => sections::audit::seed(tx).await,
+        "ekyc" => sections::ekyc::seed(tx).await,
+        "scale" => sections::scale::seed(tx).await,
         _ => unreachable!("registry only resolves known module keys: {key}"),
     }
 }
@@ -77,6 +87,8 @@ pub async fn run(
     url: &str,
     module_keys: &[&'static str],
     ref_date: Option<chrono::NaiveDate>,
+    verify_after_seed: bool,
+    staff_password_hash: Option<&str>,
 ) -> Result<RunSummary, anyhow::Error> {
     let mut conn = PgConnection::connect(url).await?;
 
@@ -124,10 +136,12 @@ pub async fn run(
             .execute(&mut *tx)
             .await?;
     }
-    sqlx::raw_sql(
+    sqlx::query(
         "CREATE TEMP TABLE staging_ref ON COMMIT DROP AS \
-         SELECT COALESCE(current_setting('staging.ref_date', true)::date, CURRENT_DATE) AS today",
+         SELECT COALESCE(current_setting('staging.ref_date', true)::date, CURRENT_DATE) AS today, \
+                $1::text AS staff_password_hash",
     )
+    .bind(staff_password_hash)
     .execute(&mut *tx)
     .await?;
 
@@ -145,7 +159,13 @@ pub async fn run(
         run_section(key, &mut tx).await?;
     }
 
-    sqlx::raw_sql(RESYNC_SQL).execute(&mut *tx).await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*resync_sql()))
+        .execute(&mut *tx)
+        .await?;
+
+    if verify_after_seed && !module_keys.is_empty() {
+        crate::verify::verify_invariants(&mut tx).await?;
+    }
 
     let ref_date_used: chrono::NaiveDate = sqlx::query_scalar("SELECT today FROM staging_ref")
         .fetch_one(&mut *tx)
@@ -181,67 +201,117 @@ const RESTART_GENERATED_IDS_SQL: &str = r#"
 DO $$
 BEGIN
     EXECUTE format('ALTER SEQUENCE public.housekeeping_tasks_id_seq RESTART WITH %s',
-                   (SELECT GREATEST(MAX(id), 800000) + 1 FROM public.housekeeping_tasks));
+                   (SELECT GREATEST(COALESCE(MAX(id), 0), 800000) + 1 FROM public.housekeeping_tasks));
+    EXECUTE format('ALTER SEQUENCE public.room_history_id_seq RESTART WITH %s',
+                   (SELECT GREATEST(COALESCE(MAX(id), 0), 800000) + 1 FROM public.room_history));
 END;
 $$;
 "#;
 
-/// Identity-sequence resync after OVERRIDING SYSTEM VALUE inserts (ported from
-/// staging.sql §90). Sequences live below the band, so max(seq, 800000) is safe.
-const RESYNC_SQL: &str = r#"
-SELECT pg_catalog.setval('public.users_id_seq', GREATEST((SELECT MAX(id) FROM public.users), 800000), true);
-SELECT pg_catalog.setval('public.teams_id_seq', GREATEST((SELECT MAX(id) FROM public.teams), 800000), true);
-SELECT pg_catalog.setval('public.room_types_id_seq', GREATEST((SELECT MAX(id) FROM public.room_types), 800000), true);
-SELECT pg_catalog.setval('public.rooms_id_seq', GREATEST((SELECT MAX(id) FROM public.rooms), 800000), true);
-SELECT pg_catalog.setval('public.rate_plans_id_seq', GREATEST((SELECT MAX(id) FROM public.rate_plans), 800000), true);
-SELECT pg_catalog.setval('public.room_rates_id_seq', GREATEST((SELECT MAX(id) FROM public.room_rates), 800000), true);
-SELECT pg_catalog.setval('public.guests_id_seq', GREATEST((SELECT MAX(id) FROM public.guests), 800000), true);
-SELECT pg_catalog.setval('public.companies_id_seq', GREATEST((SELECT MAX(id) FROM public.companies), 800000), true);
-SELECT pg_catalog.setval('public.corporate_account_contacts_id_seq', GREATEST((SELECT MAX(id) FROM public.corporate_account_contacts), 800000), true);
-SELECT pg_catalog.setval('public.bookings_id_seq', GREATEST((SELECT MAX(id) FROM public.bookings), 800000), true);
-SELECT pg_catalog.setval('public.booking_guests_id_seq', GREATEST((SELECT MAX(id) FROM public.booking_guests), 800000), true);
-SELECT pg_catalog.setval('public.services_id_seq', GREATEST((SELECT MAX(id) FROM public.services), 800000), true);
-SELECT pg_catalog.setval('public.payments_id_seq', GREATEST((SELECT MAX(id) FROM public.payments), 800000), true);
-SELECT pg_catalog.setval('public.invoices_id_seq', GREATEST((SELECT MAX(id) FROM public.invoices), 800000), true);
-SELECT pg_catalog.setval('public.customer_ledgers_id_seq', GREATEST((SELECT MAX(id) FROM public.customer_ledgers), 800000), true);
-SELECT pg_catalog.setval('public.customer_ledger_payments_id_seq', GREATEST((SELECT MAX(id) FROM public.customer_ledger_payments), 800000), true);
-SELECT pg_catalog.setval('public.promotions_id_seq', GREATEST((SELECT MAX(id) FROM public.promotions), 800000), true);
-SELECT pg_catalog.setval('public.vouchers_id_seq', GREATEST((SELECT MAX(id) FROM public.vouchers), 800000), true);
-SELECT pg_catalog.setval('public.voucher_redemptions_id_seq', GREATEST((SELECT MAX(id) FROM public.voucher_redemptions), 800000), true);
-SELECT pg_catalog.setval('public.voucher_redemption_allocations_id_seq', GREATEST((SELECT MAX(id) FROM public.voucher_redemption_allocations), 800000), true);
-SELECT pg_catalog.setval('public.housekeeping_tasks_id_seq', GREATEST((SELECT MAX(id) FROM public.housekeeping_tasks), 800000), true);
-SELECT pg_catalog.setval('public.maintenance_tickets_id_seq', GREATEST((SELECT MAX(id) FROM public.maintenance_tickets), 800000), true);
-SELECT pg_catalog.setval('public.room_events_id_seq', GREATEST((SELECT MAX(id) FROM public.room_events), 800000), true);
-SELECT pg_catalog.setval('public.night_audit_runs_id_seq', GREATEST((SELECT MAX(id) FROM public.night_audit_runs), 800000), true);
-SELECT pg_catalog.setval('public.night_audit_details_id_seq', GREATEST((SELECT MAX(id) FROM public.night_audit_details), 800000), true);
-SELECT pg_catalog.setval('public.night_audit_posted_nights_id_seq', GREATEST((SELECT MAX(id) FROM public.night_audit_posted_nights), 800000), true);
-SELECT pg_catalog.setval('public.email_templates_id_seq', GREATEST((SELECT MAX(id) FROM public.email_templates), 800000), true);
-SELECT pg_catalog.setval('public.email_campaigns_id_seq', GREATEST((SELECT MAX(id) FROM public.email_campaigns), 800000), true);
-SELECT pg_catalog.setval('public.email_deliveries_id_seq', GREATEST((SELECT MAX(id) FROM public.email_deliveries), 800000), true);
-SELECT pg_catalog.setval('public.email_suppressions_id_seq', GREATEST((SELECT MAX(id) FROM public.email_suppressions), 800000), true);
-SELECT pg_catalog.setval('public.loyalty_members_id_seq', GREATEST((SELECT MAX(id) FROM public.loyalty_members), 800000), true);
-SELECT pg_catalog.setval('public.loyalty_accounts_id_seq', GREATEST((SELECT MAX(id) FROM public.loyalty_accounts), 800000), true);
-SELECT pg_catalog.setval('public.loyalty_memberships_id_seq', GREATEST((SELECT MAX(id) FROM public.loyalty_memberships), 800000), true);
-SELECT pg_catalog.setval('public.loyalty_transactions_id_seq', GREATEST((SELECT MAX(id) FROM public.loyalty_transactions), 800000), true);
-SELECT pg_catalog.setval('public.loyalty_rewards_id_seq', GREATEST((SELECT MAX(id) FROM public.loyalty_rewards), 800000), true);
-SELECT pg_catalog.setval('public.loyalty_redemptions_id_seq', GREATEST((SELECT MAX(id) FROM public.loyalty_redemptions), 800000), true);
-SELECT pg_catalog.setval('public.guest_complimentary_credits_id_seq', GREATEST((SELECT MAX(id) FROM public.guest_complimentary_credits), 800000), true);
-SELECT pg_catalog.setval('public.guest_portal_sessions_id_seq', GREATEST((SELECT MAX(id) FROM public.guest_portal_sessions), 800000), true);
-SELECT pg_catalog.setval('public.payment_retry_capabilities_id_seq', GREATEST((SELECT MAX(id) FROM public.payment_retry_capabilities), 800000), true);
-SELECT pg_catalog.setval('public.room_changes_id_seq', GREATEST((SELECT MAX(id) FROM public.room_changes), 800000), true);
-SELECT pg_catalog.setval('public.guest_notes_id_seq', GREATEST((SELECT MAX(id) FROM public.guest_notes), 800000), true);
-SELECT pg_catalog.setval('public.guest_documents_id_seq', GREATEST((SELECT MAX(id) FROM public.guest_documents), 800000), true);
-SELECT pg_catalog.setval('public.guest_reviews_id_seq', GREATEST((SELECT MAX(id) FROM public.guest_reviews), 800000), true);
-SELECT pg_catalog.setval('public.guest_segments_id_seq', GREATEST((SELECT MAX(id) FROM public.guest_segments), 800000), true);
-SELECT pg_catalog.setval('public.user_guests_id_seq', GREATEST((SELECT MAX(id) FROM public.user_guests), 800000), true);
-SELECT pg_catalog.setval('public.notification_subscriptions_id_seq', GREATEST((SELECT MAX(id) FROM public.notification_subscriptions), 800000), true);
-SELECT pg_catalog.setval('public.notification_consent_events_id_seq', GREATEST((SELECT MAX(id) FROM public.notification_consent_events), 800000), true);
-SELECT pg_catalog.setval('public.consent_records_id_seq', GREATEST((SELECT MAX(id) FROM public.consent_records), 800000), true);
-SELECT pg_catalog.setval('public.staff_notifications_id_seq', GREATEST((SELECT MAX(id) FROM public.staff_notifications), 800000), true);
-SELECT pg_catalog.setval('public.amenities_id_seq', GREATEST((SELECT MAX(id) FROM public.amenities), 800000), true);
-SELECT pg_catalog.setval('public.audit_logs_id_seq1', GREATEST((SELECT MAX(id) FROM public.audit_logs), 800000), true);
-SELECT pg_catalog.setval('public.self_checkin_events_id_seq', GREATEST((SELECT MAX(id) FROM public.self_checkin_events), 800000), true);
-SELECT pg_catalog.setval('public.support_conversations_id_seq', GREATEST((SELECT MAX(id) FROM public.support_conversations), 800000), true);
-SELECT pg_catalog.setval('public.support_messages_id_seq', GREATEST((SELECT MAX(id) FROM public.support_messages), 800000), true);
-SELECT pg_catalog.setval('public.support_events_id_seq', GREATEST((SELECT MAX(id) FROM public.support_events), 800000), true);
-"#;
+/// Identity-sequence resync list shared between `resync_sql()` and `verify.rs`.
+pub const RESYNC_SEQUENCES: &[(&str, &str)] = &[
+    ("users", "users_id_seq"),
+    ("teams", "teams_id_seq"),
+    ("room_types", "room_types_id_seq"),
+    ("rooms", "rooms_id_seq"),
+    ("rate_plans", "rate_plans_id_seq"),
+    ("room_rates", "room_rates_id_seq"),
+    ("guests", "guests_id_seq"),
+    ("companies", "companies_id_seq"),
+    (
+        "corporate_account_contacts",
+        "corporate_account_contacts_id_seq",
+    ),
+    ("booking_channels", "booking_channels_id_seq"),
+    ("channel_pricing_rules", "channel_pricing_rules_id_seq"),
+    (
+        "channel_commission_rules",
+        "channel_commission_rules_id_seq",
+    ),
+    ("booking_groups", "booking_groups_id_seq"),
+    ("bookings", "bookings_id_seq"),
+    ("booking_guests", "booking_guests_id_seq"),
+    ("services", "services_id_seq"),
+    ("payments", "payments_id_seq"),
+    ("invoices", "invoices_id_seq"),
+    ("customer_ledgers", "customer_ledgers_id_seq"),
+    (
+        "customer_ledger_payments",
+        "customer_ledger_payments_id_seq",
+    ),
+    ("promotions", "promotions_id_seq"),
+    ("vouchers", "vouchers_id_seq"),
+    ("voucher_redemptions", "voucher_redemptions_id_seq"),
+    (
+        "voucher_redemption_allocations",
+        "voucher_redemption_allocations_id_seq",
+    ),
+    ("housekeeping_tasks", "housekeeping_tasks_id_seq"),
+    ("maintenance_tickets", "maintenance_tickets_id_seq"),
+    ("room_events", "room_events_id_seq"),
+    ("room_history", "room_history_id_seq"),
+    ("night_audit_runs", "night_audit_runs_id_seq"),
+    ("night_audit_details", "night_audit_details_id_seq"),
+    (
+        "night_audit_posted_nights",
+        "night_audit_posted_nights_id_seq",
+    ),
+    ("email_templates", "email_templates_id_seq"),
+    ("email_campaigns", "email_campaigns_id_seq"),
+    ("email_deliveries", "email_deliveries_id_seq"),
+    ("email_suppressions", "email_suppressions_id_seq"),
+    ("loyalty_members", "loyalty_members_id_seq"),
+    ("loyalty_accounts", "loyalty_accounts_id_seq"),
+    ("loyalty_memberships", "loyalty_memberships_id_seq"),
+    ("loyalty_transactions", "loyalty_transactions_id_seq"),
+    ("loyalty_rewards", "loyalty_rewards_id_seq"),
+    ("loyalty_redemptions", "loyalty_redemptions_id_seq"),
+    (
+        "guest_complimentary_credits",
+        "guest_complimentary_credits_id_seq",
+    ),
+    ("guest_portal_sessions", "guest_portal_sessions_id_seq"),
+    (
+        "payment_retry_capabilities",
+        "payment_retry_capabilities_id_seq",
+    ),
+    ("room_changes", "room_changes_id_seq"),
+    ("guest_notes", "guest_notes_id_seq"),
+    ("guest_documents", "guest_documents_id_seq"),
+    ("guest_reviews", "guest_reviews_id_seq"),
+    ("guest_segments", "guest_segments_id_seq"),
+    ("user_guests", "user_guests_id_seq"),
+    (
+        "notification_subscriptions",
+        "notification_subscriptions_id_seq",
+    ),
+    (
+        "notification_consent_events",
+        "notification_consent_events_id_seq",
+    ),
+    ("consent_records", "consent_records_id_seq"),
+    ("staff_notifications", "staff_notifications_id_seq"),
+    ("amenities", "amenities_id_seq"),
+    ("audit_logs", "audit_logs_id_seq1"),
+    ("self_checkin_events", "self_checkin_events_id_seq"),
+    ("support_conversations", "support_conversations_id_seq"),
+    ("support_messages", "support_messages_id_seq"),
+    ("support_events", "support_events_id_seq"),
+    ("ekyc_verifications", "ekyc_verifications_id_seq"),
+    ("ekyc_notes", "ekyc_notes_id_seq"),
+    ("ekyc_decision_history", "ekyc_decision_history_id_seq"),
+];
+
+/// Transactional sequence resync (`ALTER SEQUENCE ... RESTART WITH N` rolls back
+/// cleanly if any post-seed invariant check aborts the seed transaction).
+fn resync_sql() -> String {
+    let mut sql = String::from("DO $$\nBEGIN\n");
+    for (table, seq) in RESYNC_SEQUENCES {
+        sql.push_str(&format!(
+            "    EXECUTE format('ALTER SEQUENCE public.{seq} RESTART WITH %s', \
+             (SELECT GREATEST(COALESCE(MAX(id), 0), 800000) + 1 FROM public.{table}));\n"
+        ));
+    }
+    sql.push_str("END;\n$$;\n");
+    sql
+}

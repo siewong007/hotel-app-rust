@@ -101,6 +101,7 @@ async fn login_start(
             retry_after,
         ));
     }
+    crate::modules::auth::turnstile::verify_request(&headers, ip, "passkey_login").await?;
     handlers::passkey_login_start_handler(State(pool), Json(req)).await
 }
 

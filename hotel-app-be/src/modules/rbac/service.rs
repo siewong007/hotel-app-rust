@@ -106,9 +106,9 @@ pub async fn update_route_policy(
     let before = RbacRepository::find_route_access_policy_for_update(&mut *tx, &route_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Route access policy not found".to_string()))?;
-    ensure_route_policy_names_exist(pool, &before, &input).await?;
+    ensure_route_policy_names_exist(&mut tx, &before, &input).await?;
     if route_id == ACCESS_CONTROL_ROUTE_ID {
-        ensure_actor_keeps_page_access(pool, actor_user_id, &input).await?;
+        ensure_actor_keeps_page_access(&mut tx, actor_user_id, &input).await?;
     }
     let policy = RbacRepository::update_route_access_policy(&mut *tx, &route_id, &input).await?;
     tx.commit()
@@ -155,7 +155,7 @@ fn route_policy_audit_values(policy: &RouteAccessPolicy) -> serde_json::Value {
 /// for. Names the stored rule already carries are left alone, so a rule that
 /// predates a renamed permission can still be saved while it is tidied up.
 async fn ensure_route_policy_names_exist(
-    pool: &DbPool,
+    conn: &mut sqlx::PgConnection,
     before: &RouteAccessPolicy,
     input: &RouteAccessPolicyInput,
 ) -> Result<(), ApiError> {
@@ -169,7 +169,7 @@ async fn ensure_route_policy_names_exist(
         [&input.required_permissions, &input.nav_permissions],
         &known_permissions,
     );
-    let existing = RbacRepository::existing_permission_names(pool, &new_permissions).await?;
+    let existing = RbacRepository::existing_permission_names(&mut *conn, &new_permissions).await?;
     reject_unknown(&new_permissions, &existing, "permission")?;
 
     let known_roles: HashSet<&str> = before
@@ -189,7 +189,7 @@ async fn ensure_route_policy_names_exist(
         ],
         &known_roles,
     );
-    let existing = RbacRepository::existing_role_names(pool, &new_roles).await?;
+    let existing = RbacRepository::existing_role_names(&mut *conn, &new_roles).await?;
     reject_unknown(&new_roles, &existing, "role")
 }
 
@@ -225,16 +225,17 @@ fn reject_unknown(
 }
 
 async fn ensure_actor_keeps_page_access(
-    pool: &DbPool,
+    conn: &mut sqlx::PgConnection,
     actor_user_id: i64,
     input: &RouteAccessPolicyInput,
 ) -> Result<(), ApiError> {
-    let permissions = RbacRepository::permission_names_for_user(pool, actor_user_id).await?;
-    let roles: HashSet<String> = crate::core::AuthService::get_user_roles(pool, actor_user_id)
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?
-        .into_iter()
-        .collect();
+    let permissions = RbacRepository::permission_names_for_user(&mut *conn, actor_user_id).await?;
+    let roles: HashSet<String> =
+        crate::core::AuthService::get_user_roles(&mut *conn, actor_user_id)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?
+            .into_iter()
+            .collect();
 
     if page_rule_admits(input, &permissions, &roles) {
         Ok(())
@@ -353,7 +354,7 @@ pub async fn assign_permission_to_role(
     input: AssignPermissionInput,
 ) -> Result<(), ApiError> {
     ensure_can_mutate_role_permissions(pool, actor_user_id, input.role_id).await?;
-    ensure_actor_can_manage_roles(pool, actor_user_id, &[input.role_id]).await?;
+    ensure_actor_can_manage_roles_until(pool, actor_user_id, &[input.role_id], None).await?;
     ensure_actor_can_grant_permissions(pool, actor_user_id, &[input.permission_id]).await?;
     RbacRepository::assign_permission_to_role(
         pool,
@@ -382,7 +383,7 @@ pub async fn remove_permission_from_role(
     permission_id: i64,
 ) -> Result<(), ApiError> {
     ensure_can_mutate_role_permissions(pool, actor_user_id, role_id).await?;
-    ensure_actor_can_manage_roles(pool, actor_user_id, &[role_id]).await?;
+    ensure_actor_can_manage_roles_until(pool, actor_user_id, &[role_id], None).await?;
     RbacRepository::remove_permission_from_role(pool, role_id, permission_id).await?;
     log_rbac_definition_change(
         pool,
@@ -407,7 +408,7 @@ pub async fn replace_role_permissions(
         return Err(ApiError::NotFound("Role not found".to_string()));
     }
     ensure_can_mutate_role_permissions(pool, actor_user_id, role_id).await?;
-    ensure_actor_can_manage_roles(pool, actor_user_id, &[role_id]).await?;
+    ensure_actor_can_manage_roles_until(pool, actor_user_id, &[role_id], None).await?;
 
     let permission_ids = unique_ids(input.permission_ids);
     ensure_actor_can_grant_permissions(pool, actor_user_id, &permission_ids).await?;
@@ -810,7 +811,7 @@ pub(crate) async fn ensure_actor_can_grant_permissions(
     }
 
     let conferred = RbacRepository::permission_names_for_ids(pool, permission_ids).await?;
-    ensure_actor_holds_all(pool, actor_user_id, &conferred).await
+    ensure_actor_holds_all_inner(pool, actor_user_id, &conferred, true, None).await
 }
 
 /// A system role's permission set may only be changed by a super admin.
@@ -828,16 +829,6 @@ async fn ensure_can_mutate_role_permissions(
         Some(true) => crate::core::middleware::ensure_super_admin(pool, actor_user_id).await,
         Some(false) => Ok(()),
     }
-}
-
-/// The superset rule: every permission in `conferred` must already be held by
-/// the actor.
-async fn ensure_actor_holds_all(
-    pool: &DbPool,
-    actor_user_id: i64,
-    conferred: &HashSet<String>,
-) -> Result<(), ApiError> {
-    ensure_actor_holds_all_inner(pool, actor_user_id, conferred, false, None).await
 }
 
 async fn ensure_actor_holds_all_inner(

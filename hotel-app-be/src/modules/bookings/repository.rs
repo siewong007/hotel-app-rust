@@ -105,7 +105,7 @@ impl BookingRepository {
         )))
         .fetch_one(pool)
         .await
-        .unwrap_or(0);
+        .map_err(ApiError::from)?;
 
         let bookings = rows
             .iter()

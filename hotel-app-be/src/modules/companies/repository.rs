@@ -114,7 +114,11 @@ impl CompanyRepository {
         let company = {
             let credit_limit = input
                 .credit_limit
-                .map(|value| Decimal::from_f64_retain(value).unwrap_or_default());
+                .map(|value| {
+                    Decimal::from_f64_retain(value)
+                        .ok_or_else(|| ApiError::BadRequest("Invalid credit limit".to_string()))
+                })
+                .transpose()?;
 
             let row = sqlx::query(
                 r#"
@@ -162,7 +166,11 @@ impl CompanyRepository {
         {
             let credit_limit = input
                 .credit_limit
-                .map(|value| Decimal::from_f64_retain(value).unwrap_or_default());
+                .map(|value| {
+                    Decimal::from_f64_retain(value)
+                        .ok_or_else(|| ApiError::BadRequest("Invalid credit limit".to_string()))
+                })
+                .transpose()?;
 
             sqlx::query(
                 r#"

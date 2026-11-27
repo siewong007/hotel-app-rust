@@ -362,4 +362,55 @@ describe('SecuritySection', () => {
 
     expect(await screen.findByText('We could not load your two-factor settings.')).toBeTruthy();
   });
+
+  it('requires step-up confirmation after the delete dialog to remove a passkey', async () => {
+    mocks.listPasskeys.mockResolvedValue([passkey('1', 'Ada iPhone')]);
+    mocks.confirm.mockResolvedValue(true);
+    mocks.deletePasskey.mockResolvedValue(undefined);
+
+    renderSection();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Ada iPhone' }));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalled());
+    expect(mocks.deletePasskey).not.toHaveBeenCalled();
+
+    fireEvent.change(await screen.findByLabelText('Your password'), {
+      target: { value: 'guest-secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mocks.deletePasskey).toHaveBeenCalledWith(
+        '1',
+        { password: 'guest-secret', totp_code: undefined },
+        { suppressApiNotification: true },
+      ),
+    );
+  });
+
+  it('requires both current password and 2FA code to turn off the authenticator app', async () => {
+    mocks.getTwoFactorStatus.mockResolvedValue({ enabled: true, backup_codes_remaining: 4 });
+    mocks.disableTwoFactor.mockResolvedValue(undefined);
+
+    renderSection();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn off' }));
+    const confirmOff = screen.getAllByRole('button', { name: 'Turn off' }).at(-1)!;
+    expect(confirmOff.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Current Password'), {
+      target: { value: 'guest-secret' },
+    });
+    fireEvent.change(screen.getByLabelText('Code from your app, or a backup code'), {
+      target: { value: '654321' },
+    });
+    expect(confirmOff.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(confirmOff);
+    await waitFor(() =>
+      expect(mocks.disableTwoFactor).toHaveBeenCalledWith('654321', 'guest-secret', {
+        suppressApiNotification: true,
+      }),
+    );
+  });
 });

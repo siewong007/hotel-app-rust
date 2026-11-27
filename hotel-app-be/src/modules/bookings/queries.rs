@@ -37,7 +37,9 @@
 //
 // Aliases are prefixed bk_ because booking_list.rs already binds `cl` and `pay`
 // inside its own filter subqueries.
-pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
+macro_rules! bookings_base_sql {
+    () => {
+        r#"
     SELECT
         b.id, b.booking_number, b.folio_number, b.guest_id, g.nick_name as guest_name, g.email as guest_email,
         g.guest_type::text as guest_type, g.tourism_type::text as guest_tourism_type,
@@ -105,6 +107,7 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
         WHERE cl.booking_id = b.id
           AND cl.post_type = 'room_charge'
           AND cl.status <> 'void'
+          AND cl.void_at IS NULL
           AND COALESCE(cl.is_reversal, FALSE) = FALSE
         ORDER BY cl.created_at DESC
         LIMIT 1
@@ -145,7 +148,10 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
     LEFT JOIN LATERAL (
         SELECT cl.invoice_number
         FROM customer_ledgers cl
-        WHERE cl.booking_id = b.id AND cl.invoice_number IS NOT NULL
+        WHERE cl.booking_id = b.id
+          AND cl.invoice_number IS NOT NULL
+          AND cl.status <> 'void'
+          AND cl.void_at IS NULL
         ORDER BY cl.created_at DESC
         LIMIT 1
     ) bk_cli ON TRUE
@@ -166,7 +172,11 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
           )
         LIMIT 1
     ) bk_payout ON TRUE
-"#;
+"#
+    };
+}
+
+pub const GET_BOOKINGS_BASE_QUERY: &str = bookings_base_sql!();
 
 // =============================================================================
 // Get Bookings Query (kept for backward compat)
@@ -176,71 +186,7 @@ pub const GET_BOOKINGS_BASE_QUERY: &str = r#"
 // Get Booking By ID Query
 // =============================================================================
 
-pub const GET_BOOKING_BY_ID_QUERY: &str = r#"
-    SELECT
-        b.id, b.booking_number, b.folio_number, b.guest_id, g.nick_name as guest_name, g.email as guest_email,
-        g.guest_type::text as guest_type, g.tourism_type::text as guest_tourism_type,
-        b.room_id, r.room_number, rt.name as room_type, rt.code as room_type_code,
-        b.check_in_date, b.check_out_date,
-        -- Occupancy -- keep in step with GET_BOOKINGS_BASE_QUERY above.
-        b.adults, b.children,
-        COALESCE(NULLIF(b.room_rate, 0), COALESCE(r.custom_price, rt.base_price)) as room_rate,
-        b.discount_amount,
-        b.total_amount, b.status,
-        -- payment_status is derived live from the payments table so the chip
-        -- never goes out of sync with the live total_paid / balance_due
-        -- subqueries below. Stored bookings.payment_status is intentionally
-        -- ignored unless the booking is voided or complimentary.
-        CASE
-            WHEN b.status = 'voided' THEN 'voided'
-            WHEN b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) <= 0 THEN 'paid'
-            WHEN COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) >= COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
-            WHEN COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) > 0 THEN 'partial'
-            ELSE 'unpaid'
-        END AS payment_status, b.payment_method, b.source, b.booking_channel_id,
-        bc.name AS booking_channel_name, bc.channel_type AS booking_channel_type,
-        bc.settlement_payment_methods AS booking_channel_settlement_methods,
-        b.ota_reference, b.remarks, b.special_requests, b.is_complimentary, b.complimentary_reason,
-        b.complimentary_start_date, b.complimentary_end_date, b.original_total_amount, b.complimentary_nights,
-        b.deposit_paid, b.deposit_amount, b.room_card_deposit,
-        COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) AS total_paid,
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund'), 0) AS total_refunded,
-        CASE WHEN COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) - COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) > 0 THEN COALESCE((SELECT cl.amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) - COALESCE((SELECT cl.paid_amount FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.post_type = 'room_charge' AND cl.status <> 'void' AND COALESCE(cl.is_reversal, FALSE) = FALSE ORDER BY cl.created_at DESC LIMIT 1), GREATEST(COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status = 'completed' AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')), 0) - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'), 0), 0)) ELSE 0 END AS balance_due,
-        EXISTS(SELECT 1 FROM payments p WHERE p.booking_id = b.id AND p.status <> 'void' AND COALESCE(p.payment_type, 'booking') = 'refund' AND COALESCE(p.notes, '') NOT LIKE 'Room charge refunded%') AS deposit_refunded,
-        b.company_id, b.company_name, b.payment_note,
-        b.created_at, b.is_posted, b.posted_date,
-        b.is_tourist, b.tourism_tax_amount, b.extra_bed_count, b.extra_bed_charge,
-        b.rate_override_weekday, b.rate_override_weekend, b.actual_check_out, b.daily_rates,
-        b.cleaning_preference, b.smoking_preference, r.is_smoking AS room_is_smoking,
-        -- Same staff-creator name as GET_BOOKINGS_BASE_QUERY.
-        CASE
-            WHEN creator.user_type::text = 'staff' THEN NULLIF(BTRIM(creator.full_name), '')
-            ELSE NULL
-        END AS created_by_name,
-        COALESCE(
-            (SELECT inv.invoice_number FROM invoices inv WHERE inv.booking_id = b.id ORDER BY inv.created_at DESC LIMIT 1),
-            (SELECT cl.invoice_number FROM customer_ledgers cl WHERE cl.booking_id = b.id AND cl.invoice_number IS NOT NULL ORDER BY cl.created_at DESC LIMIT 1)
-        ) AS invoice_number,
-        -- Same as GET_BOOKINGS_BASE_QUERY's bk_payout lateral.
-        EXISTS(
-            SELECT 1 FROM payments p
-            WHERE (bc.channel_type IN ('ota', 'website') OR b.source IN ('online', 'website'))
-              AND p.booking_id = b.id
-          AND p.status = 'completed'
-          AND COALESCE(p.payment_type, 'booking') = 'booking'
-          AND regexp_replace(regexp_replace(lower(p.payment_method), '[^a-z0-9]', '', 'g'), '^(.+)com$', '\1') IN (
-              SELECT regexp_replace(regexp_replace(lower(m), '[^a-z0-9]', '', 'g'), '^(.+)com$', '\1')
-              FROM unnest(COALESCE(NULLIF(bc.settlement_payment_methods, '{}'::text[]), ARRAY['Bank Transfer', 'PayPal']::text[])) AS m
-          )
-        ) AS channel_payout_recorded
-    FROM bookings b
-    INNER JOIN guests g ON b.guest_id = g.id
-    INNER JOIN rooms r ON b.room_id = r.id
-    INNER JOIN room_types rt ON r.room_type_id = rt.id
-    LEFT JOIN booking_channels bc ON bc.id = b.booking_channel_id
-    LEFT JOIN users creator ON creator.id = b.created_by AND creator.deleted_at IS NULL
-    WHERE b.id = $1
-"#;
+pub const GET_BOOKING_BY_ID_QUERY: &str = concat!(bookings_base_sql!(), "\n    WHERE b.id = $1\n");
 
 // =============================================================================
 // Today's Check-ins Query

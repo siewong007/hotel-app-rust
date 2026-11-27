@@ -56,6 +56,7 @@ import com.hotelapp.staff.core.design.HotelOutlinedButton
 import com.hotelapp.staff.core.design.HotelPullToRefreshBox
 import com.hotelapp.staff.core.design.HotelSearchBar
 import com.hotelapp.staff.core.design.HotelTheme
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
 import com.hotelapp.staff.core.format.DateFormatter
@@ -79,6 +80,8 @@ data class BookingsUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
+    val hasMore: Boolean = true,
+    val hasLoadedOnce: Boolean = false,
     val items: List<BookingWithDetailsDto> = emptyList(),
     val page: Long = 1,
     val total: Long = 0,
@@ -95,6 +98,8 @@ class BookingsViewModel(
     val uiState: StateFlow<BookingsUiState> = _uiState.asStateFlow()
 
     private var searchDebounceJob: Job? = null
+    private var loadJob: Job? = null
+    private var loadMoreJob: Job? = null
 
     init {
         load(page = 1, replace = true)
@@ -109,6 +114,8 @@ class BookingsViewModel(
 
     fun setView(view: String) {
         if (_uiState.value.view == view) return
+        searchDebounceJob?.cancel()
+        loadMoreJob?.cancel()
         _uiState.update { it.copy(view = view) }
         load(page = 1, replace = true)
     }
@@ -124,23 +131,36 @@ class BookingsViewModel(
 
     fun clearFilters() {
         searchDebounceJob?.cancel()
+        loadMoreJob?.cancel()
         _uiState.update { it.copy(search = "", view = "all") }
         load(page = 1, replace = true)
     }
 
     fun refresh(silent: Boolean = false) {
+        if (!silent) {
+            searchDebounceJob?.cancel()
+        }
+        loadMoreJob?.cancel()
         load(page = 1, replace = true, silent = silent)
     }
 
     fun loadMore() {
         val snapshot = _uiState.value
-        if (snapshot.isLoadingMore || snapshot.items.size >= snapshot.total) return
+        if (!snapshot.hasMore || snapshot.isLoadingMore || snapshot.items.size >= snapshot.total || snapshot.error != null) return
         load(page = snapshot.page + 1, replace = false)
     }
 
     private fun load(page: Long, replace: Boolean, silent: Boolean = false) {
-        viewModelScope.launch {
+        if (replace) {
+            loadJob?.cancel()
+            loadMoreJob?.cancel()
+        } else {
+            loadMoreJob?.cancel()
+        }
+        val launchedJob = viewModelScope.launch {
             val snapshot = _uiState.value
+            val requestedSearch = snapshot.search
+            val requestedView = snapshot.view
             _uiState.update {
                 if (silent) it else it.copy(
                     isLoading = replace && it.items.isEmpty(),
@@ -152,15 +172,28 @@ class BookingsViewModel(
             repository.list(
                 page = page,
                 pageSize = 25,
-                search = snapshot.search,
-                view = snapshot.view,
+                search = requestedSearch,
+                view = requestedView,
             ).onSuccess { res ->
                 _uiState.update { cur ->
+                    if (cur.search != requestedSearch || cur.view != requestedView) {
+                        return@update cur.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            isLoadingMore = false,
+                        )
+                    }
+                    val merged = if (replace) res.data else (cur.items + res.data).distinctBy { it.id }
+                    val moreAvailable = res.data.isNotEmpty() &&
+                        merged.size < res.total &&
+                        (replace || merged.size > cur.items.size)
                     cur.copy(
                         isLoading = false,
                         isRefreshing = false,
                         isLoadingMore = false,
-                        items = if (replace) res.data else (cur.items + res.data).distinctBy { it.id },
+                        hasMore = moreAvailable,
+                        hasLoadedOnce = true,
+                        items = merged,
                         page = res.page,
                         total = res.total,
                         error = null,
@@ -168,14 +201,26 @@ class BookingsViewModel(
                 }
             }.onFailure { err ->
                 _uiState.update { cur ->
+                    if (cur.search != requestedSearch || cur.view != requestedView) {
+                        return@update cur.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            isLoadingMore = false,
+                        )
+                    }
                     cur.copy(
                         isLoading = false,
                         isRefreshing = false,
                         isLoadingMore = false,
-                        error = if (silent && cur.items.isNotEmpty()) cur.error else err.message,
+                        error = if (silent && cur.hasLoadedOnce) cur.error else (err.message ?: "Unable to load bookings."),
                     )
                 }
             }
+        }
+        if (replace) {
+            loadJob = launchedJob
+        } else {
+            loadMoreJob = launchedJob
         }
     }
 }
@@ -203,12 +248,14 @@ fun BookingsScreen(
     val config by serverConfigStore.config.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
-    val shouldLoadMore by remember(state.items.size, state.total, state.isLoadingMore) {
+    val shouldLoadMore by remember(state.items.size, state.total, state.hasMore, state.isLoadingMore, state.error) {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            state.items.isNotEmpty() &&
+            state.hasMore &&
+                state.items.isNotEmpty() &&
                 state.items.size < state.total &&
                 !state.isLoadingMore &&
+                state.error == null &&
                 lastVisible >= state.items.size - 4
         }
     }
@@ -317,6 +364,14 @@ fun BookingsScreen(
                         contentPadding = PaddingValues(top = 8.dp, bottom = if (canCreateBooking) 88.dp else 8.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        if (state.error != null) {
+                            item(key = "bookings_error_banner") {
+                                InlineAlertBanner(
+                                    message = state.error!!,
+                                    tone = colors.danger,
+                                )
+                            }
+                        }
                         items(state.items, key = { it.id }) { booking ->
                             BookingListCard(
                                 booking = booking,
@@ -325,7 +380,7 @@ fun BookingsScreen(
                                 modifier = Modifier.animateItem(),
                             )
                         }
-                        if (state.items.size < state.total) {
+                        if (state.hasMore && state.items.size < state.total) {
                             item(key = "load_more_footer") {
                                 if (state.isLoadingMore) {
                                     Box(
@@ -457,7 +512,7 @@ private fun BookingListCard(
             Spacer(modifier = Modifier.width(10.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = MoneyFormatter.format(booking.totalAmount, currency),
+                    text = MoneyFormatter.format(booking.billableTotal(), currency),
                     style = MaterialTheme.typography.labelLarge,
                     color = colors.textPrimary,
                 )

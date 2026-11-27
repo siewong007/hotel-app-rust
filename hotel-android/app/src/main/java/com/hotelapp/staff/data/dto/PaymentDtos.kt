@@ -1,6 +1,8 @@
 package com.hotelapp.staff.data.dto
 
 import com.hotelapp.staff.core.network.FlexibleDecimalSerializer
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -50,11 +52,13 @@ data class PaymentWorkflowSummaryDto(
     val warnings: List<String> = emptyList(),
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class RecordPaymentRequestDto(
     @SerialName("booking_id") val bookingId: Long,
     val amount: Double,
     @SerialName("payment_method") val paymentMethod: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     @SerialName("payment_type") val paymentType: String? = "booking",
     @SerialName("transaction_reference") val transactionReference: String? = null,
     val notes: String? = null,
@@ -97,6 +101,21 @@ data class PendingPaymentPageDto(
 @Serializable
 data class RejectPaymentRequestDto(
     val reason: String,
+)
+
+@Serializable
+data class RefundDepositRequestDto(
+    val amount: Double,
+    @SerialName("payment_method") val paymentMethod: String,
+    val note: String,
+    @SerialName("transaction_reference") val transactionReference: String? = null,
+)
+
+@Serializable
+data class ForfeitDepositRequestDto(
+    val amount: Double,
+    val reason: String,
+    val notes: String? = null,
 )
 
 @Serializable
@@ -147,4 +166,14 @@ data class InvoicePreviewDto(
     val invoice: InvoiceDto,
     val payment: JsonElement? = null,
     @SerialName("booking_details") val bookingDetails: JsonElement? = null,
+)
+
+@Serializable
+data class RequestPaymentReceiptRequestDto(
+    val message: String? = null,
+)
+
+data class PaymentReceiptFile(
+    val bytes: ByteArray,
+    val contentType: String,
 )

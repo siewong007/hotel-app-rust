@@ -380,10 +380,20 @@ describe('AuthService', () => {
       expect(del).toHaveBeenCalledWith('profile/passkeys/pk1', undefined);
     });
 
+    it('sends step-up credentials when provided', async () => {
+      del.mockReturnValue(Promise.resolve(undefined));
+
+      await AuthService.deletePasskey('pk1', { password: 'secret', totp_code: '123456' });
+
+      expect(del).toHaveBeenCalledWith('profile/passkeys/pk1', {
+        json: { password: 'secret', totp_code: '123456' },
+      });
+    });
+
     it('sends the skip-notification header only when asked', async () => {
       del.mockReturnValue(Promise.resolve(undefined));
 
-      await AuthService.deletePasskey('pk1', { suppressApiNotification: true });
+      await AuthService.deletePasskey('pk1', undefined, { suppressApiNotification: true });
       expect(del).toHaveBeenCalledWith('profile/passkeys/pk1', {
         headers: SKIP_NOTIFICATION_HEADERS,
       });
@@ -468,7 +478,17 @@ describe('AuthService', () => {
   });
 
   describe('disableTwoFactor', () => {
-    it('posts the code as json to profile/2fa/disable', async () => {
+    it('posts the code and password as json to profile/2fa/disable', async () => {
+      post.mockReturnValue(Promise.resolve(undefined));
+
+      await AuthService.disableTwoFactor('123456', 'secret-pass');
+
+      expect(post).toHaveBeenCalledWith('profile/2fa/disable', {
+        json: { code: '123456', password: 'secret-pass' },
+      });
+    });
+
+    it('omits password when absent', async () => {
       post.mockReturnValue(Promise.resolve(undefined));
 
       await AuthService.disableTwoFactor('123456');

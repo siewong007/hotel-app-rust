@@ -119,6 +119,9 @@ required_payload=(
   database/patches/0031_manager_owns_user_management.sql
   database/patches/0032_full_audit_schema_fixes.sql
   database/patches/0033_security_audit_hardening.sql
+  database/patches/0034_db_perf_integrity_hardening.sql
+  database/patches/0035_bughunter_security_fixes.sql
+  database/patches/0036_wave2_security_hardening.sql
   database/db-least-privilege.sql
 )
 for payload in "${required_payload[@]}"; do
@@ -381,6 +384,9 @@ install_release_files() {
   install -m 0644 "$RELEASE_DIR/database/patches/0031_manager_owns_user_management.sql" "$APP_DIR/database/patches/0031_manager_owns_user_management.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0032_full_audit_schema_fixes.sql" "$APP_DIR/database/patches/0032_full_audit_schema_fixes.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0033_security_audit_hardening.sql" "$APP_DIR/database/patches/0033_security_audit_hardening.sql"
+  install -m 0644 "$RELEASE_DIR/database/patches/0034_db_perf_integrity_hardening.sql" "$APP_DIR/database/patches/0034_db_perf_integrity_hardening.sql"
+  install -m 0644 "$RELEASE_DIR/database/patches/0035_bughunter_security_fixes.sql" "$APP_DIR/database/patches/0035_bughunter_security_fixes.sql"
+  install -m 0644 "$RELEASE_DIR/database/patches/0036_wave2_security_hardening.sql" "$APP_DIR/database/patches/0036_wave2_security_hardening.sql"
   install -m 0644 "$RELEASE_DIR/database/db-least-privilege.sql" "$APP_DIR/database/db-least-privilege.sql"
   # The backend image runs as uid/gid 1000. Bind-mounted application state must
   # stay writable by that non-root user across container replacements.
@@ -735,21 +741,31 @@ staging.saliminn.my {
         format filter {
             wrap json
             fields {
-                request>uri query {
-                    replace token REDACTED
-                }
+                request>uri regexp "(/guest-portal/(?:booking|pre-checkin|auto-checkin)/|/booking/recover-payment/|/communications/unsubscribe/)[A-Za-z0-9._~-]{16,}|([?&]token=)[^&#]+" "${1}${2}REDACTED"
+                request>headers>Sec-WebSocket-Protocol delete
+                request>headers>X-Booking-Access-Token delete
+                request>headers>X-Desktop-Client-Token delete
+                request>headers>X-Staging-Access delete
+                request>headers>X-Step-Up delete
+                request>headers>X-Backup-Passphrase delete
+                resp_headers>Sec-WebSocket-Protocol delete
             }
         }
     }
 
-    @backend path /api /api/* /uploads /uploads/* /health /ws /ws/*
+    # Optional edge-secret / CIDR gate protecting BOTH @backend and UI routes on staging.
+    # HTTP Basic Auth cannot sit in front of @backend without colliding with Bearer JWTs,
+    # so operator deployments front staging with Cloudflare Access or supply EDGE_ACCESS_HEADER.
+    __STAGING_EDGE_GUARD_BLOCK__
+    @backend path /api /api/* /uploads /uploads/* /health /ws /ws/* /hotel.*
     handle @backend {
         # Replace — never append to — any client-supplied X-Forwarded-For so
         # the backend's right-to-left parse sees only this proxy's view of the
         # peer. Appending would let one host rotate spoofed IPs per request
         # and bypass every per-IP rate limiter.
         reverse_proxy 127.0.0.1:3031 {
-            header_up X-Forwarded-For {remote_host}
+            header_up X-Real-IP {client_ip}
+            header_up X-Forwarded-For {client_ip}
         }
     }
 
@@ -764,7 +780,7 @@ staging.saliminn.my {
 }
 CADDY
 
-  # Bake host-local basic-auth hash into the generated site file (never from git).
+  # Bake host-local basic-auth hash and optional edge-access guard into the generated site file.
   hash_file="$APP_DIR/basic-auth.hash"
   if [[ ! -s "$hash_file" ]]; then
     die "missing $hash_file — create with: caddy hash-password --plaintext '…' > $hash_file"
@@ -772,7 +788,54 @@ CADDY
   HASH=$(tr -d '\n' < "$hash_file")
   sed -i "s|__BASIC_AUTH_HASH_WILL_BE_SUBSTITUTED_AT_RUNTIME__|${HASH}|g" "$site_tmp"
 
-  install -m 0644 "$site_tmp" "$CADDY_SITE_FILE"
+  edge_secret_file="$APP_DIR/edge-secret.txt"
+  if [[ -s "$edge_secret_file" ]]; then
+    EDGE_SECRET=$(tr -d '\r\n' < "$edge_secret_file")
+    if [[ ! "$EDGE_SECRET" =~ ^[A-Za-z0-9._~+/=-]{16,256}$ ]]; then
+      die "Invalid $edge_secret_file: must be 16-256 characters from [A-Za-z0-9._~+/=-]"
+    fi
+    EDGE_GUARD=$(printf '    @denied_edge not header X-Staging-Access "%s"\n    handle @denied_edge {\n        respond "Forbidden" 403\n    }' "$EDGE_SECRET")
+    STAGING_EDGE_GUARD="$EDGE_GUARD" python3 - "$site_tmp" <<'PY'
+import os, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace("__STAGING_EDGE_GUARD_BLOCK__", os.environ["STAGING_EDGE_GUARD"]))
+PY
+  elif [[ "${STAGING_REQUIRE_EDGE_SECRET:-false}" == "true" ]]; then
+    die "STAGING_REQUIRE_EDGE_SECRET=true but missing $edge_secret_file"
+  else
+    sed -i "s|__STAGING_EDGE_GUARD_BLOCK__|    # Configure $edge_secret_file or Cloudflare Access to gate @backend routes on staging|g" "$site_tmp"
+  fi
+
+  if ! grep -Eq '^[[:space:]]*trusted_proxies[[:space:]]' "$CADDY_FILE"; then
+    local first_active_line caddy_main_tmp
+    first_active_line=$(grep -Ev '^[[:space:]]*(#|$)' "$CADDY_FILE" | head -n 1 || true)
+    if [[ "$first_active_line" != "{" ]]; then
+      caddy_main_tmp=$(mktemp "$APP_DIR/.Caddyfile.global.XXXXXX")
+      {
+        cat <<'GLOBAL'
+{
+    servers {
+        trusted_proxies static private_ranges 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+        client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+    }
+}
+
+GLOBAL
+        cat "$CADDY_FILE"
+      } > "$caddy_main_tmp"
+      install -m 0644 "$caddy_main_tmp" "$CADDY_FILE"
+      rm -f "$caddy_main_tmp"
+    else
+      log "WARNING: $CADDY_FILE already has a global options block without trusted_proxies; add Cloudflare trusted_proxies and client_ip_headers so {client_ip} resolves real client IPs"
+    fi
+  fi
+
+  if getent group caddy >/dev/null 2>&1; then
+    install -m 0640 -o root -g caddy "$site_tmp" "$CADDY_SITE_FILE"
+  else
+    install -m 0600 -o root -g root "$site_tmp" "$CADDY_SITE_FILE"
+  fi
   if ! grep -Fqx "import $CADDY_SITE_FILE" "$CADDY_FILE"; then
     printf '\n# Hotel application (managed by /opt/saliminn-staging/deploy.sh)\nimport %s\n' \
       "$CADDY_SITE_FILE" >> "$CADDY_FILE"

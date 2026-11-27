@@ -89,4 +89,23 @@ class SearchViewModelTest {
         advanceUntilIdle()
         assertEquals(1, hits)
     }
+
+    @Test
+    fun `clearing query cancels pending search before repository call runs`() = runTest {
+        val repo = FakeSearchRepository()
+        var hits = 0
+        repo.handler = { q, _ ->
+            hits++
+            Result.success(GlobalSearchResponseDto(query = q))
+        }
+        val vm = SearchViewModel(repo, null)
+        vm.setQuery("Amina")
+        vm.setType("guests")
+        vm.setQuery("a")
+        advanceTimeBy(400)
+        advanceUntilIdle()
+
+        assertEquals(0, hits)
+        assertFalse(vm.uiState.value.hasSearched)
+    }
 }

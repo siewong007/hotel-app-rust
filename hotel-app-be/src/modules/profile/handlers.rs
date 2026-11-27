@@ -23,10 +23,17 @@ pub async fn get_user_profile_handler(
 pub async fn update_user_profile_handler(
     State(pool): State<DbPool>,
     Extension(user_id): Extension<i64>,
+    current_session_id: Option<String>,
     Json(input): Json<UserProfileUpdate>,
 ) -> Result<Json<UserProfile>, ApiError> {
     Ok(Json(
-        profile_service::update_user_profile(&pool, user_id, input).await?,
+        profile_service::update_user_profile_with_context(
+            &pool,
+            user_id,
+            current_session_id.as_deref(),
+            input,
+        )
+        .await?,
     ))
 }
 

@@ -35,9 +35,9 @@ impl DisposableDatabases {
                 .fetch_one(&mut admin)
                 .await
                 .expect("read PostgreSQL server version");
-        assert_eq!(
-            server_version_num, 190000,
-            "patch lifecycle tests require PostgreSQL 19"
+        assert!(
+            server_version_num >= 190000,
+            "patch lifecycle tests require PostgreSQL 19+, got {server_version_num}"
         );
         Self {
             admin_url,
@@ -1124,12 +1124,23 @@ async fn postgres_v1_catalog_moves_late_audit_months_without_rebuilding_the_defa
     assert_eq!(audit_partition_function(&pool).await, baseline);
     assert!(!audit_partition_revision_recorded(&pool).await);
 
+    // Patch 0034 adds concurrency locks to ensure_audit_logs_partition(date), so
+    // check patch 0021's direct no-op behavior at revision 21 before running the
+    // remaining catalog through HEAD.
+    let through_21 = TemporaryCatalog::truncated_at(21);
+    assert_runner_succeeded(&run_patches(&database, Some(&through_21.path)).await);
+    assert!(audit_partition_revision_recorded(&pool).await);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(PATCH_0021))
+        .execute(&pool)
+        .await
+        .expect("re-running patch 0021's body at revision 21 must be a no-op");
+
     let first_run = run_patches(&database, None).await;
     assert_runner_succeeded(&first_run);
     assert_eq!(
         audit_partition_function(&pool).await,
         catalog_head,
-        "patch 0021 must converge a deployed database onto the fresh-install definition"
+        "patch 0021+ must converge a deployed database onto the fresh-install definition"
     );
     assert_eq!(
         schema_inventory(&database).await,
@@ -1144,15 +1155,11 @@ async fn postgres_v1_catalog_moves_late_audit_months_without_rebuilding_the_defa
         "patch 0021 must record its revision: {revisions:?}"
     );
 
-    // Re-runs are no-ops: the runner skips the recorded revision, and the
-    // patch body itself accepts its own definition.
+    // Re-running the full catalog is a no-op.
     assert_runner_succeeded(&run_patches(&database, None).await);
     assert_eq!(revision_snapshot(&pool).await, revisions);
-    sqlx::raw_sql(sqlx::AssertSqlSafe(PATCH_0021))
-        .execute(&pool)
-        .await
-        .expect("re-running patch 0021's body must be a no-op");
     assert_eq!(audit_partition_function(&pool).await, catalog_head);
+    drop(through_21);
 
     // Rows for months without a partition land in the DEFAULT one. Creating
     // March late must move the March row only and keep the default table.
@@ -3124,6 +3131,327 @@ async fn postgres_v1_patch_0033_applies_and_skips_idempotently() {
         vec!["reviews:create".to_string()],
         "patch 0033 must revoke staff read/update permissions from the guest role"
     );
+
+    pool.close().await;
+    databases.cleanup().await;
+}
+
+const PATCH_0034: &str =
+    include_str!("../database/postgres/patches/0034_db_perf_integrity_hardening.sql");
+
+#[tokio::test]
+async fn postgres_v1_patch_0034_applies_and_skips_idempotently() {
+    let Some(database_url) = database_url_or_skip() else {
+        return;
+    };
+    let mut databases = DisposableDatabases::connect(&database_url).await;
+    let database = databases.create("patch_0034").await;
+    let pool = install_v1(&database).await;
+
+    let through_34 = TemporaryCatalog::truncated_at(34);
+    let first_run = run_patches(&database, Some(&through_34.path)).await;
+    assert_runner_succeeded(&first_run);
+    let revisions = revision_snapshot(&pool).await;
+    assert!(
+        revisions
+            .iter()
+            .any(|(version, name, _, _)| *version == 34 && name == "db-perf-integrity-hardening"),
+        "patch 0034 must record its revision: {revisions:?}"
+    );
+
+    let second_run = run_patches(&database, Some(&through_34.path)).await;
+    assert_runner_succeeded(&second_run);
+    assert_eq!(revision_snapshot(&pool).await, revisions);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0034)))
+        .execute(&pool)
+        .await
+        .expect("re-running patch 0034 body directly must be a no-op");
+
+    // Verify redundant indexes were dropped and new critical indexes exist.
+    let dropped_still_present: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('idx_bookings_room', 'uq_guest_preferences_key', 'idx_vouchers_promotion_guest', 'idx_audit_logs_created_at_brin')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("check dropped redundant indexes");
+    assert_eq!(dropped_still_present, 0);
+
+    for index_name in [
+        "idx_payments_group_payment_ref",
+        "idx_loyalty_transactions_payment_id",
+        "idx_invoices_invoice_number_pattern",
+        "idx_bookings_check_out_status",
+        "idx_rate_limit_buckets_window_start",
+        "idx_audit_logs_action_created",
+    ] {
+        let exists: bool = sqlx::query_scalar("SELECT to_regclass('public.' || $1) IS NOT NULL")
+            .bind(index_name)
+            .fetch_one(&pool)
+            .await
+            .expect("check created index");
+        assert!(exists, "patch 0034 must ensure index {index_name} exists");
+    }
+
+    let reason_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM ekyc_reason_codes WHERE is_active = true")
+            .fetch_one(&pool)
+            .await
+            .expect("count seeded ekyc reason codes");
+    assert!(
+        reason_count >= 8,
+        "expected eKYC reason codes seeded, got {reason_count}"
+    );
+
+    // Verify same-day hourly bookings cannot overlap while active.
+    sqlx::query("INSERT INTO guests (id, nick_name) OVERRIDING SYSTEM VALUE VALUES (995001, 'Hourly Test') ON CONFLICT (id) DO NOTHING")
+        .execute(&pool).await.unwrap();
+    let room_id: i64 =
+        sqlx::query_scalar("SELECT id FROM rooms WHERE is_active = true ORDER BY id LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO bookings (id, booking_number, guest_id, room_id, check_in_date, check_out_date, room_rate, subtotal, total_amount, status, payment_status)
+         OVERRIDING SYSTEM VALUE VALUES (995001, 'BK-995001', 995001, $1, DATE '2095-01-10', DATE '2095-01-10', 100, 100, 100, 'confirmed', 'unpaid')",
+    )
+    .bind(room_id)
+    .execute(&pool)
+    .await
+    .expect("first hourly booking succeeds");
+
+    let overlap = sqlx::query(
+        "INSERT INTO bookings (id, booking_number, guest_id, room_id, check_in_date, check_out_date, room_rate, subtotal, total_amount, status, payment_status)
+         OVERRIDING SYSTEM VALUE VALUES (995002, 'BK-995002', 995001, $1, DATE '2095-01-10', DATE '2095-01-10', 100, 100, 100, 'confirmed', 'unpaid')",
+    )
+    .bind(room_id)
+    .execute(&pool)
+    .await
+    .expect_err("overlapping active hourly booking must be rejected");
+    assert!(
+        overlap
+            .to_string()
+            .contains("bookings_no_room_date_overlap")
+    );
+
+    // Verify room_current_occupancy emits 1 row per room even on same-day turnover.
+    let today: chrono::NaiveDate = sqlx::query_scalar("SELECT CURRENT_DATE")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO bookings (id, booking_number, guest_id, room_id, check_in_date, check_out_date, room_rate, subtotal, total_amount, status, payment_status)
+         OVERRIDING SYSTEM VALUE VALUES
+         (995003, 'BK-995003', 995001, $1, $2 - 1, $2, 100, 100, 100, 'late_checkout', 'paid'),
+         (995004, 'BK-995004', 995001, $1, $2, $2 + 1, 100, 100, 100, 'checked_in', 'paid')",
+    )
+    .bind(room_id)
+    .bind(today)
+    .execute(&pool)
+    .await
+    .expect("insert turnover bookings");
+    let room_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM room_current_occupancy WHERE room_id = $1")
+            .bind(room_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        room_rows, 1,
+        "same-day turnover must not duplicate room_current_occupancy"
+    );
+
+    // Verify sync_booking_payment_status subtracts room-charge refunds.
+    sqlx::query(
+        "INSERT INTO payments (id, booking_id, amount, payment_method, payment_type, status, notes)
+         OVERRIDING SYSTEM VALUE VALUES
+         (995001, 995001, 100.00, 'cash', 'booking', 'completed', NULL),
+         (995002, 995001, 40.00, 'cash', 'refund', 'refunded', 'Room charge refunded: partial')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let pay_status: String =
+        sqlx::query_scalar("SELECT payment_status FROM bookings WHERE id = 995001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        pay_status, "partial",
+        "trigger must subtract room-charge refund"
+    );
+
+    // Verify enforce_booking_tourism_tax accepts 0.
+    sqlx::query("UPDATE system_settings SET value = '0' WHERE key = 'tourism_tax_rate'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO guests (id, nick_name, tourism_type) OVERRIDING SYSTEM VALUE VALUES (995002, 'Foreign Zero', 'foreign') ON CONFLICT (id) DO NOTHING").execute(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO bookings (id, booking_number, guest_id, room_id, check_in_date, check_out_date, room_rate, subtotal, total_amount, status, payment_status)
+         OVERRIDING SYSTEM VALUE VALUES (995005, 'BK-995005', 995002, $1, DATE '2095-02-01', DATE '2095-02-03', 100, 200, 200, 'confirmed', 'unpaid')",
+    )
+    .bind(room_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let tax: rust_decimal::Decimal =
+        sqlx::query_scalar("SELECT tourism_tax_amount FROM bookings WHERE id = 995005")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        tax,
+        rust_decimal::Decimal::ZERO,
+        "tourism_tax_rate=0 must yield 0 tax"
+    );
+
+    pool.close().await;
+    databases.cleanup().await;
+}
+
+const PATCH_0035: &str =
+    include_str!("../database/postgres/patches/0035_bughunter_security_fixes.sql");
+
+#[tokio::test]
+async fn postgres_v1_patch_0035_applies_and_skips_idempotently() {
+    let Some(database_url) = database_url_or_skip() else {
+        return;
+    };
+    let mut databases = DisposableDatabases::connect(&database_url).await;
+    let database = databases.create("patch_0035").await;
+    let pool = install_v1(&database).await;
+
+    let first_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&first_run);
+    let revisions = revision_snapshot(&pool).await;
+    assert!(
+        revisions
+            .iter()
+            .any(|(version, name, _, _)| *version == 35 && name == "bughunter-security-fixes"),
+        "patch 0035 must record its revision: {revisions:?}"
+    );
+
+    let second_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&second_run);
+    assert_eq!(revision_snapshot(&pool).await, revisions);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0035)))
+        .execute(&pool)
+        .await
+        .expect("re-running patch 0035 body directly must be a no-op");
+
+    let oauth_table_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.consumed_oauth_tokens') IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("check consumed_oauth_tokens table");
+    assert!(
+        oauth_table_exists,
+        "patch 0035 must ensure consumed_oauth_tokens exists"
+    );
+
+    for constraint_name in [
+        "bookings_extra_bed_charge_non_negative",
+        "bookings_extra_bed_count_non_negative",
+        "bookings_room_rate_non_negative",
+        "bookings_subtotal_non_negative",
+        "bookings_total_amount_non_negative",
+    ] {
+        let present: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid = 'public.bookings'::regclass AND conname = $1)",
+        )
+        .bind(constraint_name)
+        .fetch_one(&pool)
+        .await
+        .expect("check booking CHECK constraint");
+        assert!(
+            present,
+            "patch 0035 must ensure constraint {constraint_name} exists"
+        );
+    }
+
+    pool.close().await;
+    databases.cleanup().await;
+}
+
+const PATCH_0036: &str =
+    include_str!("../database/postgres/patches/0036_wave2_security_hardening.sql");
+
+#[tokio::test]
+async fn postgres_v1_patch_0036_applies_and_skips_idempotently() {
+    let Some(database_url) = database_url_or_skip() else {
+        return;
+    };
+    let mut databases = DisposableDatabases::connect(&database_url).await;
+    let database = databases.create("patch_0036").await;
+    let pool = install_v1(&database).await;
+
+    let first_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&first_run);
+    let revisions = revision_snapshot(&pool).await;
+    assert!(
+        revisions
+            .iter()
+            .any(|(version, name, _, _)| *version == 36 && name == "wave2-security-hardening"),
+        "patch 0036 must record its revision: {revisions:?}"
+    );
+
+    let second_run = run_patches(&database, None).await;
+    assert_runner_succeeded(&second_run);
+    assert_eq!(revision_snapshot(&pool).await, revisions);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*psql_script_for_sqlx(PATCH_0036)))
+        .execute(&pool)
+        .await
+        .expect("re-running patch 0036 body directly must be a no-op");
+
+    let has_prev_hash: bool = sqlx::query_scalar(
+        "SELECT EXISTS( \
+            SELECT 1 FROM information_schema.columns \
+            WHERE table_schema = 'public' \
+              AND table_name = 'refresh_tokens' \
+              AND column_name = 'previous_token_hash' \
+        )",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("check refresh_tokens.previous_token_hash column");
+    assert!(
+        has_prev_hash,
+        "patch 0036 must add refresh_tokens.previous_token_hash"
+    );
+
+    let err = sqlx::query(
+        "SELECT public.transfer_import_ddl('public', 'audit_logs', 'triggers_off', NULL)",
+    )
+    .execute(&pool)
+    .await
+    .expect_err("transfer_import_ddl must refuse disabling triggers on public.audit_logs");
+    let db_err = err.as_database_error().expect("database error");
+    assert_eq!(
+        db_err.code().as_deref(),
+        Some("42501"),
+        "expected SQLSTATE 42501 when disabling audit_logs triggers, got {db_err}"
+    );
+
+    let hotel_app_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = 'hotel_app')")
+            .fetch_one(&pool)
+            .await
+            .expect("check hotel_app role");
+    if hotel_app_exists {
+        for priv_name in ["UPDATE", "DELETE", "TRUNCATE"] {
+            let has_priv: bool = sqlx::query_scalar(
+                "SELECT pg_catalog.has_table_privilege('hotel_app', 'public.audit_logs'::regclass, $1)",
+            )
+            .bind(priv_name)
+            .fetch_one(&pool)
+            .await
+            .expect("check hotel_app audit_logs privilege");
+            assert!(
+                !has_priv,
+                "hotel_app must not hold {priv_name} on public.audit_logs after patch 0036"
+            );
+        }
+    }
 
     pool.close().await;
     databases.cleanup().await;

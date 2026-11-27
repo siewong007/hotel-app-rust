@@ -56,12 +56,56 @@ pub struct GroupReceipt {
     pub grand_total: Decimal,
 }
 
+/// Read an already-issued combined receipt for a booking group without minting
+/// any missing invoices (safe for `payments:read`).
+pub async fn group_receipt_read_only(
+    pool: &DbPool,
+    group_id: i64,
+) -> Result<GroupReceipt, ApiError> {
+    let (group, booking_ids, invoice_by_booking) =
+        load_group_receipt_inputs(pool, group_id).await?;
+    if booking_ids
+        .iter()
+        .any(|id| !invoice_by_booking.contains_key(id))
+    {
+        return Err(ApiError::NotFound(
+            "Group receipt has not been issued yet".to_string(),
+        ));
+    }
+    assemble_group_receipt(pool, group_id, group, &booking_ids, &invoice_by_booking).await
+}
+
 /// Build (and, where missing, issue the per-room invoices for) a group receipt.
 pub async fn group_receipt(
     pool: &DbPool,
     user_id: i64,
     group_id: i64,
 ) -> Result<GroupReceipt, ApiError> {
+    let (group, booking_ids, mut invoice_by_booking) =
+        load_group_receipt_inputs(pool, group_id).await?;
+
+    for &booking_id in &booking_ids {
+        if let std::collections::hash_map::Entry::Vacant(e) = invoice_by_booking.entry(booking_id) {
+            let invoice_number =
+                super::service::ensure_invoice_for_booking(pool, booking_id, user_id).await?;
+            e.insert(invoice_number);
+        }
+    }
+
+    assemble_group_receipt(pool, group_id, group, &booking_ids, &invoice_by_booking).await
+}
+
+async fn load_group_receipt_inputs(
+    pool: &DbPool,
+    group_id: i64,
+) -> Result<
+    (
+        GroupHeader,
+        Vec<i64>,
+        std::collections::HashMap<i64, String>,
+    ),
+    ApiError,
+> {
     let group: Option<GroupHeader> = sqlx::query_as(
         "SELECT bg.group_number, bg.guest_id, g.nick_name AS guest_name, bg.check_in_date, \
          bg.check_out_date, bg.currency, bg.payment_status \
@@ -90,32 +134,56 @@ pub async fn group_receipt(
         ));
     }
 
-    let mut rooms = Vec::with_capacity(booking_ids.len());
-    for booking_id in booking_ids {
-        let invoice_number =
-            super::service::ensure_invoice_for_booking(pool, booking_id, user_id).await?;
-        let row: GroupReceiptRow = sqlx::query_as(
-            "SELECT b.id AS booking_id, b.booking_number, $2::text AS invoice_number, \
-             r.room_number, rt.name AS room_type, b.check_in_date, b.check_out_date, \
-             (b.check_out_date - b.check_in_date)::int AS nights, \
-             b.total_amount AS room_total, \
-             COALESCE(b.tourism_tax_amount, 0) AS tourism_tax_amount, \
-             COALESCE(b.extra_bed_count, 0)::int AS extra_bed_count, \
-             COALESCE(b.extra_bed_charge, 0) AS extra_bed_charge, \
-             b.total_amount + COALESCE(b.tourism_tax_amount, 0) \
-               + COALESCE(b.extra_bed_charge, 0) AS total \
-             FROM bookings b \
-             LEFT JOIN rooms r ON r.id = b.room_id \
-             LEFT JOIN room_types rt ON rt.id = r.room_type_id \
-             WHERE b.id = $1",
-        )
-        .bind(booking_id)
-        .bind(&invoice_number)
-        .fetch_one(pool)
-        .await
-        .map_err(ApiError::from)?;
-        rooms.push(row);
-    }
+    let existing_rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT DISTINCT ON (booking_id) booking_id, invoice_number \
+         FROM invoices \
+         WHERE booking_id = ANY($1) \
+           AND invoice_number IS NOT NULL \
+           AND COALESCE(status, '') NOT IN ('void', 'voided', 'cancelled') \
+         ORDER BY booking_id, created_at DESC, id DESC",
+    )
+    .bind(&booking_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(ApiError::from)?;
+    let invoice_by_booking: std::collections::HashMap<i64, String> =
+        existing_rows.into_iter().collect();
+
+    Ok((group, booking_ids, invoice_by_booking))
+}
+
+async fn assemble_group_receipt(
+    pool: &DbPool,
+    group_id: i64,
+    group: GroupHeader,
+    booking_ids: &[i64],
+    invoice_by_booking: &std::collections::HashMap<i64, String>,
+) -> Result<GroupReceipt, ApiError> {
+    let invoice_numbers: Vec<String> = booking_ids
+        .iter()
+        .map(|id| invoice_by_booking.get(id).cloned().unwrap_or_default())
+        .collect();
+    let rooms: Vec<GroupReceiptRow> = sqlx::query_as(
+        "SELECT b.id AS booking_id, b.booking_number, u.invoice_number, \
+         r.room_number, rt.name AS room_type, b.check_in_date, b.check_out_date, \
+         (b.check_out_date - b.check_in_date)::int AS nights, \
+         b.total_amount AS room_total, \
+         COALESCE(b.tourism_tax_amount, 0) AS tourism_tax_amount, \
+         COALESCE(b.extra_bed_count, 0)::int AS extra_bed_count, \
+         COALESCE(b.extra_bed_charge, 0) AS extra_bed_charge, \
+         b.total_amount + COALESCE(b.tourism_tax_amount, 0) \
+           + COALESCE(b.extra_bed_charge, 0) AS total \
+         FROM UNNEST($1::bigint[], $2::text[]) WITH ORDINALITY AS u(booking_id, invoice_number, ord) \
+         JOIN bookings b ON b.id = u.booking_id \
+         LEFT JOIN rooms r ON r.id = b.room_id \
+         LEFT JOIN room_types rt ON rt.id = r.room_type_id \
+         ORDER BY u.ord",
+    )
+    .bind(booking_ids)
+    .bind(&invoice_numbers)
+    .fetch_all(pool)
+    .await
+    .map_err(ApiError::from)?;
 
     let group_payment_ref: Option<String> = sqlx::query_scalar(
         "SELECT p.metadata->>'group_payment_ref' FROM payments p \

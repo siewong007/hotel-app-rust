@@ -25,6 +25,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDateRangePickerState
@@ -50,7 +51,9 @@ import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.hotelTextFieldColors
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
+import com.hotelapp.staff.core.format.DateFormatter
 import com.hotelapp.staff.core.format.MoneyFormatter
+import com.hotelapp.staff.core.format.MoneyInputParser
 import com.hotelapp.staff.data.dto.CreateBookingRequestDto
 import com.hotelapp.staff.data.dto.GuestDto
 import com.hotelapp.staff.data.dto.RoomWithOccupancyDto
@@ -59,9 +62,12 @@ import com.hotelapp.staff.data.repository.GuestsRepository
 import com.hotelapp.staff.data.repository.RoomsRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,15 +79,20 @@ fun CreateBookingSheet(
     onDismiss: () -> Unit,
     onCreated: (Long) -> Unit,
     session: StaffSession? = null,
+    hotelTimezone: String = "Asia/Kuala_Lumpur",
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
     val scope = rememberCoroutineScope()
     val canReadRooms = session?.hasPermission("rooms:read") ?: true
     val canReadGuests = session?.hasPermission("guests:read") ?: true
+    val hotelToday = remember(hotelTimezone) {
+        runCatching { LocalDate.now(ZoneId.of(hotelTimezone)) }.getOrElse { LocalDate.now() }
+    }
 
     var guests by remember { mutableStateOf<List<GuestDto>>(emptyList()) }
     var guestQuery by remember { mutableStateOf("") }
+    var guestSearchError by remember { mutableStateOf<String?>(null) }
     var selectedGuest by remember { mutableStateOf<GuestDto?>(null) }
     var guestExpanded by remember { mutableStateOf(false) }
 
@@ -89,16 +100,22 @@ fun CreateBookingSheet(
     var selectedRoomId by remember { mutableLongStateOf(0L) }
     var roomExpanded by remember { mutableStateOf(false) }
 
-    var checkInDate by remember { mutableStateOf(LocalDate.now().toString()) }
-    var checkOutDate by remember { mutableStateOf(LocalDate.now().plusDays(1).toString()) }
+    var checkInDate by remember { mutableStateOf(hotelToday.toString()) }
+    var checkOutDate by remember { mutableStateOf(hotelToday.plusDays(1).toString()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     var source by remember { mutableStateOf("walk_in") }
     var paymentMethod by remember { mutableStateOf("cash") }
     var depositAmount by remember { mutableStateOf("") }
-    var remarks by remember { mutableStateOf("") }
+    var bookingRemarks by remember { mutableStateOf("") }
+    var specialRequests by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    fun isRoomSelectable(room: RoomWithOccupancyDto): Boolean {
+        val st = room.status?.trim()?.lowercase().orEmpty()
+        return st != "maintenance" && st != "out_of_order"
+    }
 
     LaunchedEffect(Unit) {
         if (!canReadRooms || !canReadGuests) {
@@ -108,38 +125,64 @@ fun CreateBookingSheet(
         roomsRepository.roomsWithOccupancy()
             .onSuccess { all ->
                 val sorted = all.sortedWith(
-                    compareBy<RoomWithOccupancyDto> { it.isOccupied || it.status != "available" }
+                    compareBy<RoomWithOccupancyDto> { !isRoomSelectable(it) }
+                        .thenBy { it.isOccupied || !it.status.equals("available", ignoreCase = true) }
                         .thenBy { it.roomNumber },
                 )
                 rooms = sorted
                 if (selectedRoomId == 0L) {
-                    sorted.firstOrNull()?.let { selectedRoomId = it.id }
+                    sorted.firstOrNull {
+                        isRoomSelectable(it) && !it.isOccupied &&
+                            (it.status.isNullOrBlank() || it.status.equals("available", ignoreCase = true))
+                    }?.let { selectedRoomId = it.id }
                 }
             }
             .onFailure { err ->
                 error = err.message ?: "Unable to load rooms."
-            }
-        guestsRepository.list(page = 1)
-            .onSuccess { res ->
-                guests = res.data
-            }
-            .onFailure { err ->
-                if (error == null) error = err.message ?: "Unable to load guests."
             }
     }
 
     LaunchedEffect(guestQuery) {
         if (!canReadGuests) return@LaunchedEffect
         if (guestQuery == selectedGuest?.displayName()) return@LaunchedEffect
-        delay(250)
-        guestsRepository.list(search = guestQuery, page = 1).onSuccess { res ->
-            guests = res.data
+        if (guestQuery.isNotBlank()) delay(250)
+        guestSearchError = null
+        guestsRepository.list(search = guestQuery, page = 1)
+            .onSuccess { res ->
+                guests = res.data
+                guestSearchError = null
+            }
+            .onFailure { err ->
+                guestSearchError = err.message ?: "Unable to search guests."
+            }
+    }
+
+    val paymentMethodOptions = remember(source) {
+        if (source == "website") {
+            listOf(
+                FilterOption("bank_transfer", "Bank Transfer"),
+                FilterOption("paypal", "PayPal"),
+            )
+        } else {
+            listOf(
+                FilterOption("cash", "Cash"),
+                FilterOption("card", "Card"),
+                FilterOption("bank_transfer", "Bank Transfer"),
+            )
+        }
+    }
+    LaunchedEffect(source) {
+        if (paymentMethodOptions.none { it.value == paymentMethod }) {
+            paymentMethod = paymentMethodOptions.first().value
         }
     }
 
     val selectedRoom = rooms.find { it.id == selectedRoomId }
 
-    HotelModalSheetContainer(onDismiss = { if (!isSubmitting) onDismiss() }) {
+    HotelModalSheetContainer(
+        dismissible = !isSubmitting,
+        onDismiss = { if (!isSubmitting) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -187,7 +230,13 @@ fun CreateBookingSheet(
                     containerColor = colors.surfaceOverlay,
                     modifier = Modifier.heightIn(max = 240.dp),
                 ) {
-                    if (guests.isEmpty()) {
+                    if (!guestSearchError.isNullOrBlank()) {
+                        DropdownMenuItem(
+                            text = { Text(guestSearchError!!, color = colors.danger.fg) },
+                            onClick = { guestExpanded = false },
+                            enabled = false,
+                        )
+                    } else if (guests.isEmpty()) {
                         DropdownMenuItem(
                             text = { Text("No matching guests", color = colors.textMuted) },
                             onClick = { guestExpanded = false },
@@ -195,14 +244,16 @@ fun CreateBookingSheet(
                         )
                     } else {
                         guests.forEach { guest ->
+                            val isBlacklisted = guest.isBlacklisted == true
                             DropdownMenuItem(
                                 text = {
                                     Text(
                                         text = buildString {
                                             append(guest.displayName())
                                             guest.phone?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                                            if (isBlacklisted) append(" [Blacklisted]")
                                         },
-                                        color = colors.textPrimary,
+                                        color = if (isBlacklisted) colors.danger.fg else colors.textPrimary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -217,6 +268,18 @@ fun CreateBookingSheet(
                         }
                     }
                 }
+            }
+
+            if (selectedGuest?.isBlacklisted == true) {
+                val reason = selectedGuest?.blacklistReason?.takeIf { it.isNotBlank() }
+                InlineAlertBanner(
+                    message = if (reason != null) {
+                        "Guest is blacklisted ($reason)."
+                    } else {
+                        "Warning: selected guest is marked as blacklisted."
+                    },
+                    tone = colors.danger,
+                )
             }
 
             ExposedDropdownMenuBox(
@@ -245,12 +308,18 @@ fun CreateBookingSheet(
                     modifier = Modifier.heightIn(max = 260.dp),
                 ) {
                     rooms.forEach { room ->
-                        val statusTag = if (room.isOccupied) "Occupied" else (room.status ?: "available")
+                        val selectable = isRoomSelectable(room)
+                        val statusTag = when {
+                            !selectable -> (room.status ?: "maintenance").replace('_', ' ')
+                            room.isOccupied -> "Occupied today"
+                            else -> (room.status ?: "available")
+                        }
                         DropdownMenuItem(
+                            enabled = selectable,
                             text = {
                                 Text(
                                     text = "Rm ${room.roomNumber} · ${room.roomType} ($statusTag) · ${MoneyFormatter.format(room.pricePerNight, currency)}",
-                                    color = colors.textPrimary,
+                                    color = if (selectable) colors.textPrimary else colors.textMuted,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -265,9 +334,25 @@ fun CreateBookingSheet(
                 }
             }
 
+            if (selectedRoom?.isOccupied == true) {
+                InlineAlertBanner(
+                    message = "Room ${selectedRoom.roomNumber} is occupied today — confirm check-in dates do not overlap.",
+                    tone = colors.warning,
+                )
+            }
+
+            val nightsLabel = DateFormatter.formatDateRangeWithNights(checkInDate, checkOutDate)
+                .ifBlank { "$checkInDate → $checkOutDate" }
+            val nightsCount = DateFormatter.nightsCount(checkInDate, checkOutDate) ?: 1L
+            val estimatedStay = selectedRoom?.pricePerNight?.multiply(BigDecimal(nightsCount.coerceAtLeast(1L)))
             HotelOutlinedButton(
-                text = "Stay: $checkInDate → $checkOutDate",
+                text = if (estimatedStay != null) {
+                    "Stay: $nightsLabel · Est. ${MoneyFormatter.format(estimatedStay, currency)}"
+                } else {
+                    "Stay: $nightsLabel"
+                },
                 icon = Icons.Outlined.DateRange,
+                enabled = !isSubmitting,
                 onClick = { showDatePicker = true },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -277,26 +362,23 @@ fun CreateBookingSheet(
                 options = listOf(
                     FilterOption("walk_in", "Walk-In"),
                     FilterOption("phone", "Phone"),
-                    FilterOption("online", "Direct Online"),
+                    FilterOption("website", "Direct Website"),
                 ),
                 selected = source,
-                onSelect = { source = it },
+                onSelect = { if (!isSubmitting) source = it },
             )
 
             Text("Payment Method", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             FilterChipRow(
-                options = listOf(
-                    FilterOption("cash", "Cash"),
-                    FilterOption("card", "Card"),
-                    FilterOption("bank_transfer", "Bank Transfer"),
-                ),
+                options = paymentMethodOptions,
                 selected = paymentMethod,
-                onSelect = { paymentMethod = it },
+                onSelect = { if (!isSubmitting) paymentMethod = it },
             )
 
             OutlinedTextField(
                 value = depositAmount,
                 onValueChange = { depositAmount = it },
+                enabled = !isSubmitting,
                 label = { Text("Deposit Amount (optional, $currency)") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -306,9 +388,21 @@ fun CreateBookingSheet(
             )
 
             OutlinedTextField(
-                value = remarks,
-                onValueChange = { remarks = it },
-                label = { Text("Staff Remarks / Special Requests (optional)") },
+                value = bookingRemarks,
+                onValueChange = { bookingRemarks = it },
+                enabled = !isSubmitting,
+                label = { Text("Staff Remarks (optional)") },
+                minLines = 2,
+                shape = RoundedCornerShape(12.dp),
+                colors = hotelTextFieldColors(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            OutlinedTextField(
+                value = specialRequests,
+                onValueChange = { specialRequests = it },
+                enabled = !isSubmitting,
+                label = { Text("Guest Special Requests (optional)") },
                 minLines = 2,
                 shape = RoundedCornerShape(12.dp),
                 colors = hotelTextFieldColors(),
@@ -319,14 +413,20 @@ fun CreateBookingSheet(
             HotelPrimaryButton(
                 text = if (isSubmitting) "Creating Booking..." else "Create Booking",
                 isLoading = isSubmitting,
-                enabled = selectedGuest != null && selectedRoomId > 0L,
+                enabled = !isSubmitting && selectedGuest != null && selectedRoomId > 0L,
                 onClick = {
+                    if (isSubmitting) return@HotelPrimaryButton
                     val guest = selectedGuest ?: return@HotelPrimaryButton
                     val rawDeposit = depositAmount.trim()
-                    val parsedDeposit = rawDeposit.toDoubleOrNull()
-                    if (rawDeposit.isNotEmpty() && (parsedDeposit == null || parsedDeposit <= 0.0)) {
-                        error = "Enter a valid deposit amount greater than 0, or leave blank."
-                        return@HotelPrimaryButton
+                    val parsedDeposit = if (rawDeposit.isEmpty()) {
+                        null
+                    } else {
+                        val valid = MoneyInputParser.parsePositiveAmount(rawDeposit)
+                        if (valid == null) {
+                            error = "Enter a valid deposit amount greater than 0 (max 2 decimal places), or leave blank."
+                            return@HotelPrimaryButton
+                        }
+                        valid.toDouble()
                     }
                     isSubmitting = true
                     error = null
@@ -338,8 +438,10 @@ fun CreateBookingSheet(
                                 checkInDate = checkInDate,
                                 checkOutDate = checkOutDate,
                                 paymentMethod = paymentMethod,
+                                amountPaid = parsedDeposit,
                                 source = source,
-                                bookingRemarks = remarks.trim().takeIf { it.isNotEmpty() },
+                                bookingRemarks = bookingRemarks.trim().takeIf { it.isNotEmpty() },
+                                specialRequests = specialRequests.trim().takeIf { it.isNotEmpty() },
                                 depositAmount = parsedDeposit,
                                 depositPaid = if (parsedDeposit != null) true else null,
                             ),
@@ -360,25 +462,47 @@ fun CreateBookingSheet(
     }
 
     if (showDatePicker) {
+        val todayUtcMillis = remember(hotelToday) {
+            hotelToday.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }
         val pickerState = rememberDateRangePickerState(
             initialSelectedStartDateMillis = LocalDate.parse(checkInDate).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
             initialSelectedEndDateMillis = LocalDate.parse(checkOutDate).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis >= todayUtcMillis
+                override fun isSelectableYear(year: Int): Boolean = year >= hotelToday.year
+            },
         )
+        val startMs = pickerState.selectedStartDateMillis
+        val endMs = pickerState.selectedEndDateMillis
+        val isValidRange = startMs != null && endMs != null && endMs >= startMs
+        val selectedNights = if (startMs != null && endMs != null && endMs >= startMs) {
+            ChronoUnit.DAYS.between(
+                Instant.ofEpochMilli(startMs).atZone(ZoneOffset.UTC).toLocalDate(),
+                Instant.ofEpochMilli(endMs).atZone(ZoneOffset.UTC).toLocalDate(),
+            )
+        } else null
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(
+                    enabled = isValidRange,
                     onClick = {
-                        val startMs = pickerState.selectedStartDateMillis
-                        val endMs = pickerState.selectedEndDateMillis
-                        if (startMs != null && endMs != null && endMs > startMs) {
+                        if (startMs != null && endMs != null && endMs >= startMs) {
                             checkInDate = Instant.ofEpochMilli(startMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
                             checkOutDate = Instant.ofEpochMilli(endMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
+                            showDatePicker = false
                         }
-                        showDatePicker = false
                     },
                 ) {
-                    Text("Apply")
+                    Text(
+                        when (selectedNights) {
+                            0L -> "Apply (Same-Day)"
+                            null -> "Select End Date"
+                            1L -> "Apply (1 Night)"
+                            else -> "Apply ($selectedNights Nights)"
+                        },
+                    )
                 }
             },
             dismissButton = {

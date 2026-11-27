@@ -34,7 +34,9 @@ export function useEnableTwoFactor(options?: ApiRequestOptions) {
 export function useDisableTwoFactor(options?: ApiRequestOptions) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (code: string) => AuthService.disableTwoFactor(code, options),
+    gcTime: 0,
+    mutationFn: ({ code, password }: { code: string; password?: string }) =>
+      AuthService.disableTwoFactor(code, password, options),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.twoFactor.all });
     },

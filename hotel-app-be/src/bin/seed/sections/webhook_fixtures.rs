@@ -27,13 +27,13 @@ INSERT INTO public.payments (
     created_by, created_at, idempotency_key
 )
 OVERRIDING SYSTEM VALUE VALUES
-    (804130, 802112, 291.60, 'USD', 'paypal', 'booking',
+    (804130, 802112, 291.60, 'MYR', 'paypal', 'booking',
         'paypal', 'PAYID-STGORDER0000001', 'pending', 'PayPal order created — awaiting capture webhook',
         800006, (SELECT today-4 FROM staging_ref)::timestamptz, 'stg-pp-order-130'),
-    (804131, 802131, 194.40, 'USD', 'paypal', 'booking',
+    (804131, 802131, 194.40, 'MYR', 'paypal', 'booking',
         'paypal', 'PAYID-STGORDER0000002', 'processing', 'PayPal capture in flight — replay CAPTURE.COMPLETED to settle',
         800006, (SELECT today-1 FROM staging_ref)::timestamptz, 'stg-pp-order-131'),
-    (804132, 802201, 194.40, 'USD', 'paypal', 'booking',
+    (804132, 802201, 194.40, 'MYR', 'paypal', 'booking',
         'paypal', 'PAYID-STGORDER0000003', 'pending', 'Anonymous-booking PayPal order awaiting capture',
-        800006, CURRENT_TIMESTAMP - interval '3 hours', 'stg-pp-order-132');
+        800006, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '3 hours', 'stg-pp-order-132');
 "#;

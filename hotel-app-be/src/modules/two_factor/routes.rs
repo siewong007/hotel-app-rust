@@ -82,6 +82,18 @@ async fn enable_2fa(
         ));
     }
     let user_id = require_auth(&headers).await?;
+    let (user_allowed, user_retry_after) = limiters
+        .reauth_user
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !user_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many re-authentication attempts. Please try again in {user_retry_after} seconds."
+            ),
+            user_retry_after,
+        ));
+    }
     handlers::enable_2fa_handler(State(pool), user_id, Json(req)).await
 }
 

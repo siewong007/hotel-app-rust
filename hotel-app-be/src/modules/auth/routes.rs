@@ -280,6 +280,18 @@ async fn resend_verification(
             retry_after,
         ));
     }
+    super::turnstile::verify_request(&headers, ip, "resend_verification").await?;
+    let sanitized_email = crate::utils::sanitization::Sanitizer::sanitize_email(&req.email);
+    let (email_allowed, email_retry_after) = limiters
+        .resend_verification_email
+        .check_with_retry(format!("verify_email:{sanitized_email}"))
+        .await;
+    if !email_allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!("Too many requests. Try again in {email_retry_after} seconds."),
+            email_retry_after,
+        ));
+    }
     handlers::resend_verification_handler(State(pool), Json(req)).await
 }
 

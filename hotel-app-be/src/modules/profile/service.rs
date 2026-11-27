@@ -34,6 +34,15 @@ pub async fn get_user_profile(pool: &DbPool, user_id: i64) -> Result<UserProfile
 pub async fn update_user_profile(
     pool: &DbPool,
     user_id: i64,
+    input: UserProfileUpdate,
+) -> Result<UserProfile, ApiError> {
+    update_user_profile_with_context(pool, user_id, None, input).await
+}
+
+pub async fn update_user_profile_with_context(
+    pool: &DbPool,
+    user_id: i64,
+    current_session_id: Option<&str>,
     mut input: UserProfileUpdate,
 ) -> Result<UserProfile, ApiError> {
     if let Some(full_name) = &input.full_name {
@@ -53,9 +62,16 @@ pub async fn update_user_profile(
         .validate()
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
 
-    if let Some(full_name) = input.full_name {
-        UserRepository::update_full_name(pool, user_id, &full_name).await?;
-    }
+    let full_name = input.full_name;
+    let phone = input.phone;
+    let avatar_url = input.avatar_url;
+    let current_password = input.current_password;
+    let totp_code = input
+        .totp_code
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_string);
+
     if let Some(email) = input.email {
         let account = UserRepository::find_by_id(pool, user_id)
             .await?
@@ -91,12 +107,25 @@ pub async fn update_user_profile(
             // the guest out of the account they just completed.
             crate::services::account_emails::try_send_email_verification(pool, user_id).await;
         } else if email_changed {
+            // Verify step-up credentials before checking email uniqueness so an
+            // unverified session cannot probe other users' addresses.
+            crate::modules::auth::service::ensure_step_up(
+                pool,
+                user_id,
+                current_password.as_deref(),
+                totp_code.as_deref(),
+            )
+            .await?;
+
             if UserRepository::email_exists_for_other_user(pool, user_id, &email).await? {
                 return Err(ApiError::Conflict(
                     "An account with this email already exists".to_string(),
                 ));
             }
             UserRepository::update_email(pool, user_id, &email).await?;
+            AuthService::revoke_other_user_tokens(pool, user_id, current_session_id)
+                .await
+                .map_err(|error| ApiError::Database(error.to_string()))?;
             let _ = AuditLog::log_event(
                 pool,
                 AuditEvent {
@@ -107,6 +136,7 @@ pub async fn update_user_profile(
                     details: Some(serde_json::json!({
                         "old_email": account.email,
                         "new_email": email,
+                        "other_sessions_revoked": true,
                     })),
                     ..Default::default()
                 },
@@ -114,10 +144,14 @@ pub async fn update_user_profile(
             .await;
         }
     }
-    if let Some(phone) = input.phone {
+
+    if let Some(full_name) = full_name {
+        UserRepository::update_full_name(pool, user_id, &full_name).await?;
+    }
+    if let Some(phone) = phone {
         UserRepository::update_phone(pool, user_id, &phone).await?;
     }
-    if let Some(avatar_url) = input.avatar_url {
+    if let Some(avatar_url) = avatar_url {
         UserRepository::update_avatar_url(pool, user_id, &avatar_url).await?;
     }
 
@@ -134,7 +168,11 @@ pub async fn update_password(
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
     AuthService::validate_password(&input.new_password).map_err(ApiError::BadRequest)?;
 
-    let current_hash = UserRepository::get_password_hash(pool, user_id).await?;
+    let current_hash = UserRepository::get_password_hash(pool, user_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError::BadRequest("Password login is not enabled for this account".to_string())
+        })?;
     let valid = AuthService::verify_password(&input.current_password, &current_hash)
         .await
         .map_err(|_| ApiError::Internal("Password verification failed".to_string()))?;

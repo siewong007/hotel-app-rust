@@ -56,18 +56,18 @@ INSERT INTO public.users (
     is_super_admin, last_login_at, created_at
 )
 OVERRIDING SYSTEM VALUE VALUES
-    -- 2FA-enabled staff login: HotelStaging2026! + TOTP (or a recovery code).
-    (800019, 'twofa_stg', 'twofa.stg@staging.hotel-app.test', '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Two-Factor Seed', '+60-12-555-0117', 'staff', true, true, false, 0, false, CURRENT_TIMESTAMP - interval '1 day', CURRENT_TIMESTAMP - interval '30 days'),
+    -- 2FA-enabled staff login: seeded password + TOTP (or a recovery code).
+    (800019, 'twofa_stg', 'twofa.stg@staging.hotel-app.test', (SELECT staff_password_hash FROM staging_ref), 'Two-Factor Seed', '+60-12-555-0117', 'staff', true, true, false, 0, false, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '1 day', ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '30 days'),
     -- Timed lockout still in force (is_locked=false but locked_until future).
-    (800020, 'locked_timed', 'locked.timed@staging.hotel-app.test', '$2b$12$pR0XOo.29MgsqNnNI4GP7OG6nY8u76Wg6Ee84Pqc6g1qzZeVxoUPK', 'Timed Lockout Seed', '+60-12-555-0118', 'staff', true, true, false, 5, false, NULL, CURRENT_TIMESTAMP - interval '10 days');
+    (800020, 'locked_timed', 'locked.timed@staging.hotel-app.test', (SELECT staff_password_hash FROM staging_ref), 'Timed Lockout Seed', '+60-12-555-0118', 'staff', true, true, false, 5, false, NULL, ((SELECT today FROM staging_ref)::timestamptz + interval '12 hours') - interval '10 days');
 
-UPDATE public.users SET locked_until = CURRENT_TIMESTAMP + interval '25 minutes' WHERE id = 800020;
+UPDATE public.users SET locked_until = (SELECT today + 1 FROM staging_ref)::timestamptz WHERE id = 800020;
 
 -- Pending email-verification token on the unverified account (800014),
 -- matching the registration flow's stored token shape.
 UPDATE public.users
 SET email_verification_token = 'stg-verify-' || id::text,
-    email_token_expires_at = CURRENT_TIMESTAMP + interval '20 hours'
+    email_token_expires_at = (SELECT today + 2 FROM staging_ref)::timestamptz
 WHERE id = 800014;
 
 INSERT INTO public.user_roles (user_id, role_id)

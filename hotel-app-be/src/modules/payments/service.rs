@@ -470,7 +470,7 @@ pub async fn record_payment(
                 ApiError::BadRequest(format!("Invalid payment_date '{d}'. Expected YYYY-MM-DD"))
             })?;
             let closed: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM night_audit_runs WHERE audit_date = $1 AND status = 'completed')",
+                "SELECT EXISTS(SELECT 1 FROM night_audit_runs WHERE audit_date >= $1 AND status = 'completed')",
             )
             .bind(parsed_date)
             .fetch_one(&mut *tx)
@@ -957,7 +957,7 @@ pub async fn get_invoice_preview(
     user_id: i64,
     booking_id: i64,
 ) -> Result<InvoicePreview, ApiError> {
-    let invoice = generate_invoice(pool, user_id, booking_id).await?;
+    let invoice = PaymentRepository::preview_invoice(pool, user_id, booking_id).await?;
 
     let payment = PaymentRepository::find_by_booking_id(pool, booking_id).await?;
     let booking_details = serde_json::json!({
@@ -1165,6 +1165,16 @@ pub async fn ensure_invoice_for_booking_tx(
     booking_id: i64,
     user_id: i64,
 ) -> Result<String, ApiError> {
+    let booking_exists: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM bookings WHERE id = $1 FOR UPDATE")
+            .bind(booking_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(ApiError::from)?;
+    if booking_exists.is_none() {
+        return Err(ApiError::NotFound("Booking not found".to_string()));
+    }
+
     if let Some(invoice_number) =
         PaymentRepository::existing_invoice_number(&mut **tx, booking_id).await?
     {
@@ -3526,6 +3536,7 @@ pub async fn save_payment_receipt(
     let (extension, content_type) = receipt_extension(bytes).ok_or_else(|| {
         ApiError::BadRequest("Receipt must be a JPEG, PNG, WebP, or PDF file.".to_string())
     })?;
+    let previous_receipt = PaymentRepository::receipt_file(pool, payment_id).await?;
     let directory = PathBuf::from(PAYMENT_RECEIPT_UPLOAD_DIR);
     fs::create_dir_all(&directory)
         .map_err(|_| ApiError::Internal("Unable to prepare receipt storage.".to_string()))?;
@@ -3536,16 +3547,42 @@ pub async fn save_payment_receipt(
     ));
     fs::write(&path, bytes)
         .map_err(|_| ApiError::Internal("Unable to save the receipt.".to_string()))?;
-    if let Err(error) = PaymentRepository::save_receipt_file(
-        pool,
-        payment_id,
-        &path.to_string_lossy(),
-        content_type,
-    )
-    .await
-    {
+    let tx_result: Result<(), ApiError> = async {
+        let mut tx = pool.begin().await.map_err(ApiError::from)?;
+        let locked: Option<(String, String)> =
+            sqlx::query_as("SELECT payment_method, status FROM payments WHERE id = $1 FOR UPDATE")
+                .bind(payment_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::from)?;
+        let (locked_method, locked_status) =
+            locked.ok_or_else(|| ApiError::NotFound("Payment not found.".to_string()))?;
+        if locked_method != PaymentMethod::BankTransfer.to_string() || locked_status != "pending" {
+            return Err(ApiError::BadRequest(
+                "A receipt can only be uploaded for a pending bank-transfer claim.".to_string(),
+            ));
+        }
+        PaymentRepository::save_receipt_file_tx(
+            &mut tx,
+            payment_id,
+            &path.to_string_lossy(),
+            content_type,
+        )
+        .await?;
+        tx.commit().await.map_err(ApiError::from)
+    }
+    .await;
+    if let Err(error) = tx_result {
         let _ = fs::remove_file(&path);
         return Err(error);
+    }
+    if let Some(previous) = previous_receipt
+        && previous.path != path.to_string_lossy()
+        && let Ok(root) = directory.canonicalize()
+        && let Ok(prev_canonical) = Path::new(&previous.path).canonicalize()
+        && prev_canonical.starts_with(&root)
+    {
+        let _ = fs::remove_file(prev_canonical);
     }
     AuditLog::log_event(
         pool,
@@ -4581,24 +4618,22 @@ pub async fn capture_group_paypal_payment(
             ));
         }
     }
+    let mut claim_ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
+    claim_ids.sort_unstable();
     let mut proc_tx = pool.begin().await.map_err(ApiError::from)?;
-    for (id, _, status, _) in &rows {
-        if status == "pending" {
-            let moved = sqlx::query(
-                "UPDATE payments SET status = 'processing' \
-                 WHERE id = $1 AND status = 'pending'",
-            )
-            .bind(id)
-            .execute(&mut *proc_tx)
-            .await
-            .map_err(ApiError::from)?
-            .rows_affected();
-            if moved == 0 {
-                return Err(ApiError::BadRequest(
-                    "This PayPal payment is no longer available for capture.".to_string(),
-                ));
-            }
-        }
+    let claimed = sqlx::query(
+        "UPDATE payments SET status = 'processing' \
+         WHERE id = ANY($1) AND status = 'pending'",
+    )
+    .bind(&claim_ids)
+    .execute(&mut *proc_tx)
+    .await
+    .map_err(ApiError::from)?
+    .rows_affected();
+    if claimed as usize != claim_ids.len() {
+        return Err(ApiError::BadRequest(
+            "This PayPal payment is no longer available for capture.".to_string(),
+        ));
     }
     proc_tx.commit().await.map_err(ApiError::from)?;
     let release_all = |reason: String| {

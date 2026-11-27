@@ -154,12 +154,20 @@ pub async fn list_segments(
         pagination.offset,
     )
     .await?;
-    let mut summaries = Vec::with_capacity(items.len());
-    for segment in items {
+    let mut clauses = Vec::with_capacity(items.len());
+    let mut next_param = 1;
+    for segment in &items {
         // Segments are stored validated, so compile failure means corruption —
         // surface it as a 500 rather than silently reporting 0 members.
-        let member_count = SegmentRepository::count_matching(pool, &compile(&segment, 1)?).await?;
-        summaries.push(SegmentSummary {
+        let clause = compile(segment, next_param)?;
+        next_param += clause.binds.len();
+        clauses.push(clause);
+    }
+    let counts = SegmentRepository::count_matching_batch(pool, &clauses).await?;
+    let summaries = items
+        .into_iter()
+        .zip(counts)
+        .map(|(segment, member_count)| SegmentSummary {
             id: segment.id,
             name: segment.name,
             slug: segment.slug,
@@ -168,8 +176,8 @@ pub async fn list_segments(
             is_active: segment.is_active,
             member_count,
             updated_at: segment.updated_at,
-        });
-    }
+        })
+        .collect();
     Ok(SegmentListResponse {
         items: summaries,
         total,

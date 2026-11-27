@@ -26,7 +26,7 @@ use sqlx::Connection;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-use super::crypto::{DecryptingReader, is_encrypted_backup};
+use super::crypto::{DecryptingReader, ENVELOPE_MAGIC, is_encrypted_backup};
 use super::repository::{
     DataTransferRepository, ForeignKeyRef, InsertRowOutcome, PkLookup, QualifiedTable,
     TransferTable, transfer_order,
@@ -147,6 +147,45 @@ fn stage_internal(context: &str, error: impl std::fmt::Display) -> StageUploadEr
     ))
 }
 
+static UPLOAD_OWNERS: OnceLock<Mutex<HashMap<Uuid, i64>>> = OnceLock::new();
+
+fn upload_owners() -> &'static Mutex<HashMap<Uuid, i64>> {
+    UPLOAD_OWNERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_upload_owners() -> std::sync::MutexGuard<'static, HashMap<Uuid, i64>> {
+    upload_owners()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn record_upload_owner(upload_id: Uuid, owner_user_id: i64) {
+    let mut owners = lock_upload_owners();
+    owners.retain(|id, _| *id == upload_id || staged_upload_path(*id).exists());
+    owners.insert(upload_id, owner_user_id);
+}
+
+fn remove_upload_owner(upload_id: Uuid) {
+    lock_upload_owners().remove(&upload_id);
+}
+
+fn upload_owner(upload_id: Uuid) -> Option<i64> {
+    lock_upload_owners().get(&upload_id).copied()
+}
+
+/// Ensures an HTTP caller owns `upload_id` or holds `super_admin` before any
+/// inspection, execution, or deletion touches the staged upload on disk.
+pub async fn ensure_upload_owner_or_super_admin(
+    pool: &DbPool,
+    actor_user_id: i64,
+    upload_id: Uuid,
+) -> Result<(), ApiError> {
+    if upload_owner(upload_id) == Some(actor_user_id) {
+        return Ok(());
+    }
+    crate::core::middleware::ensure_super_admin(pool, actor_user_id).await
+}
+
 /// Stream the request body to `<staging>/upload-<uuid>.part`, rename to
 /// `.json` once complete, and report the sniffed format. The `.part` file is
 /// deleted whenever the upload aborts — incomplete bodies never reach the
@@ -154,6 +193,17 @@ fn stage_internal(context: &str, error: impl std::fmt::Display) -> StageUploadEr
 pub async fn stage_backup_upload(body: Body) -> Result<UploadResponse, StageUploadError> {
     let dir = staged_upload_dir();
     stage_backup_upload_to(body, &dir, MAX_UPLOAD_BYTES).await
+}
+
+/// Stage an HTTP upload and bind its UUID to `owner_user_id` so other staff
+/// users cannot preview, execute, or discard another operator's staged file.
+pub async fn stage_backup_upload_for_user(
+    owner_user_id: i64,
+    body: Body,
+) -> Result<UploadResponse, StageUploadError> {
+    let response = stage_backup_upload(body).await?;
+    record_upload_owner(response.upload_id, owner_user_id);
+    Ok(response)
 }
 
 /// The staging loop with its target directory and byte cap parameterized —
@@ -178,43 +228,108 @@ pub async fn stage_backup_upload_to(
     let mut stream = std::pin::pin!(body.into_data_stream());
     let mut sniff = Vec::with_capacity(SNIFF_PREFIX_BYTES);
     let mut total = 0_u64;
-    // The file must be one JSON document; a body whose first non-whitespace
-    // byte is not `{` is rejected before any bytes are written.
-    let mut object_started = false;
+    // The file must be either a JSON backup object (`{...}`) or a sealed
+    // `ENVELOPE_MAGIC` binary envelope (magic right at byte 0). Buffer only
+    // long enough to distinguish the magic header across small chunks, while
+    // counting every byte (including leading whitespace) against `max_bytes`.
+    enum UploadPrefixState {
+        Pending { buf: Vec<u8>, saw_whitespace: bool },
+        Active,
+    }
+    let mut prefix_state = UploadPrefixState::Pending {
+        buf: Vec::new(),
+        saw_whitespace: false,
+    };
 
     let outcome: Result<u64, StageUploadError> = async {
         while let Some(chunk) = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
             let bytes = chunk.map_err(|error| stage_internal("read body", error))?;
-            // Every received byte counts toward the cap BEFORE the whitespace
-            // early-continue — an unbounded whitespace prefix must not bypass
-            // the mid-stream limit.
+            // Every received byte counts toward the cap BEFORE any prefix
+            // trimming — an unbounded whitespace prefix must not bypass the
+            // mid-stream limit.
             total += bytes.len() as u64;
             if total > max_bytes {
                 return Err(StageUploadError::PayloadTooLarge);
             }
-            if !object_started {
-                match bytes.iter().find(|byte| !byte.is_ascii_whitespace()) {
-                    None => continue,
-                    Some(b'{') => object_started = true,
-                    Some(_) => {
-                        return Err(StageUploadError::BadRequest(
-                            "the uploaded file is not a JSON document".to_string(),
-                        ));
+            if bytes.is_empty() {
+                continue;
+            }
+
+            let slice_to_write: std::borrow::Cow<'_, [u8]> = match &mut prefix_state {
+                UploadPrefixState::Pending {
+                    buf,
+                    saw_whitespace,
+                } => {
+                    if *saw_whitespace {
+                        match bytes.iter().position(|byte| !byte.is_ascii_whitespace()) {
+                            None => continue,
+                            Some(pos) if bytes[pos] == b'{' => {
+                                prefix_state = UploadPrefixState::Active;
+                                std::borrow::Cow::Borrowed(&bytes[pos..])
+                            }
+                            Some(_) => {
+                                return Err(StageUploadError::BadRequest(
+                                    "the uploaded file must be a JSON document or an encrypted backup".to_string(),
+                                ));
+                            }
+                        }
+                    } else {
+                        buf.extend_from_slice(&bytes);
+                        if buf.starts_with(ENVELOPE_MAGIC) {
+                            let owned = std::mem::take(buf);
+                            prefix_state = UploadPrefixState::Active;
+                            std::borrow::Cow::Owned(owned)
+                        } else if ENVELOPE_MAGIC.starts_with(buf) {
+                            continue;
+                        } else {
+                            match buf.iter().position(|byte| !byte.is_ascii_whitespace()) {
+                                None => {
+                                    *saw_whitespace = true;
+                                    buf.clear();
+                                    continue;
+                                }
+                                Some(pos) if buf[pos] == b'{' => {
+                                    let owned = buf.split_off(pos);
+                                    buf.clear();
+                                    prefix_state = UploadPrefixState::Active;
+                                    std::borrow::Cow::Owned(owned)
+                                }
+                                Some(_) => {
+                                    return Err(StageUploadError::BadRequest(
+                                        "the uploaded file must be a JSON document or an encrypted backup".to_string(),
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
-            }
+                UploadPrefixState::Active => std::borrow::Cow::Borrowed(&bytes),
+            };
+
             if sniff.len() < SNIFF_PREFIX_BYTES {
-                let take = (SNIFF_PREFIX_BYTES - sniff.len()).min(bytes.len());
-                sniff.extend_from_slice(&bytes[..take]);
+                let take = (SNIFF_PREFIX_BYTES - sniff.len()).min(slice_to_write.len());
+                sniff.extend_from_slice(&slice_to_write[..take]);
             }
-            file.write_all(&bytes)
+            file.write_all(&slice_to_write)
                 .await
                 .map_err(|error| stage_internal("write temp file", error))?;
         }
-        if !object_started {
-            return Err(StageUploadError::BadRequest(
-                "the request body is empty".to_string(),
-            ));
+        match prefix_state {
+            UploadPrefixState::Pending {
+                buf,
+                saw_whitespace,
+            } => {
+                if saw_whitespace || buf.is_empty() {
+                    return Err(StageUploadError::BadRequest(
+                        "the request body is empty".to_string(),
+                    ));
+                }
+                return Err(StageUploadError::BadRequest(
+                    "the uploaded file must be a JSON document or an encrypted backup"
+                        .to_string(),
+                ));
+            }
+            UploadPrefixState::Active => {}
         }
         file.flush()
             .await
@@ -262,7 +377,10 @@ pub async fn delete_staged_upload(upload_id: Uuid) -> Result<(), ApiError> {
         ));
     }
     match fs::remove_file(&path) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            remove_upload_owner(upload_id);
+            Ok(())
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(ApiError::NotFound(
             "staged upload not found or already consumed".to_string(),
         )),
@@ -273,6 +391,16 @@ pub async fn delete_staged_upload(upload_id: Uuid) -> Result<(), ApiError> {
             ))
         }
     }
+}
+
+/// Owner-scoped discard used by `DELETE /data-transfer/import/uploads/{uploadId}`.
+pub async fn delete_staged_upload_for_user(
+    pool: &DbPool,
+    actor_user_id: i64,
+    upload_id: Uuid,
+) -> Result<(), ApiError> {
+    ensure_upload_owner_or_super_admin(pool, actor_user_id, upload_id).await?;
+    delete_staged_upload(upload_id).await
 }
 
 /// Classify a staged backup from its first bytes. This is a sniff — upload
@@ -800,26 +928,136 @@ pub async fn preview_import(
     passphrase: Option<String>,
 ) -> Result<ImportPreview, ApiError> {
     let file = read_staged_backup(upload_id, passphrase).await?;
-    let (_, tier) = classify_backup_file(&file);
-    preview_structured(pool, upload_id, file, tier).await
+    let classification = classify_backup_file(&file);
+    preview_structured(pool, upload_id, file, classification).await
 }
 
 /// Authorized pre-flight diff enforcing super-admin access on System-tier
-/// backups before inspecting destination database rows. Business-tier sensitive
-/// files remain previewable by `data_transfer:import` holders (returning
-/// `requiresPermissions: ["data_transfer:import_sensitive"]`).
+/// backups and returning a metadata-only preview when the caller lacks
+/// `data_transfer:import_sensitive` or `settings:manage`, preventing any
+/// destination DB primary-key or record-existence probing.
 pub async fn preview_import_for_user(
     pool: &DbPool,
     user_id: i64,
     upload_id: Uuid,
     passphrase: Option<String>,
 ) -> Result<ImportPreview, ApiError> {
+    ensure_upload_owner_or_super_admin(pool, user_id, upload_id).await?;
     let file = read_staged_backup(upload_id, passphrase).await?;
-    let (_, tier) = classify_backup_file(&file);
-    if tier == TransferTier::System {
+    let classification = classify_backup_file(&file);
+    if classification.tier == TransferTier::System {
         crate::core::middleware::ensure_super_admin(pool, user_id).await?;
     }
-    preview_structured(pool, upload_id, file, tier).await
+    let has_import_sensitive = if classification.sensitive {
+        crate::core::middleware::check_permission(pool, user_id, "data_transfer:import_sensitive")
+            .await
+            .is_ok()
+    } else {
+        true
+    };
+    let has_settings_manage = if classification.touches_system_settings {
+        crate::core::middleware::check_permission(pool, user_id, "settings:manage")
+            .await
+            .is_ok()
+    } else {
+        true
+    };
+    if !has_import_sensitive || !has_settings_manage {
+        return Ok(metadata_only_preview(upload_id, file, classification));
+    }
+    preview_structured(pool, upload_id, file, classification).await
+}
+
+fn metadata_only_preview(
+    upload_id: Uuid,
+    file: BackupFile,
+    classification: BackupClassification,
+) -> ImportPreview {
+    let manifest_names: HashSet<&str> = file
+        .manifest
+        .entities
+        .iter()
+        .map(|entity| entity.name.as_str())
+        .collect();
+    let mut warnings = Vec::new();
+    for key in file.tables.keys() {
+        if !manifest_names.contains(key.as_str()) {
+            warnings.push(format!(
+                "{key} is present in the file but absent from its manifest"
+            ));
+        }
+    }
+    let declared_rows: u64 = file.integrity.entity_rows.values().sum();
+    let actual_rows: u64 = file.tables.values().map(|rows| rows.len() as u64).sum();
+    if declared_rows != actual_rows {
+        warnings.push(format!(
+            "the integrity trailer declares {declared_rows} rows but the file carries {actual_rows} — the file may be truncated or modified"
+        ));
+    }
+
+    let mut validation_errors = Vec::new();
+    if file.format != "hotel-backup" {
+        validation_errors.push(format!("unsupported backup format '{}'", file.format));
+    }
+    if file.version != 1 {
+        validation_errors.push(format!(
+            "unsupported hotel-backup version {} — this build understands version 1",
+            file.version
+        ));
+    }
+    if file.kind != "business-data" && file.kind != "full-system" {
+        validation_errors.push(format!("unsupported backup kind '{}'", file.kind));
+    }
+    if file.includes_secrets == Some(true) && file.kind != "full-system" {
+        warnings.push(
+            "the file declares it may contain secrets but is not a full-system backup — no legitimate export does this; inspect it before importing"
+                .to_string(),
+        );
+    }
+    if classification.tier == TransferTier::System {
+        warnings.push(
+            "this is a full-system backup: importing it replaces user accounts, passwords, RBAC grants and eKYC records in this database"
+                .to_string(),
+        );
+    }
+
+    let mut entities = Vec::with_capacity(file.tables.len());
+    for (key, rows) in file.tables {
+        let count = rows.len() as u64;
+        entities.push(ImportPreviewEntity {
+            name: key,
+            rows: count,
+            new: Some(count),
+            existing: Some(0),
+            skipped: Some(0),
+        });
+    }
+
+    let mut requires_permissions = Vec::new();
+    if classification.sensitive {
+        requires_permissions.push("data_transfer:import_sensitive".to_string());
+    }
+    if classification.touches_system_settings {
+        requires_permissions.push("settings:manage".to_string());
+    }
+
+    ImportPreview {
+        upload_id,
+        format: "v1".to_string(),
+        version: Some(file.version),
+        export_type: file.export_type,
+        sensitive: classification.sensitive,
+        requires_permissions,
+        exported_at: Some(file.exported_at),
+        source_environment: Some(file.source.environment),
+        application_version: Some(file.application_version),
+        entities,
+        unsupported_entities: Vec::new(),
+        validation_errors,
+        relationship_problems: Vec::new(),
+        warnings,
+        total_rows: actual_rows,
+    }
 }
 
 /// Diff the staged `hotel-backup` file against the destination.
@@ -827,8 +1065,9 @@ async fn preview_structured(
     pool: &DbPool,
     upload_id: Uuid,
     file: BackupFile,
-    tier: TransferTier,
+    classification: BackupClassification,
 ) -> Result<ImportPreview, ApiError> {
+    let tier = classification.tier;
     // The manifest and integrity trailer exist precisely so this check can
     // run: a file whose row counts disagree with its own trailer was
     // truncated or modified after the export completed.
@@ -869,6 +1108,7 @@ async fn preview_structured(
             version: Some(file.version),
             export_type,
             sensitive,
+            touches_system_settings: classification.touches_system_settings,
             exported_at: Some(file.exported_at.clone()),
             source_environment: Some(file.source.environment.clone()),
             application_version: Some(file.application_version.clone()),
@@ -1145,6 +1385,8 @@ struct FileHeader<'a> {
     /// Whether the file carries sensitive entities — computed from the
     /// parsed entity names (never trusting the declared flag alone).
     sensitive: bool,
+    /// Whether the file touches `public.system_settings`, requiring `settings:manage`.
+    touches_system_settings: bool,
     exported_at: Option<String>,
     source_environment: Option<String>,
     application_version: Option<String>,
@@ -1366,6 +1608,9 @@ async fn preview_table_map(
     if header.sensitive {
         requires_permissions.push("data_transfer:import_sensitive".to_string());
     }
+    if header.touches_system_settings {
+        requires_permissions.push("settings:manage".to_string());
+    }
 
     Ok(ImportPreview {
         upload_id,
@@ -1395,6 +1640,7 @@ async fn preview_table_map(
 /// never executes.
 struct ImportJobEntry {
     upload_id: Uuid,
+    owner_user_id: i64,
     status: ImportJobState,
     progress: JobProgress,
     result: Option<ImportJobResult>,
@@ -1443,7 +1689,7 @@ enum RegisterJobError {
 /// observe "not running" before the other's insert, and a `DELETE` can no
 /// longer unlink the file between the existence check and the registration
 /// because `delete_staged_upload` holds this same lock while it unlinks.
-fn try_register_job(upload_id: Uuid) -> Result<Uuid, RegisterJobError> {
+fn try_register_job(upload_id: Uuid, owner_user_id: i64) -> Result<Uuid, RegisterJobError> {
     let mut jobs = lock_registry();
     prune_finished_jobs(&mut jobs);
     if upload_has_running_job(&jobs, upload_id) {
@@ -1457,6 +1703,7 @@ fn try_register_job(upload_id: Uuid) -> Result<Uuid, RegisterJobError> {
         job_id,
         ImportJobEntry {
             upload_id,
+            owner_user_id,
             status: ImportJobState::Running,
             progress: JobProgress {
                 entity: None,
@@ -1514,11 +1761,52 @@ pub fn import_job_status(job_id: Uuid) -> Option<ImportJobStatus> {
     })
 }
 
+/// Owner-scoped job status lookup enforcing caller ownership or `super_admin`.
+pub async fn import_job_status_for_user(
+    pool: &DbPool,
+    actor_user_id: i64,
+    job_id: Uuid,
+) -> Result<Option<ImportJobStatus>, ApiError> {
+    let entry = {
+        let mut jobs = lock_registry();
+        prune_finished_jobs(&mut jobs);
+        jobs.get(&job_id).map(|job| {
+            (
+                job.owner_user_id,
+                ImportJobStatus {
+                    status: job.status,
+                    progress: job.progress.clone(),
+                    result: job.result.clone(),
+                    error: job.error.clone(),
+                },
+            )
+        })
+    };
+    let Some((owner_user_id, status)) = entry else {
+        return Ok(None);
+    };
+    if owner_user_id != actor_user_id {
+        crate::core::middleware::ensure_super_admin(pool, actor_user_id).await?;
+    }
+    Ok(Some(status))
+}
+
 // ---------------------------------------------------------------------------
 // Execute + job runner
 // ---------------------------------------------------------------------------
 
-fn classify_backup_file(file: &BackupFile) -> (bool, TransferTier) {
+#[derive(Clone, Copy)]
+struct BackupClassification {
+    sensitive: bool,
+    tier: TransferTier,
+    touches_system_settings: bool,
+}
+
+fn classify_backup_file(file: &BackupFile) -> BackupClassification {
+    let touches_system_settings = file
+        .tables
+        .keys()
+        .any(|key| key.rsplit('.').next() == Some("system_settings"));
     let sensitive = file.format != "hotel-backup"
         || file.version != 1
         || file.includes_sensitive_data == Some(true)
@@ -1533,52 +1821,75 @@ fn classify_backup_file(file: &BackupFile) -> (bool, TransferTier) {
     } else {
         TransferTier::Business
     };
-    (sensitive, tier)
+    BackupClassification {
+        sensitive,
+        tier,
+        touches_system_settings,
+    }
 }
 
-fn classify_staged_file_sync(path: &Path, passphrase: Option<&str>) -> (bool, TransferTier) {
+fn classify_staged_file_sync(path: &Path, passphrase: Option<&str>) -> BackupClassification {
     let file = match parse_staged_file(path, passphrase) {
         Ok(file) => file,
         // A plaintext retired-format file is rejected by the job itself and
         // never imports anything, so it only needs the business tier (it is
         // still gated as sensitive). Everything else unreadable fails closed.
         Err(error) if error.starts_with(RETIRED_FORMAT_ERROR) => {
-            return (true, TransferTier::Business);
+            return BackupClassification {
+                sensitive: true,
+                tier: TransferTier::Business,
+                touches_system_settings: false,
+            };
         }
-        Err(_) => return (true, TransferTier::System),
+        Err(_) => {
+            return BackupClassification {
+                sensitive: true,
+                tier: TransferTier::System,
+                touches_system_settings: true,
+            };
+        }
     };
     classify_backup_file(&file)
 }
 
-async fn classify_staged_file(upload_id: Uuid, passphrase: Option<String>) -> (bool, TransferTier) {
+async fn classify_staged_file(upload_id: Uuid, passphrase: Option<String>) -> BackupClassification {
     let path = staged_upload_path(upload_id);
     if !path.exists() {
         // Missing uploads fail closed; execute reports NotFound separately.
-        return (true, TransferTier::System);
+        return BackupClassification {
+            sensitive: true,
+            tier: TransferTier::System,
+            touches_system_settings: true,
+        };
     }
     tokio::task::spawn_blocking(move || classify_staged_file_sync(&path, passphrase.as_deref()))
         .await
-        .unwrap_or((true, TransferTier::System))
+        .unwrap_or(BackupClassification {
+            sensitive: true,
+            tier: TransferTier::System,
+            touches_system_settings: true,
+        })
 }
 
 #[cfg(test)]
 fn staged_file_is_sensitive_sync(path: &Path, passphrase: Option<&str>) -> bool {
-    classify_staged_file_sync(path, passphrase).0
+    classify_staged_file_sync(path, passphrase).sensitive
 }
 
 #[cfg(test)]
 fn staged_file_tier_sync(path: &Path, passphrase: Option<&str>) -> TransferTier {
-    classify_staged_file_sync(path, passphrase).1
+    classify_staged_file_sync(path, passphrase).tier
 }
 
 async fn staged_file_tier(upload_id: Uuid, passphrase: Option<String>) -> TransferTier {
-    classify_staged_file(upload_id, passphrase).await.1
+    classify_staged_file(upload_id, passphrase).await.tier
 }
 
 /// The permission checks that depend on the file and the requested mode —
 /// layered on top of the route's `data_transfer:import` guard:
 ///
 /// - sensitive file contents → `data_transfer:import_sensitive`
+/// - `system_settings` changes → `settings:manage` and fresh step-up token
 /// - `onConflict: "update"` → `data_transfer:override`
 /// - `mode: "restore"` → `data_transfer:restore` **and** a fresh step-up token
 ///
@@ -1590,17 +1901,23 @@ pub async fn enforce_import_permissions(
     headers: &axum::http::HeaderMap,
     request: &ImportExecuteRequest,
 ) -> Result<TransferTier, ApiError> {
-    let (is_sensitive, tier) =
-        classify_staged_file(request.upload_id, request.passphrase.clone()).await;
-    if is_sensitive {
+    let classification = classify_staged_file(request.upload_id, request.passphrase.clone()).await;
+    if classification.sensitive {
         crate::core::middleware::check_permission(pool, user_id, "data_transfer:import_sensitive")
             .await?;
     }
     // A file carrying the protected set can rewrite who can log in and what
     // they may do, so it clears the same bar as producing one: super admin
     // plus step-up re-authentication, on top of the import permissions.
-    if tier == TransferTier::System {
+    if classification.tier == TransferTier::System {
         crate::core::middleware::ensure_super_admin(pool, user_id).await?;
+        let claims = crate::core::middleware::extract_claims(headers).await?;
+        super::step_up::require_step_up(headers, &claims)?;
+    }
+    if classification.touches_system_settings {
+        if !crate::core::middleware::is_super_admin(pool, user_id).await? {
+            crate::core::middleware::check_permission(pool, user_id, "settings:manage").await?;
+        }
         let claims = crate::core::middleware::extract_claims(headers).await?;
         super::step_up::require_step_up(headers, &claims)?;
     }
@@ -1612,7 +1929,7 @@ pub async fn enforce_import_permissions(
         let claims = crate::core::middleware::extract_claims(headers).await?;
         super::step_up::require_step_up(headers, &claims)?;
     }
-    Ok(tier)
+    Ok(classification.tier)
 }
 
 pub async fn start_import_job(
@@ -1658,7 +1975,7 @@ pub(super) async fn start_import_job_with_connection(
     }
 
     let path = staged_upload_path(request.upload_id);
-    let job_id = match try_register_job(request.upload_id) {
+    let job_id = match try_register_job(request.upload_id, import_user_id) {
         Ok(job_id) => job_id,
         Err(RegisterJobError::Busy) => {
             return Err(ApiError::Conflict(
@@ -1720,6 +2037,7 @@ async fn run_import_job(
     if let Err(error) = tokio::fs::remove_file(&path).await {
         log::warn!("import job {job_id}: could not remove staged file: {error}");
     }
+    remove_upload_owner(request.upload_id);
 
     match &outcome {
         Ok(result) => {
@@ -1982,6 +2300,10 @@ async fn import_structured_backup(
     set_job_progress(job_id, None, 0, total_rows);
 
     let mut tx = connection.begin().await.map_err(ApiError::from)?;
+    sqlx::query("SET LOCAL statement_timeout = '120s'")
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
 
     // The clear and the insert both walk a foreign-key cycle (`users` <->
     // `guests`), which no ordering can satisfy while the constraints are
@@ -2104,9 +2426,11 @@ async fn import_structured_backup(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            ApiError::BadRequest(format!(
-                "Import failed a deferred foreign-key or check constraint: {error}. No changes were saved."
-            ))
+            log::error!("Data transfer import deferred constraint check failed: {error}");
+            ApiError::BadRequest(
+                "Import failed a deferred foreign-key or check constraint. No changes were saved."
+                    .to_string(),
+            )
         })?;
 
     DataTransferRepository::set_transfer_triggers(&mut tx, &ordered_tables, true).await?;
@@ -2118,6 +2442,8 @@ async fn import_structured_backup(
     // every replica's caches now rather than leaving them stale for the TTL.
     crate::core::rbac_cache::invalidate_all(pool).await;
     crate::core::settings_cache::invalidate_all(pool).await;
+    crate::core::db::clear_timezone_cache();
+    crate::core::auth::AuthService::invalidate_all_session_caches(pool).await;
     // Same for staff UI: the restore bypasses domain_for_path (no per-route
     // mutation fired), so fan every domain out or other replicas' clients
     // keep stale TanStack views until some unrelated mutation lands.
@@ -2487,6 +2813,51 @@ mod tests {
             .map(|mut d| d.next().is_some())
             .unwrap_or(false);
         assert!(!leftovers, "an aborted upload must not leave staging files");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn encrypted_envelope_stages_across_arbitrary_chunk_boundaries() {
+        use super::super::crypto::BackupEncryptor;
+
+        let dir = std::env::temp_dir().join(format!("dt-enc-stage-{}", Uuid::new_v4()));
+        let document =
+            permission_test_document(r#""public.guests":[]"#, r#""includesSensitiveData":false"#);
+        let mut encryptor = BackupEncryptor::new("test-passphrase").unwrap();
+        let mut encrypted = encryptor.push(document.as_bytes()).unwrap();
+        encrypted.extend(encryptor.finish().unwrap());
+
+        // Split right through ENVELOPE_MAGIC so prefix accumulation across chunks is exercised.
+        let part_a = encrypted[..5].to_vec();
+        let part_b = encrypted[5..20].to_vec();
+        let part_c = encrypted[20..].to_vec();
+        let stream = async_stream::stream! {
+            yield Ok::<_, std::io::Error>(part_a);
+            yield Ok::<_, std::io::Error>(part_b);
+            yield Ok::<_, std::io::Error>(part_c);
+        };
+
+        let staged = stage_backup_upload_to(Body::from_stream(stream), &dir, MAX_UPLOAD_BYTES)
+            .await
+            .expect("encrypted backup envelope must stage");
+        assert_eq!(staged.detected_format, "encrypted");
+
+        let parsed = parse_staged_file(
+            &staged_json_path(&dir, staged.upload_id),
+            Some("test-passphrase"),
+        )
+        .expect("staged encrypted upload must decrypt and parse");
+        assert_eq!(parsed.version, 1);
+
+        let truncated_magic = ENVELOPE_MAGIC[..8].to_vec();
+        let truncated =
+            stage_backup_upload_to(Body::from(truncated_magic), &dir, MAX_UPLOAD_BYTES).await;
+        assert!(matches!(truncated, Err(StageUploadError::BadRequest(_))));
+
+        let garbage =
+            stage_backup_upload_to(Body::from(b"[1,2,3]".to_vec()), &dir, MAX_UPLOAD_BYTES).await;
+        assert!(matches!(garbage, Err(StageUploadError::BadRequest(_))));
+
         let _ = fs::remove_dir_all(&dir);
     }
 

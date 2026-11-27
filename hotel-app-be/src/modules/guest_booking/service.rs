@@ -17,8 +17,9 @@ use super::repository::{
     VoucherRedemptionValues,
 };
 use super::validation::{
-    ValidatedStay, smoking_preference_note, validate_anonymous_guest, validate_client_request_id,
-    validate_complimentary_dates, validate_smoking_preference, validate_stay,
+    ValidatedStay, smoking_preference_note, validate_anonymous_client_request_id,
+    validate_anonymous_guest, validate_client_request_id, validate_complimentary_dates,
+    validate_smoking_preference, validate_stay,
 };
 use crate::core::db::DbPool;
 use crate::core::error::ApiError;
@@ -90,19 +91,14 @@ pub(crate) fn anonymous_access_token_expiry(
 }
 
 /// Expiry used when an anonymous create is retried with the same client
-/// request id. Keep the original deadline while it is still in the future so
-/// a retry cannot extend the unpaid hold; recompute only when the stored
-/// value is missing or already past (the token is hashed at rest, so retry
-/// always mints a new plaintext token).
-fn replay_anonymous_access_token_expiry(
+/// request id. Only valid while the original deadline is still in the future
+/// (`None` if missing or expired, refusing replay of stale holds).
+pub(super) fn replay_anonymous_access_token_expiry(
     now: chrono::DateTime<chrono::Utc>,
-    check_in: NaiveDate,
+    _check_in: NaiveDate,
     stored_expiry: Option<chrono::DateTime<chrono::Utc>>,
-) -> chrono::DateTime<chrono::Utc> {
-    match stored_expiry {
-        Some(expiry) if expiry > now => expiry,
-        _ => anonymous_access_token_expiry(now, check_in),
-    }
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    stored_expiry.filter(|expiry| *expiry > now)
 }
 
 async fn currency(pool: &DbPool) -> String {
@@ -947,6 +943,9 @@ fn resolve_bulk_cells(
             expected,
         });
     }
+    // Lock and write cells in canonical ascending `(room_type_id, stay_date)`
+    // order so overlapping concurrent bulk updates cannot deadlock.
+    resolved.sort_by_key(|cell| cell.key());
     Ok(resolved)
 }
 
@@ -1545,7 +1544,7 @@ pub async fn create_anonymous(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) -> Result<GuestBookingConfirmation, ApiError> {
-    let request_id = validate_client_request_id(&request.client_request_id)?;
+    let request_id = validate_anonymous_client_request_id(&request.client_request_id)?;
     let guest = validate_anonymous_guest(&request.guest)?;
     let smoking_preference = validate_smoking_preference(request.smoking_preference.as_deref())?;
 
@@ -1556,16 +1555,22 @@ pub async fn create_anonymous(
 
     // Idempotent retry: same client request id, same email. The stored
     // access token is hashed, so the original plaintext cannot be recovered
-    // — mint a replacement so a lost first response can still pay.
+    // — mint a replacement so a lost first response can still pay, but never
+    // after the original access-token deadline has expired.
     if let Some(mut existing) =
         Repository::find_anonymous_by_request_id(pool, &request_id, &guest.email).await?
     {
-        let access_token = crate::modules::guest_portal::service::generate_session_token();
         let access_token_expires_at = replay_anonymous_access_token_expiry(
             chrono::Utc::now(),
             existing.check_in_date,
             existing.access_token_expires_at,
-        );
+        )
+        .ok_or_else(|| {
+            ApiError::Conflict(
+                "This reservation hold has expired; please submit a new booking.".to_string(),
+            )
+        })?;
+        let access_token = crate::modules::guest_portal::service::generate_session_token();
         crate::modules::guest_portal::repository::GuestPortalRepository::update_precheckin_token(
             pool,
             existing.booking_id,
@@ -1688,12 +1693,18 @@ pub async fn create_anonymous(
             if let Some(mut existing) =
                 Repository::find_anonymous_by_request_id(pool, &request_id, &guest.email).await?
             {
-                let access_token = crate::modules::guest_portal::service::generate_session_token();
                 let access_token_expires_at = replay_anonymous_access_token_expiry(
                     chrono::Utc::now(),
                     existing.check_in_date,
                     existing.access_token_expires_at,
-                );
+                )
+                .ok_or_else(|| {
+                    ApiError::Conflict(
+                        "This reservation hold has expired; please submit a new booking."
+                            .to_string(),
+                    )
+                })?;
+                let access_token = crate::modules::guest_portal::service::generate_session_token();
                 crate::modules::guest_portal::repository::GuestPortalRepository::update_precheckin_token(
                     pool,
                     existing.booking_id,
@@ -2167,22 +2178,21 @@ mod anonymous_access_token_expiry_tests {
         let stored = now + Duration::days(20);
         assert_eq!(
             replay_anonymous_access_token_expiry(now, day("2026-12-01"), Some(stored)),
-            stored
+            Some(stored)
         );
     }
 
     #[test]
-    fn idempotent_retry_recomputes_when_the_stored_deadline_is_gone_or_past() {
+    fn idempotent_retry_rejects_when_the_stored_deadline_is_gone_or_past() {
         let now = at("2026-09-05");
         let check_in = day("2026-12-01");
-        let expected = anonymous_access_token_expiry(now, check_in);
         assert_eq!(
             replay_anonymous_access_token_expiry(now, check_in, None),
-            expected
+            None
         );
         assert_eq!(
             replay_anonymous_access_token_expiry(now, check_in, Some(now - Duration::seconds(1))),
-            expected
+            None
         );
     }
 }

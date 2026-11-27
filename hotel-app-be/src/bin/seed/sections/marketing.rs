@@ -22,34 +22,34 @@ INSERT INTO public.promotions (
     internal_code, objective, created_by, updated_by
 )
 OVERRIDING SYSTEM VALUE VALUES
-    (807001, 'stg-weekend-15', 'Weekend Escape 15%', '15% off weekend stays (Fri-Sun).', 'Min 2 nights. Stays must start Fri or Sat.', 'published', 'deal', 'percentage', 15.00, 200.00, 'USD',
+    (807001, 'stg-weekend-15', 'Weekend Escape 15%', '15% off weekend stays (Fri-Sun).', 'Min 2 nights. Stays must start Fri or Sat.', 'published', 'deal', 'percentage', 15.00, 200.00, 'MYR',
         (SELECT today-30 FROM staging_ref)::timestamptz, (SELECT today+60 FROM staging_ref)::timestamptz,
         (SELECT today FROM staging_ref), (SELECT today+90 FROM staging_ref), 2, 5, 200.00, 500, 37, 1, true, true, 'WKND15', 'occupancy', 800007, 800007),
-    (807002, 'stg-member-voucher-20', 'Member Voucher RM20eq', 'Flat 20 off for loyalty members.', 'One per member. Public claimable.', 'published', 'voucher', 'fixed_amount', 20.00, NULL, 'USD',
+    (807002, 'stg-member-voucher-20', 'Member Voucher RM20eq', 'Flat 20 off for loyalty members.', 'One per member. Public claimable.', 'published', 'voucher', 'fixed_amount', 20.00, NULL, 'MYR',
         (SELECT today-15 FROM staging_ref)::timestamptz, (SELECT today+30 FROM staging_ref)::timestamptz,
         (SELECT today FROM staging_ref), (SELECT today+60 FROM staging_ref), 1, NULL, 50.00, 200, 12, 1, true, true, 'MBR20', 'loyalty', 800007, 800007),
-    (807003, 'stg-corporate-10', 'Corporate Partner 10%', 'Corporate account partner rate.', 'Linked corporate accounts only.', 'published', 'deal', 'percentage', 10.00, NULL, 'USD',
+    (807003, 'stg-corporate-10', 'Corporate Partner 10%', 'Corporate account partner rate.', 'Linked corporate accounts only.', 'published', 'deal', 'percentage', 10.00, NULL, 'MYR',
         NULL, NULL, (SELECT today-90 FROM staging_ref), (SELECT today+180 FROM staging_ref), 1, NULL, 0.00, NULL, 64, 2, false, true, 'CORP10', 'retention', 800007, 800007),
-    (807004, 'stg-merdeka-sale', 'Merdeka Flash Sale', 'Flash sale — ended.', 'Was live for 48h.', 'archived', 'deal', 'percentage', 30.00, 300.00, 'USD',
+    (807004, 'stg-merdeka-sale', 'Merdeka Flash Sale', 'Flash sale — ended.', 'Was live for 48h.', 'archived', 'deal', 'percentage', 30.00, 300.00, 'MYR',
         (SELECT today-40 FROM staging_ref)::timestamptz, (SELECT today-38 FROM staging_ref)::timestamptz,
         (SELECT today-30 FROM staging_ref), (SELECT today-10 FROM staging_ref), 1, 3, 100.00, 300, 300, 1, true, false, 'MDK30', 'acquisition', 800007, 800007),
-    (807005, 'stg-paused-upsell', 'Suite Upsell Push', 'Paused pending rate review.', 'Internal only.', 'paused', 'deal', 'fixed_amount', 50.00, NULL, 'USD',
+    (807005, 'stg-paused-upsell', 'Suite Upsell Push', 'Paused pending rate review.', 'Internal only.', 'paused', 'deal', 'fixed_amount', 50.00, NULL, 'MYR',
         (SELECT today-10 FROM staging_ref)::timestamptz, (SELECT today+20 FROM staging_ref)::timestamptz,
         (SELECT today+5 FROM staging_ref), (SELECT today+90 FROM staging_ref), 3, NULL, 800.00, 50, 3, 1, false, true, 'UPSL50', 'upsell', 800007, 800001),
-    (807006, 'stg-cancelled-test', 'Cancelled Test Promo', 'Cancelled before launch.', NULL, 'cancelled', 'voucher', 'percentage', 25.00, NULL, 'USD',
+    (807006, 'stg-cancelled-test', 'Cancelled Test Promo', 'Cancelled before launch.', NULL, 'cancelled', 'voucher', 'percentage', 25.00, NULL, 'MYR',
         NULL, NULL, NULL, NULL, 1, NULL, 0.00, 10, 0, 1, false, true, 'CXL25', 'other', 800007, 800007),
-    (807007, 'stg-draft-cny', 'CNY Early Bird (draft)', 'Draft — not yet published.', NULL, 'draft', 'deal', 'percentage', 18.00, 150.00, 'USD',
+    (807007, 'stg-draft-cny', 'CNY Early Bird (draft)', 'Draft — not yet published.', NULL, 'draft', 'deal', 'percentage', 18.00, 150.00, 'MYR',
         NULL, NULL, (SELECT today+120 FROM staging_ref), (SELECT today+140 FROM staging_ref), 2, NULL, 300.00, 100, 0, 1, true, true, 'CNY18', 'occupancy', 800007, 800007),
     -- Edge states: published but claim window closed; published but claim
     -- limit reached; published voucher promo that is private (unclaimable by
     -- the public gallery but vouchers on it remain valid).
-    (807008, 'stg-window-closed', 'Window Closed Voucher', 'Published but the claim window has closed.', 'Claim period ended.', 'published', 'voucher', 'percentage', 5.00, NULL, 'USD',
+    (807008, 'stg-window-closed', 'Window Closed Voucher', 'Published but the claim window has closed.', 'Claim period ended.', 'published', 'voucher', 'percentage', 5.00, NULL, 'MYR',
         (SELECT today-40 FROM staging_ref)::timestamptz, (SELECT today-10 FROM staging_ref)::timestamptz,
         (SELECT today-30 FROM staging_ref), (SELECT today+30 FROM staging_ref), 1, NULL, 0.00, 100, 40, 1, true, true, 'WINC05', 'acquisition', 800007, 800007),
-    (807009, 'stg-limit-reached', 'Limit Reached Voucher', 'Published but the claim limit is exhausted.', 'All claims taken.', 'published', 'voucher', 'fixed_amount', 10.00, NULL, 'USD',
+    (807009, 'stg-limit-reached', 'Limit Reached Voucher', 'Published but the claim limit is exhausted.', 'All claims taken.', 'published', 'voucher', 'fixed_amount', 10.00, NULL, 'MYR',
         (SELECT today-20 FROM staging_ref)::timestamptz, (SELECT today+20 FROM staging_ref)::timestamptz,
         (SELECT today FROM staging_ref), (SELECT today+60 FROM staging_ref), 1, NULL, 0.00, 3, 3, 1, true, true, 'LIMT10', 'acquisition', 800007, 800007),
-    (807010, 'stg-private-voucher', 'Private Voucher 20%', 'Published voucher promo hidden from the public gallery.', 'Invitation only.', 'published', 'voucher', 'percentage', 20.00, NULL, 'USD',
+    (807010, 'stg-private-voucher', 'Private Voucher 20%', 'Published voucher promo hidden from the public gallery.', 'Invitation only.', 'published', 'voucher', 'percentage', 20.00, NULL, 'MYR',
         (SELECT today-15 FROM staging_ref)::timestamptz, (SELECT today+45 FROM staging_ref)::timestamptz,
         (SELECT today FROM staging_ref), (SELECT today+90 FROM staging_ref), 1, NULL, 0.00, 50, 8, 1, false, true, 'PRIV20', 'retention', 800007, 800007);
 

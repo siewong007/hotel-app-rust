@@ -30,14 +30,28 @@ function bookingTokenHeaders(token: string): Record<string, string> {
 }
 
 export class GuestPortalService {
-  static async verify(request: {
-    booking_number: string;
-    name: string;
-  }): Promise<{ token: string; expires_at: string; booking_id: string }> {
+  static async verify(
+    request: {
+      booking_number: string;
+      name: string;
+      email?: string;
+    },
+    turnstileToken?: string | null,
+  ): Promise<{ token: string; expires_at: string; booking_id: string }> {
+    const trimmedEmail = request.email?.trim();
+    const json = {
+      booking_number: request.booking_number,
+      name: request.name,
+      ...(trimmedEmail ? { email: trimmedEmail } : {}),
+    };
+    const headers: Record<string, string> = {
+      [SKIP_API_NOTIFICATION_HEADER]: 'true',
+      ...(turnstileToken ? { 'cf-turnstile-response': turnstileToken } : {}),
+    };
     return await api
       .post('guest-portal/verify', {
-        json: request,
-        headers: { [SKIP_API_NOTIFICATION_HEADER]: 'true' },
+        json,
+        headers,
       })
       .json();
   }
@@ -74,10 +88,17 @@ export class GuestPortalService {
    */
   static async claimAccount(
     token: string,
-    request: GuestPortalClaimAccountRequest
+    request: GuestPortalClaimAccountRequest,
+    turnstileToken?: string
   ): Promise<GuestPortalClaimAccountResponse> {
     return await api
-      .post('guest-portal/claim-account', { json: request, headers: bookingTokenHeaders(token) })
+      .post('guest-portal/claim-account', {
+        json: request,
+        headers: {
+          ...bookingTokenHeaders(token),
+          ...(turnstileToken ? { 'cf-turnstile-response': turnstileToken } : {}),
+        },
+      })
       .json();
   }
 

@@ -45,15 +45,15 @@ variable "ssh_ingress_cidrs" {
 }
 
 variable "web_ingress_cidrs" {
-  description = "CIDRs permitted to reach the development web and API ports."
+  description = "CIDRs permitted to reach the development web and API ports. Keep this restricted."
   type        = set(string)
-  default     = ["0.0.0.0/0"]
+  default     = []
 }
 
 variable "expose_backend_port" {
-  description = "Expose backend port 3030 for the current two-origin Compose deployment."
+  description = "Expose backend port 3030 only when required without a reverse proxy."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "freeform_tags" {

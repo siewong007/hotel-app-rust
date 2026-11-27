@@ -260,12 +260,15 @@ pub async fn list(pool: &DbPool) -> Result<Vec<BookingChannel>, ApiError> {
     Ok(rows.iter().map(row_to_channel).collect())
 }
 
-pub async fn find_by_id(pool: &DbPool, id: i64) -> Result<BookingChannel, ApiError> {
+pub async fn find_by_id<'e, E>(executor: E, id: i64) -> Result<BookingChannel, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {CHANNEL_COLUMNS} FROM booking_channels WHERE id = $1"
     )))
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?
     .ok_or_else(|| ApiError::NotFound("Booking channel not found".to_string()))?;
@@ -437,12 +440,15 @@ pub async fn list_pricing_rules(
 
 /// Active rules for a set of channels overlapping the stay window
 /// `[from, last_night]` — one query feeds the whole resolution.
-pub async fn active_pricing_rules(
-    pool: &DbPool,
+pub async fn active_pricing_rules<'e, E>(
+    executor: E,
     channel_ids: &[i64],
     from: NaiveDate,
     last_night: NaiveDate,
-) -> Result<Vec<ChannelPricingRule>, ApiError> {
+) -> Result<Vec<ChannelPricingRule>, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     if channel_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -457,7 +463,7 @@ pub async fn active_pricing_rules(
     .bind(channel_ids)
     .bind(from)
     .bind(last_night)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
     Ok(rows.iter().map(row_to_pricing_rule).collect())
@@ -633,17 +639,20 @@ pub async fn all_active_commission_rules(
 
 /// All active commission rules for a channel — the service layer picks the
 /// one covering the relevant date.
-pub async fn active_commission_rules(
-    pool: &DbPool,
+pub async fn active_commission_rules<'e, E>(
+    executor: E,
     channel_id: i64,
-) -> Result<Vec<ChannelCommissionRule>, ApiError> {
+) -> Result<Vec<ChannelCommissionRule>, ApiError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {COMMISSION_RULE_COLUMNS} FROM channel_commission_rules
          WHERE channel_id = $1 AND is_active = true
          ORDER BY priority DESC, id DESC"
     )))
     .bind(channel_id)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
     Ok(rows.iter().map(row_to_commission_rule).collect())

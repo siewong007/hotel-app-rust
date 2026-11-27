@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +27,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +53,7 @@ import com.hotelapp.staff.core.format.MoneyFormatter
 import com.hotelapp.staff.core.format.StatusFormatter
 import com.hotelapp.staff.data.dto.MaintenanceTicketDto
 import com.hotelapp.staff.data.dto.RoomWithOccupancyDto
+import java.util.UUID
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -80,7 +84,10 @@ fun MaintenanceDetailSheet(
         else -> emptyList()
     }
 
-    HotelModalSheetContainer(onDismiss = { if (!isMutating) onDismiss() }) {
+    HotelModalSheetContainer(
+        dismissible = !isMutating,
+        onDismiss = { if (!isMutating) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -117,6 +124,9 @@ fun MaintenanceDetailSheet(
             ticket.actualCost?.let { KeyValueRow("Actual Cost", MoneyFormatter.format(it, currency)) }
             KeyValueRow("Created", DateFormatter.formatTimestamp(ticket.createdAt))
             KeyValueRow("Updated", DateFormatter.formatRelativeTimestamp(ticket.updatedAt))
+            ticket.resolutionNotes?.takeIf { it.isNotBlank() }?.let { notes ->
+                KeyValueRow("Resolution Notes", notes)
+            }
 
             if (error != null) {
                 InlineAlertBanner(message = error, tone = colors.danger)
@@ -164,7 +174,6 @@ fun MaintenanceDetailSheet(
                                     text = "Mark ${StatusFormatter.humanize(target)}",
                                     enabled = !isMutating,
                                     onClick = { onTransition(target, resolutionNotes) },
-                                    modifier = Modifier.weight(1f),
                                 )
                             }
                         }
@@ -182,12 +191,17 @@ fun CreateMaintenanceTicketSheet(
     isSubmitting: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onCreate: (Long?, String, String, String, String) -> Unit,
+    onCreate: (Long?, String, String, String, String, String) -> Unit,
+    pickerError: String? = null,
+    isLoadingPickers: Boolean = false,
+    onRetryPickers: () -> Unit = {},
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
+    val idempotencyKey = remember { UUID.randomUUID().toString() }
     var selectedRoomId by remember { mutableStateOf<Long?>(null) }
     var roomQuery by remember { mutableStateOf("Common Area") }
+    var roomSelectionValid by remember { mutableStateOf(true) }
     var roomExpanded by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("other") }
@@ -203,7 +217,7 @@ fun CreateMaintenanceTicketSheet(
     }
     val visibleRooms = remember(rooms, roomQuery, selectedRoomLabel) {
         val q = roomQuery.trim().lowercase()
-        if (q.isEmpty() || roomQuery == selectedRoomLabel) {
+        if (q.isEmpty() || roomQuery == selectedRoomLabel || q == "common area") {
             rooms
         } else {
             rooms.filter {
@@ -212,7 +226,10 @@ fun CreateMaintenanceTicketSheet(
         }
     }
 
-    HotelModalSheetContainer(onDismiss = { if (!isSubmitting) onDismiss() }) {
+    HotelModalSheetContainer(
+        dismissible = !isSubmitting,
+        onDismiss = { if (!isSubmitting) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -225,6 +242,18 @@ fun CreateMaintenanceTicketSheet(
 
             if (error != null) {
                 InlineAlertBanner(message = error, tone = colors.danger)
+            }
+
+            if (pickerError != null) {
+                InlineAlertBanner(message = pickerError, tone = colors.warning)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        enabled = !isLoadingPickers && !isSubmitting,
+                        onClick = onRetryPickers,
+                    ) {
+                        Text(if (isLoadingPickers) "Retrying..." else "Retry loading rooms", color = colors.primaryOnSurface)
+                    }
+                }
             }
 
             OutlinedTextField(
@@ -244,12 +273,37 @@ fun CreateMaintenanceTicketSheet(
                 ) {
                     OutlinedTextField(
                         value = roomQuery,
-                        onValueChange = {
-                            roomQuery = it
+                        onValueChange = { nextQuery ->
+                            roomQuery = nextQuery
+                            val trimmed = nextQuery.trim()
+                            when {
+                                trimmed.isEmpty() || trimmed.equals("Common Area", ignoreCase = true) -> {
+                                    selectedRoomId = null
+                                    roomSelectionValid = true
+                                }
+                                else -> {
+                                    val exactMatch = rooms.find { room ->
+                                        trimmed.equals(room.roomNumber, ignoreCase = true) ||
+                                            trimmed.equals("Room ${room.roomNumber}", ignoreCase = true) ||
+                                            trimmed.equals("Room ${room.roomNumber} (${room.roomType})", ignoreCase = true)
+                                    }
+                                    if (exactMatch != null) {
+                                        selectedRoomId = exactMatch.id
+                                        roomSelectionValid = true
+                                    } else {
+                                        selectedRoomId = null
+                                        roomSelectionValid = false
+                                    }
+                                }
+                            }
                             roomExpanded = true
                         },
                         label = { Text("Location / Room (Optional)") },
                         placeholder = { Text("Common Area or room #") },
+                        supportingText = if (!roomSelectionValid) {
+                            { Text("Select a room from the list or Common Area", color = colors.danger.fg) }
+                        } else null,
+                        isError = !roomSelectionValid,
                         singleLine = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = roomExpanded) },
                         shape = RoundedCornerShape(12.dp),
@@ -262,7 +316,10 @@ fun CreateMaintenanceTicketSheet(
                         expanded = roomExpanded,
                         onDismissRequest = {
                             roomExpanded = false
-                            roomQuery = selectedRoomLabel
+                            if (!roomSelectionValid) {
+                                roomQuery = selectedRoomLabel
+                                roomSelectionValid = true
+                            }
                         },
                         containerColor = colors.surfaceOverlay,
                         modifier = Modifier.heightIn(max = 260.dp),
@@ -273,6 +330,7 @@ fun CreateMaintenanceTicketSheet(
                                 haptics.tick()
                                 selectedRoomId = null
                                 roomQuery = "Common Area"
+                                roomSelectionValid = true
                                 roomExpanded = false
                             },
                         )
@@ -290,6 +348,7 @@ fun CreateMaintenanceTicketSheet(
                                     haptics.tick()
                                     selectedRoomId = room.id
                                     roomQuery = "Room ${room.roomNumber} (${room.roomType})"
+                                    roomSelectionValid = true
                                     roomExpanded = false
                                 },
                             )
@@ -339,8 +398,8 @@ fun CreateMaintenanceTicketSheet(
             HotelPrimaryButton(
                 text = if (isSubmitting) "Submitting..." else "Create Ticket",
                 isLoading = isSubmitting,
-                enabled = title.isNotBlank(),
-                onClick = { onCreate(selectedRoomId, title, category, priority, description) },
+                enabled = title.isNotBlank() && roomSelectionValid,
+                onClick = { onCreate(selectedRoomId, title, category, priority, description, idempotencyKey) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

@@ -29,6 +29,7 @@ pub struct GoogleIdentity {
     pub email_verified: bool,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
+    pub expiry: i64,
 }
 
 #[derive(Deserialize)]
@@ -166,6 +167,7 @@ fn validate_claims(claims: &GoogleClaims, client_id: &str) -> Result<GoogleIdent
         email_verified: true,
         given_name: clean_name(claims.given_name.as_deref()),
         family_name: clean_name(claims.family_name.as_deref()),
+        expiry: i64::try_from(claims.expiry).unwrap_or(i64::MAX),
     })
 }
 

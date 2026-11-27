@@ -48,6 +48,8 @@ pub async fn export_booking_data_handler(
     Ok(Response::builder()
         .status(axum::http::StatusCode::OK)
         .header("Content-Type", content_type)
+        .header("Cache-Control", "private, no-store")
+        .header("Pragma", "no-cache")
         .header(
             "Content-Disposition",
             format!("attachment; filename=\"{filename}\""),
@@ -89,6 +91,7 @@ pub async fn transfer_history_handler(
         &pool,
         &[
             "data_export",
+            "data_export_started",
             "data_import",
             data_transfer_step_up::STEP_UP_ACTION,
             data_transfer_step_up::STEP_UP_DENIED_ACTION,
@@ -114,8 +117,8 @@ pub async fn transfer_history_handler(
 /// Stage an uploaded backup under `private_uploads/data-transfer/` — the body
 /// streams straight to disk and the response carries the staged upload id.
 /// A 413 has no `ApiError` variant, so the service's own error enum maps here.
-pub async fn stage_backup_upload_handler(body: Body) -> Result<Response, ApiError> {
-    match data_transfer_jobs::stage_backup_upload(body).await {
+pub async fn stage_backup_upload_handler(user_id: i64, body: Body) -> Result<Response, ApiError> {
+    match data_transfer_jobs::stage_backup_upload_for_user(user_id, body).await {
         Ok(response) => Ok(Json(response).into_response()),
         Err(StageUploadError::PayloadTooLarge) => Ok((
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -153,6 +156,8 @@ pub async fn execute_import_handler(
     headers: HeaderMap,
     Json(request): Json<ImportExecuteRequest>,
 ) -> Result<Response, ApiError> {
+    data_transfer_jobs::ensure_upload_owner_or_super_admin(&pool, user_id, request.upload_id)
+        .await?;
     let connection =
         super::repository::DataTransferRepository::try_import_connection(&pool).await?;
     let tier =
@@ -170,17 +175,22 @@ pub async fn execute_import_handler(
 
 /// Poll an import job's status. Finished entries expire after an hour.
 pub async fn import_job_status_handler(
+    State(pool): State<DbPool>,
+    user_id: i64,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<ImportJobStatus>, ApiError> {
-    data_transfer_jobs::import_job_status(job_id)
+    data_transfer_jobs::import_job_status_for_user(&pool, user_id, job_id)
+        .await?
         .map(Json)
         .ok_or_else(|| ApiError::NotFound("import job not found or expired".to_string()))
 }
 
 /// Discard a staged upload the caller no longer intends to import.
 pub async fn delete_staged_upload_handler(
+    State(pool): State<DbPool>,
+    user_id: i64,
     Path(upload_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    data_transfer_jobs::delete_staged_upload(upload_id).await?;
+    data_transfer_jobs::delete_staged_upload_for_user(&pool, user_id, upload_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

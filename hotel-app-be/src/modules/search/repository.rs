@@ -140,14 +140,14 @@ impl SearchRepository {
              FROM guests g \
              WHERE g.deleted_at IS NULL AND ( \
                  CAST(g.id AS TEXT) {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.nick_name, '') {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.first_name, '') {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.last_name, '') {lk} {p} ESCAPE '\\' \
+                 OR g.nick_name {lk} {p} ESCAPE '\\' \
+                 OR g.first_name {lk} {p} ESCAPE '\\' \
+                 OR g.last_name {lk} {p} ESCAPE '\\' \
                  OR TRIM(COALESCE(g.first_name, '') || ' ' || COALESCE(g.last_name, '')) {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.email, '') {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.phone, '') {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.ic_number, '') {lk} {p} ESCAPE '\\' \
-                 OR COALESCE(g.company_name, '') {lk} {p} ESCAPE '\\' \
+                 OR g.email {lk} {p} ESCAPE '\\' \
+                 OR g.phone {lk} {p} ESCAPE '\\' \
+                 OR g.ic_number {lk} {p} ESCAPE '\\' \
+                 OR g.company_name {lk} {p} ESCAPE '\\' \
                  OR EXISTS (SELECT 1 FROM users u \
                             WHERE u.guest_id = g.id \
                               AND u.deleted_at IS NULL \
@@ -219,13 +219,13 @@ impl SearchRepository {
              LEFT JOIN bookings b ON b.id = cl.booking_id \
              WHERE CAST(cl.id AS TEXT) {lk} {p} ESCAPE '\\' \
                 OR cl.company_name {lk} {p} ESCAPE '\\' \
-                OR COALESCE(cl.description, '') {lk} {p} ESCAPE '\\' \
-                OR COALESCE(cl.invoice_number, '') {lk} {p} ESCAPE '\\' \
-                OR COALESCE(cl.folio_number, '') {lk} {p} ESCAPE '\\' \
-                OR COALESCE(b.booking_number, '') {lk} {p} ESCAPE '\\' \
-                OR COALESCE(cl.reference_number, '') {lk} {p} ESCAPE '\\' \
-                OR COALESCE(cl.payment_reference, '') {lk} {p} ESCAPE '\\' \
-                OR COALESCE(cl.room_number, '') {lk} {p} ESCAPE '\\' \
+                OR cl.description {lk} {p} ESCAPE '\\' \
+                OR cl.invoice_number {lk} {p} ESCAPE '\\' \
+                OR cl.folio_number {lk} {p} ESCAPE '\\' \
+                OR b.booking_number {lk} {p} ESCAPE '\\' \
+                OR cl.reference_number {lk} {p} ESCAPE '\\' \
+                OR cl.payment_reference {lk} {p} ESCAPE '\\' \
+                OR cl.room_number {lk} {p} ESCAPE '\\' \
              ORDER BY cl.created_at DESC LIMIT {plim}"
         );
 

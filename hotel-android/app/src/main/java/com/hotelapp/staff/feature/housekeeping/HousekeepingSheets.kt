@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.PersonOff
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -33,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -65,6 +68,9 @@ fun AssignStaffSheet(
     currentAssigneeId: Long?,
     onAssign: (Long?) -> Unit,
     onDismiss: () -> Unit,
+    staffPickerError: String? = null,
+    isLoadingStaff: Boolean = false,
+    onRetryStaff: () -> Unit = {},
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
@@ -78,6 +84,17 @@ fun AssignStaffSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
+            if (staffPickerError != null) {
+                InlineAlertBanner(message = staffPickerError, tone = colors.danger)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        enabled = !isLoadingStaff,
+                        onClick = onRetryStaff,
+                    ) {
+                        Text(if (isLoadingStaff) "Retrying..." else "Retry", color = colors.primaryOnSurface)
+                    }
+                }
+            }
             if (currentAssigneeId != null) {
                 OutlinedCard(
                     onClick = {
@@ -107,7 +124,18 @@ fun AssignStaffSheet(
                     )
                 }
             }
-            if (staff.isEmpty()) {
+            if (isLoadingStaff && staff.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.primaryMain,
+                    )
+                }
+            } else if (staff.isEmpty()) {
                 Text(
                     text = "No assignable staff available.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -196,6 +224,7 @@ fun CreateHousekeepingTaskSheet(
     var roomQuery by remember {
         mutableStateOf(firstRoom?.let { "Room ${it.roomNumber} (${StatusFormatter.humanize(it.status)})" }.orEmpty())
     }
+    var roomSelectionValid by remember(rooms) { mutableStateOf(firstRoom != null) }
     var roomExpanded by remember { mutableStateOf(false) }
 
     var taskType by remember { mutableStateOf("cleaning") }
@@ -225,7 +254,10 @@ fun CreateHousekeepingTaskSheet(
         staff.find { it.id == selectedStaffId }?.displayName() ?: "Unassigned"
     }
 
-    HotelModalSheetContainer(onDismiss = { if (!isSubmitting) onDismiss() }) {
+    HotelModalSheetContainer(
+        dismissible = !isSubmitting,
+        onDismiss = { if (!isSubmitting) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -246,12 +278,29 @@ fun CreateHousekeepingTaskSheet(
             ) {
                 OutlinedTextField(
                     value = roomQuery,
-                    onValueChange = {
-                        roomQuery = it
+                    onValueChange = { nextQuery ->
+                        roomQuery = nextQuery
+                        val trimmed = nextQuery.trim()
+                        val exactMatch = if (trimmed.isEmpty()) null else rooms.find { room ->
+                            trimmed.equals(room.roomNumber, ignoreCase = true) ||
+                                trimmed.equals("Room ${room.roomNumber}", ignoreCase = true) ||
+                                trimmed.equals("Room ${room.roomNumber} (${StatusFormatter.humanize(room.status)})", ignoreCase = true)
+                        }
+                        if (exactMatch != null) {
+                            selectedRoomId = exactMatch.id
+                            roomSelectionValid = true
+                        } else {
+                            selectedRoomId = 0L
+                            roomSelectionValid = false
+                        }
                         roomExpanded = true
                     },
                     label = { Text("Room") },
                     placeholder = { Text("Search room # or type") },
+                    supportingText = if (!roomSelectionValid) {
+                        { Text("Select a valid room from the list", color = colors.danger.fg) }
+                    } else null,
+                    isError = !roomSelectionValid,
                     singleLine = true,
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = roomExpanded) },
                     shape = RoundedCornerShape(12.dp),
@@ -264,8 +313,9 @@ fun CreateHousekeepingTaskSheet(
                     expanded = roomExpanded,
                     onDismissRequest = {
                         roomExpanded = false
-                        if (selectedRoomLabel.isNotEmpty()) {
+                        if (!roomSelectionValid && selectedRoomLabel.isNotEmpty()) {
                             roomQuery = selectedRoomLabel
+                            roomSelectionValid = true
                         }
                     },
                     containerColor = colors.surfaceOverlay,
@@ -301,6 +351,7 @@ fun CreateHousekeepingTaskSheet(
                                     haptics.tick()
                                     selectedRoomId = room.id
                                     roomQuery = "Room ${room.roomNumber} (${StatusFormatter.humanize(room.status)})"
+                                    roomSelectionValid = true
                                     roomExpanded = false
                                 },
                             )
@@ -393,7 +444,7 @@ fun CreateHousekeepingTaskSheet(
             HotelPrimaryButton(
                 text = if (isSubmitting) "Creating..." else "Create Task",
                 isLoading = isSubmitting,
-                enabled = selectedRoomId > 0,
+                enabled = selectedRoomId > 0 && roomSelectionValid,
                 onClick = { onCreate(selectedRoomId, taskType, priority, selectedStaffId, notes) },
                 modifier = Modifier.fillMaxWidth(),
             )

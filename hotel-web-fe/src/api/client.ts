@@ -7,7 +7,7 @@ import { getAccessToken, setAccessToken, clearAccessToken } from '../auth/tokenS
 import { clearPortalToken } from '../features/guest-portal/api/portalTokenStore';
 import { clearBookingAccessToken } from '../features/guest-portal/api/bookingAccessTokenStore';
 import { clearCheckoutResume } from '../features/guest-portal/booking/checkoutResume';
-import { apiUrl, getApiBaseUrl, resolveApiRequestUrl } from '../desktop/runtimeApi';
+import { apiUrl, getApiBaseUrl, getDesktopClientToken, resolveApiRequestUrl } from '../desktop/runtimeApi';
 import {
   emitApiNotification,
   getExplicitApiNotificationMessage,
@@ -228,12 +228,18 @@ function clearStoredAuth(): void {
 export async function refreshAccessToken(): Promise<RefreshTokenResponse | null> {
   if (!refreshPromise) {
     const startGeneration = authGeneration;
-    const requestRefresh = () => ky.post(apiUrl('auth/refresh'), {
-      credentials: 'include',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      timeout: REFRESH_TIMEOUT_MS,
-    })
-      .json<RefreshTokenResponse>();
+    const requestRefresh = () => {
+      const desktopToken = getDesktopClientToken();
+      return ky.post(apiUrl('auth/refresh'), {
+        credentials: 'include',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          ...(desktopToken ? { 'X-Desktop-Client-Token': desktopToken } : {}),
+        },
+        timeout: REFRESH_TIMEOUT_MS,
+      })
+        .json<RefreshTokenResponse>();
+    };
     // Never race a sign-out: refresh only once its revoke has landed.
     refreshPromise = (pendingLogout ? pendingLogout.then(requestRefresh) : requestRefresh())
       .then(tokens => {
@@ -382,6 +388,10 @@ export const api = ky.create({
         ).pathname;
         if (requestPathname.endsWith('/auth/logout') || requestPathname.endsWith('/auth/refresh')) {
           apiRequest.headers.set('X-Requested-With', 'XMLHttpRequest');
+        }
+        const desktopToken = getDesktopClientToken();
+        if (desktopToken && !apiRequest.headers.has('X-Desktop-Client-Token')) {
+          apiRequest.headers.set('X-Desktop-Client-Token', desktopToken);
         }
         // Requests that set their own Authorization header (e.g. the guest
         // portal's session token) must not be overwritten with the staff token.

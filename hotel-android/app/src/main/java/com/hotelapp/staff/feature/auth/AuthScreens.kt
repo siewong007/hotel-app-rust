@@ -1,5 +1,6 @@
 package com.hotelapp.staff.feature.auth
 
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -73,7 +74,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
+import com.hotelapp.staff.core.auth.CredentialCancelledException
 import com.hotelapp.staff.core.auth.StaffCredentialHelper
 import com.hotelapp.staff.core.config.ServerConfigStore
 import com.hotelapp.staff.core.design.HotelCard
@@ -90,19 +93,30 @@ import com.hotelapp.staff.core.network.TwoFactorExpiredException
 import com.hotelapp.staff.core.network.TwoFactorInvalidException
 import com.hotelapp.staff.core.network.TwoFactorRequiredException
 import com.hotelapp.staff.data.repository.AuthRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+enum class LoginSubmitMethod {
+    PASSWORD,
+    TOTP,
+    PASSKEY,
+    SAVED_LOGIN,
+}
 
 data class LoginUiState(
     val username: String = "",
     val password: String = "",
     val totpCode: String = "",
     val isSubmitting: Boolean = false,
+    val submittingMethod: LoginSubmitMethod? = null,
     val errorMessage: String? = null,
     val requiresTwoFactor: Boolean = false,
+    val mfaToken: String? = null,
     val twoFactorError: String? = null,
     val twoFactorMethods: List<String> = emptyList(),
 )
@@ -114,15 +128,20 @@ class AuthViewModel(
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
+    private var authJob: Job? = null
+
     fun updateUsername(value: String) {
+        if (_uiState.value.isSubmitting) return
         _uiState.update { it.copy(username = value, errorMessage = null) }
     }
 
     fun updatePassword(value: String) {
+        if (_uiState.value.isSubmitting) return
         _uiState.update { it.copy(password = value, errorMessage = null) }
     }
 
     fun updateTotpCode(value: String) {
+        if (_uiState.value.isSubmitting) return
         _uiState.update { it.copy(totpCode = value, twoFactorError = null) }
     }
 
@@ -130,33 +149,109 @@ class AuthViewModel(
         _uiState.update { it.copy(errorMessage = message) }
     }
 
+    fun resetForServerChange() {
+        authJob?.cancel()
+        authJob = null
+        _uiState.value = LoginUiState()
+    }
+
     fun dismissTwoFactor() {
+        if (_uiState.value.isSubmitting) return
         _uiState.update {
             it.copy(
                 requiresTwoFactor = false,
+                mfaToken = null,
                 totpCode = "",
                 twoFactorError = null,
+                twoFactorMethods = emptyList(),
             )
         }
     }
 
-    fun submitLogin(onPasswordLoginSuccess: ((String, String) -> Unit)? = null) {
+    fun submitSavedPassword(
+        fetchSaved: suspend () -> Result<com.hotelapp.staff.core.auth.SavedPasswordLogin>,
+        onPasswordLoginSuccess: ((String, String) -> Unit)? = null,
+    ) {
+        if (_uiState.value.isSubmitting) return
+        authJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isSubmitting = true,
+                    submittingMethod = LoginSubmitMethod.SAVED_LOGIN,
+                    errorMessage = null,
+                )
+            }
+            val saved = fetchSaved().getOrElse { err ->
+                val message = if (err is CredentialCancelledException) {
+                    null
+                } else {
+                    err.message?.ifBlank { null } ?: "No saved staff credentials found on this device."
+                }
+                _uiState.update {
+                    it.copy(isSubmitting = false, submittingMethod = null, errorMessage = message)
+                }
+                return@launch
+            }
+            _uiState.update {
+                it.copy(
+                    username = saved.username,
+                    password = saved.password,
+                    isSubmitting = false,
+                    submittingMethod = null,
+                    errorMessage = null,
+                )
+            }
+            submitLogin(onPasswordLoginSuccess = onPasswordLoginSuccess)
+        }
+    }
+
+    fun submitLogin(
+        onPasswordLoginSuccess: ((String, String) -> Unit)? = null,
+        isBackupCode: Boolean = false,
+    ) {
         val snapshot = _uiState.value
+        if (snapshot.isSubmitting) return
         if (snapshot.username.isBlank() || snapshot.password.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Enter both username/email and password.") }
             return
         }
-        if (snapshot.requiresTwoFactor && snapshot.totpCode.isBlank()) {
-            _uiState.update { it.copy(twoFactorError = "Enter your 6-digit authenticator code or recovery code.") }
+        val supportsTotp = snapshot.twoFactorMethods.isEmpty() ||
+            snapshot.twoFactorMethods.any { it.equals("totp", ignoreCase = true) }
+        val supportsBackup = snapshot.twoFactorMethods.any { it.equals("backup_code", ignoreCase = true) }
+        if (snapshot.requiresTwoFactor && !supportsTotp && !supportsBackup) {
+            _uiState.update { it.copy(twoFactorError = "Use your passkey to complete two-factor verification.") }
             return
         }
+        val trimmedCode = snapshot.totpCode.trim()
+        if (snapshot.requiresTwoFactor) {
+            if (trimmedCode.isBlank()) {
+                _uiState.update {
+                    it.copy(twoFactorError = "Enter your 6-digit authenticator code or backup code.")
+                }
+                return
+            }
+            if (!isBackupCode && supportsTotp && (trimmedCode.length != 6 || !trimmedCode.all(Char::isDigit))) {
+                _uiState.update {
+                    it.copy(twoFactorError = "Enter all 6 digits from your authenticator app.")
+                }
+                return
+            }
+        }
 
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, twoFactorError = null) }
+        val method = if (snapshot.requiresTwoFactor) LoginSubmitMethod.TOTP else LoginSubmitMethod.PASSWORD
+        authJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isSubmitting = true,
+                    submittingMethod = method,
+                    errorMessage = null,
+                    twoFactorError = null,
+                )
+            }
             val result = authRepository.login(
                 username = snapshot.username,
                 password = snapshot.password,
-                totpCode = if (snapshot.requiresTwoFactor) snapshot.totpCode else null,
+                totpCode = if (snapshot.requiresTwoFactor) trimmedCode else null,
             )
             result
                 .onSuccess {
@@ -166,12 +261,18 @@ class AuthViewModel(
                 .onFailure { err ->
                     when (err) {
                         is TwoFactorRequiredException -> {
-                            _uiState.update {
-                                it.copy(
+                            _uiState.update { cur ->
+                                cur.copy(
                                     isSubmitting = false,
+                                    submittingMethod = null,
                                     requiresTwoFactor = true,
+                                    mfaToken = err.mfaToken,
                                     twoFactorMethods = err.availableMethods,
-                                    twoFactorError = null,
+                                    twoFactorError = if (snapshot.requiresTwoFactor) {
+                                        err.message
+                                    } else {
+                                        null
+                                    },
                                 )
                             }
                         }
@@ -182,6 +283,7 @@ class AuthViewModel(
                             _uiState.update {
                                 it.copy(
                                     isSubmitting = false,
+                                    submittingMethod = null,
                                     requiresTwoFactor = true,
                                     twoFactorError = hint,
                                 )
@@ -191,8 +293,11 @@ class AuthViewModel(
                             _uiState.update {
                                 it.copy(
                                     isSubmitting = false,
+                                    submittingMethod = null,
                                     requiresTwoFactor = false,
+                                    mfaToken = null,
                                     totpCode = "",
+                                    twoFactorMethods = emptyList(),
                                     errorMessage = err.message,
                                 )
                             }
@@ -201,9 +306,9 @@ class AuthViewModel(
                             _uiState.update {
                                 val msg = err.message ?: "Sign-in failed."
                                 if (snapshot.requiresTwoFactor) {
-                                    it.copy(isSubmitting = false, twoFactorError = msg)
+                                    it.copy(isSubmitting = false, submittingMethod = null, twoFactorError = msg)
                                 } else {
-                                    it.copy(isSubmitting = false, errorMessage = msg)
+                                    it.copy(isSubmitting = false, submittingMethod = null, errorMessage = msg)
                                 }
                             }
                         }
@@ -215,28 +320,39 @@ class AuthViewModel(
     fun signInWithPasskey(
         rpId: String,
         onChallengeReady: suspend (
+            username: String,
             challengeStandardB64: String,
             allowCredentials: List<com.hotelapp.staff.data.dto.PasskeyAllowCredentialDto>,
             rpId: String,
         ) -> Result<com.hotelapp.staff.data.dto.PasskeyLoginFinishRequestDto>,
     ) {
+        if (_uiState.value.isSubmitting) return
         val username = _uiState.value.username.trim()
         if (username.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Enter your username or email before using a passkey.") }
+            _uiState.update { it.copy(errorMessage = "Enter your staff username before using a passkey.") }
             return
         }
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+        authJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(isSubmitting = true, submittingMethod = LoginSubmitMethod.PASSKEY, errorMessage = null)
+            }
             val startRes = authRepository.passkeyLoginStart(username)
             val start = startRes.getOrElse { err ->
-                _uiState.update { it.copy(isSubmitting = false, errorMessage = err.message ?: "Passkey sign-in failed.") }
-                return@launch
-            }
-            val assertion = onChallengeReady(start.challenge, start.allowCredentials, rpId).getOrElse { err ->
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
-                        errorMessage = err.message?.takeIf { m -> !m.contains("cancel", ignoreCase = true) },
+                        submittingMethod = null,
+                        errorMessage = err.message ?: "Passkey sign-in failed.",
+                    )
+                }
+                return@launch
+            }
+            val assertion = onChallengeReady(username, start.challenge, start.allowCredentials, rpId).getOrElse { err ->
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        submittingMethod = null,
+                        errorMessage = if (err is CredentialCancelledException) null else err.message,
                     )
                 }
                 return@launch
@@ -252,11 +368,100 @@ class AuthViewModel(
                     } else {
                         rawMsg.ifBlank { "Passkey verification failed." }
                     }
-                    _uiState.update { it.copy(isSubmitting = false, errorMessage = friendly) }
+                    _uiState.update { it.copy(isSubmitting = false, submittingMethod = null, errorMessage = friendly) }
+                }
+        }
+    }
+
+    fun verifySecondFactorWithPasskey(
+        rpId: String,
+        onPasswordLoginSuccess: ((String, String) -> Unit)? = null,
+        onChallengeReady: suspend (
+            mfaToken: String,
+            challengeStandardB64: String,
+            allowCredentials: List<com.hotelapp.staff.data.dto.PasskeyAllowCredentialDto>,
+            rpId: String,
+        ) -> Result<com.hotelapp.staff.data.dto.PasskeySecondFactorFinishRequestDto>,
+    ) {
+        val snapshot = _uiState.value
+        if (snapshot.isSubmitting) return
+        val mfaToken = snapshot.mfaToken?.takeIf { it.isNotBlank() }
+        if (mfaToken == null) {
+            _uiState.update { it.copy(twoFactorError = "Missing MFA session token. Enter your password again.") }
+            return
+        }
+        authJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(isSubmitting = true, submittingMethod = LoginSubmitMethod.PASSKEY, twoFactorError = null)
+            }
+            val start = authRepository.passkeySecondFactorStart(mfaToken).getOrElse { err ->
+                if (err is TwoFactorExpiredException) {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            submittingMethod = null,
+                            requiresTwoFactor = false,
+                            mfaToken = null,
+                            totpCode = "",
+                            twoFactorMethods = emptyList(),
+                            errorMessage = err.message,
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            submittingMethod = null,
+                            twoFactorError = err.message ?: "Passkey verification failed.",
+                        )
+                    }
+                }
+                return@launch
+            }
+            val assertion = onChallengeReady(mfaToken, start.challenge, start.allowCredentials, rpId).getOrElse { err ->
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        submittingMethod = null,
+                        twoFactorError = if (err is CredentialCancelledException) null else err.message,
+                    )
+                }
+                return@launch
+            }
+            authRepository.passkeySecondFactorFinish(assertion)
+                .onSuccess {
+                    onPasswordLoginSuccess?.invoke(snapshot.username, snapshot.password)
+                    _uiState.value = LoginUiState()
+                }
+                .onFailure { err ->
+                    if (err is TwoFactorExpiredException) {
+                        _uiState.update {
+                            it.copy(
+                                isSubmitting = false,
+                                submittingMethod = null,
+                                requiresTwoFactor = false,
+                                mfaToken = null,
+                                totpCode = "",
+                                twoFactorMethods = emptyList(),
+                                errorMessage = err.message,
+                            )
+                        }
+                    } else {
+                        val rawMsg = err.message.orEmpty()
+                        val friendly = if (rawMsg.contains("origin is not allowed", ignoreCase = true)) {
+                            "Android passkey verification requires Digital Asset Links (assetlinks.json) and Android APK origin allowlisting on the backend server."
+                        } else {
+                            rawMsg.ifBlank { "Passkey verification failed." }
+                        }
+                        _uiState.update { it.copy(isSubmitting = false, submittingMethod = null, twoFactorError = friendly) }
+                    }
                 }
         }
     }
 }
+
+private fun resolveWebAuthnRpId(serverUrl: String): String? =
+    serverUrl.trim().toHttpUrlOrNull()?.host?.takeIf { it.isNotBlank() }
 
 @Composable
 fun SplashScreen(hotelName: String = "Hotel PMS") {
@@ -284,11 +489,21 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     val passwordFocusRequester = remember { FocusRequester() }
 
+    val saveScope = (context as? ComponentActivity)?.lifecycleScope ?: scope
     val saveCredentialsOnSuccess: (String, String) -> Unit = { user, pass ->
         if (credentialHelper != null) {
-            scope.launch {
-                credentialHelper.savePasswordSilently(context, user, pass)
+            val currentOrigin = serverConfig.serverUrl
+            saveScope.launch {
+                credentialHelper.savePasswordSilently(context, user, pass, currentOrigin)
             }
+        }
+    }
+
+    var lastServerUrl by remember { mutableStateOf(serverConfig.serverUrl) }
+    LaunchedEffect(serverConfig.serverUrl) {
+        if (lastServerUrl != serverConfig.serverUrl) {
+            lastServerUrl = serverConfig.serverUrl
+            viewModel.resetForServerChange()
         }
     }
 
@@ -403,6 +618,7 @@ fun LoginScreen(
                 OutlinedTextField(
                     value = state.username,
                     onValueChange = viewModel::updateUsername,
+                    enabled = !state.isSubmitting,
                     label = { Text("Username or Email") },
                     leadingIcon = {
                         Icon(Icons.Outlined.Person, contentDescription = null)
@@ -426,6 +642,7 @@ fun LoginScreen(
                 OutlinedTextField(
                     value = state.password,
                     onValueChange = viewModel::updatePassword,
+                    enabled = !state.isSubmitting,
                     label = { Text("Password") },
                     leadingIcon = {
                         Icon(Icons.Outlined.Lock, contentDescription = null)
@@ -448,8 +665,10 @@ fun LoginScreen(
                     ),
                     keyboardActions = KeyboardActions(
                         onDone = {
-                            keyboard?.hide()
-                            viewModel.submitLogin(saveCredentialsOnSuccess)
+                            if (!state.isSubmitting) {
+                                keyboard?.hide()
+                                viewModel.submitLogin(saveCredentialsOnSuccess)
+                            }
                         },
                     ),
                     modifier = Modifier
@@ -469,9 +688,11 @@ fun LoginScreen(
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
+                val isPasswordSubmitting = state.isSubmitting && state.submittingMethod == LoginSubmitMethod.PASSWORD
                 HotelPrimaryButton(
-                    text = if (state.isSubmitting) "Signing In..." else "Sign In",
-                    isLoading = state.isSubmitting,
+                    text = if (isPasswordSubmitting) "Signing In..." else "Sign In",
+                    isLoading = isPasswordSubmitting,
+                    enabled = !state.isSubmitting,
                     onClick = {
                         haptics.click()
                         keyboard?.hide()
@@ -488,22 +709,16 @@ fun LoginScreen(
                         AssistChip(
                             onClick = {
                                 haptics.click()
-                                scope.launch {
-                                    credentialHelper.getSavedPassword(context)
-                                        .onSuccess { saved ->
-                                            viewModel.updateUsername(saved.username)
-                                            viewModel.updatePassword(saved.password)
-                                            viewModel.submitLogin()
-                                        }
-                                        .onFailure { err ->
-                                            val msg = err.message.orEmpty()
-                                            if (!msg.contains("cancel", ignoreCase = true)) {
-                                                viewModel.reportError(
-                                                    msg.ifBlank { "No saved staff credentials found on this device." },
-                                                )
-                                            }
-                                        }
-                                }
+                                keyboard?.hide()
+                                viewModel.submitSavedPassword(
+                                    fetchSaved = {
+                                        credentialHelper.getSavedPassword(
+                                            context,
+                                            serverConfig.serverUrl,
+                                        )
+                                    },
+                                    onPasswordLoginSuccess = null,
+                                )
                             },
                             enabled = !state.isSubmitting,
                             leadingIcon = {
@@ -514,10 +729,13 @@ fun LoginScreen(
                         AssistChip(
                             onClick = {
                                 haptics.click()
-                                val rpHost = runCatching { java.net.URI(serverConfig.serverUrl).host }.getOrNull()
-                                    ?.takeIf { it.isNotBlank() } ?: "saliminn.my"
-                                viewModel.signInWithPasskey(rpId = rpHost) { challenge, allowCreds, rpId ->
-                                    credentialHelper.signInWithPasskey(context, challenge, allowCreds, rpId)
+                                val rpHost = resolveWebAuthnRpId(serverConfig.serverUrl)
+                                if (rpHost == null) {
+                                    viewModel.reportError("Configured server URL does not have a valid host for passkeys.")
+                                    return@AssistChip
+                                }
+                                viewModel.signInWithPasskey(rpId = rpHost) { user, challenge, allowCreds, rpId ->
+                                    credentialHelper.signInWithPasskey(context, user, challenge, allowCreds, rpId)
                                 }
                             },
                             enabled = !state.isSubmitting,
@@ -533,41 +751,81 @@ fun LoginScreen(
     }
 
     if (state.requiresTwoFactor) {
+        val rpHost = remember(serverConfig.serverUrl) {
+            resolveWebAuthnRpId(serverConfig.serverUrl)
+        }
         TwoFactorBottomSheet(
             code = state.totpCode,
             error = state.twoFactorError,
+            availableMethods = state.twoFactorMethods,
             isSubmitting = state.isSubmitting,
+            submittingMethod = state.submittingMethod,
             onCodeChange = viewModel::updateTotpCode,
-            onConfirm = {
+            onConfirm = { isBackupCode ->
                 keyboard?.hide()
-                viewModel.submitLogin(saveCredentialsOnSuccess)
+                viewModel.submitLogin(saveCredentialsOnSuccess, isBackupCode = isBackupCode)
+            },
+            onVerifyWithPasskey = if (credentialHelper != null && rpHost != null) {
+                {
+                    keyboard?.hide()
+                    viewModel.verifySecondFactorWithPasskey(
+                        rpId = rpHost,
+                        onPasswordLoginSuccess = saveCredentialsOnSuccess,
+                    ) { mfaToken, challenge, allowCreds, rpId ->
+                        credentialHelper.verifySecondFactorWithPasskey(
+                            activityContext = context,
+                            mfaToken = mfaToken,
+                            challengeStandardB64 = challenge,
+                            allowCredentials = allowCreds,
+                            rpId = rpId,
+                        )
+                    }
+                }
+            } else {
+                null
             },
             onDismiss = viewModel::dismissTwoFactor,
         )
     }
 }
 
-private enum class TwoFactorInputMode { TOTP, RECOVERY }
+private enum class TwoFactorInputMode { TOTP, BACKUP_CODE }
 
 @Composable
 private fun TwoFactorBottomSheet(
     code: String,
     error: String?,
+    availableMethods: List<String>,
     isSubmitting: Boolean,
+    submittingMethod: LoginSubmitMethod?,
     onCodeChange: (String) -> Unit,
-    onConfirm: () -> Unit,
+    onConfirm: (isBackupCode: Boolean) -> Unit,
+    onVerifyWithPasskey: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val colors = HotelTheme.colors
     val focusRequester = remember { FocusRequester() }
-    var inputMode by remember { mutableStateOf(TwoFactorInputMode.TOTP) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val supportsTotp = availableMethods.isEmpty() ||
+        availableMethods.any { it.equals("totp", ignoreCase = true) }
+    val supportsBackupCode = availableMethods.any { it.equals("backup_code", ignoreCase = true) }
+    val supportsCode = supportsTotp || supportsBackupCode
+    val supportsPasskey = availableMethods.any { it.equals("passkey", ignoreCase = true) }
+    var inputMode by remember(availableMethods) {
+        mutableStateOf(if (supportsTotp) TwoFactorInputMode.TOTP else TwoFactorInputMode.BACKUP_CODE)
+    }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    LaunchedEffect(supportsCode, inputMode) {
+        if (supportsCode) {
+            keyboard?.hide()
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
     }
 
     HotelModalSheetContainer(
-        onDismiss = { if (!isSubmitting) onDismiss() },
+        onDismiss = onDismiss,
+        dismissible = !isSubmitting,
     ) {
         Column(
             modifier = Modifier
@@ -606,68 +864,91 @@ private fun TwoFactorBottomSheet(
                 }
             }
 
-            HotelSegmentedControl(
-                options = listOf(
-                    TwoFactorInputMode.TOTP to "6-Digit Code",
-                    TwoFactorInputMode.RECOVERY to "Recovery Code",
-                ),
-                selected = inputMode,
-                onSelect = {
-                    inputMode = it
-                    onCodeChange("")
-                },
-            )
-
-            OutlinedTextField(
-                value = code,
-                onValueChange = { next ->
-                    val filtered = if (inputMode == TwoFactorInputMode.TOTP) {
-                        next.filter { it.isDigit() }.take(6)
-                    } else {
-                        next.take(32)
-                    }
-                    onCodeChange(filtered)
-                },
-                label = {
-                    Text(
-                        if (inputMode == TwoFactorInputMode.TOTP) {
-                            "6-Digit Authenticator Code"
-                        } else {
-                            "Backup Recovery Code"
+            if (supportsCode) {
+                if (supportsTotp && supportsBackupCode) {
+                    HotelSegmentedControl(
+                        options = listOf(
+                            TwoFactorInputMode.TOTP to "6-Digit Code",
+                            TwoFactorInputMode.BACKUP_CODE to "Backup Code",
+                        ),
+                        selected = inputMode,
+                        enabled = !isSubmitting,
+                        onSelect = {
+                            inputMode = it
+                            onCodeChange("")
                         },
                     )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = hotelTextFieldColors(),
-                textStyle = if (inputMode == TwoFactorInputMode.TOTP) {
-                    MaterialTheme.typography.titleLarge.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 6.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                } else {
-                    MaterialTheme.typography.bodyLarge
-                },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = if (inputMode == TwoFactorInputMode.TOTP) {
-                        KeyboardType.Number
-                    } else {
-                        KeyboardType.Ascii
-                    },
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester)
-                    .semantics {
-                        if (inputMode == TwoFactorInputMode.TOTP) {
-                            contentType = ContentType.SmsOtpCode
+                }
+
+                OutlinedTextField(
+                    value = code,
+                    enabled = !isSubmitting,
+                    onValueChange = { next ->
+                        val filtered = if (inputMode == TwoFactorInputMode.TOTP) {
+                            next.filter { it.isDigit() }.take(6)
+                        } else {
+                            next.take(32)
                         }
+                        onCodeChange(filtered)
                     },
-            )
+                    label = {
+                        Text(
+                            if (inputMode == TwoFactorInputMode.TOTP) {
+                                "6-Digit Authenticator Code"
+                            } else {
+                                "Backup Code"
+                            },
+                        )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = hotelTextFieldColors(),
+                    textStyle = if (inputMode == TwoFactorInputMode.TOTP) {
+                        MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 6.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                    } else {
+                        MaterialTheme.typography.bodyLarge
+                    },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = if (inputMode == TwoFactorInputMode.TOTP) {
+                            KeyboardType.Number
+                        } else {
+                            KeyboardType.Ascii
+                        },
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (!isSubmitting) {
+                                onConfirm(inputMode == TwoFactorInputMode.BACKUP_CODE)
+                            }
+                        },
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .semantics {
+                            if (inputMode == TwoFactorInputMode.TOTP) {
+                                contentType = ContentType.SmsOtpCode
+                            }
+                        },
+                )
+            }
+
+            if (supportsPasskey && onVerifyWithPasskey != null) {
+                val isPasskeySubmitting = isSubmitting && submittingMethod == LoginSubmitMethod.PASSKEY
+                HotelPrimaryButton(
+                    text = if (isPasskeySubmitting) "Verifying Passkey..." else "Verify with Passkey",
+                    isLoading = isPasskeySubmitting,
+                    enabled = !isSubmitting,
+                    onClick = onVerifyWithPasskey,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             AnimatedVisibility(visible = error != null) {
                 InlineAlertBanner(message = error.orEmpty(), tone = colors.danger)
@@ -684,12 +965,23 @@ private fun TwoFactorBottomSheet(
                 ) {
                     Text("Cancel", color = colors.textSecondary)
                 }
-                HotelPrimaryButton(
-                    text = if (isSubmitting) "Verifying..." else "Verify",
-                    isLoading = isSubmitting,
-                    onClick = onConfirm,
-                    modifier = Modifier.weight(1.3f),
-                )
+                if (supportsCode) {
+                    val isCodeSubmitting = isSubmitting && submittingMethod != LoginSubmitMethod.PASSKEY
+                    val canSubmitCode = !isSubmitting && (
+                        if (inputMode == TwoFactorInputMode.TOTP) {
+                            code.trim().length == 6
+                        } else {
+                            code.trim().isNotEmpty()
+                        }
+                        )
+                    HotelPrimaryButton(
+                        text = if (isCodeSubmitting) "Verifying..." else "Verify",
+                        isLoading = isCodeSubmitting,
+                        enabled = canSubmitCode,
+                        onClick = { onConfirm(inputMode == TwoFactorInputMode.BACKUP_CODE) },
+                        modifier = Modifier.weight(1.3f),
+                    )
+                }
             }
         }
     }

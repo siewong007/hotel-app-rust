@@ -1,4 +1,6 @@
+import { HTTPError } from 'ky';
 import { api } from '../../../api/client';
+import { SKIP_API_NOTIFICATION_HEADER } from '../../../utils/apiNotifications';
 
 export interface GroupReceiptRow {
   booking_id: number;
@@ -35,5 +37,16 @@ export interface GroupReceipt {
 
 /** Combined receipt for a multi-room booking group (per-room invoices are unchanged). */
 export async function fetchGroupReceipt(groupId: number): Promise<GroupReceipt> {
-  return await api.get(`booking-groups/${groupId}/receipt`).json<GroupReceipt>();
+  try {
+    return await api
+      .get(`booking-groups/${groupId}/receipt`, {
+        headers: { [SKIP_API_NOTIFICATION_HEADER]: 'true' },
+      })
+      .json<GroupReceipt>();
+  } catch (error) {
+    if (error instanceof HTTPError && error.response.status === 404) {
+      return await api.post(`booking-groups/${groupId}/receipt`).json<GroupReceipt>();
+    }
+    throw error;
+  }
 }

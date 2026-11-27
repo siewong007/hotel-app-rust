@@ -2,16 +2,17 @@ package com.hotelapp.staff
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -28,7 +29,6 @@ import com.hotelapp.staff.core.auth.AuthState
 import com.hotelapp.staff.core.auth.BiometricLockManager
 import com.hotelapp.staff.core.auth.BiometricLockOverlay
 import com.hotelapp.staff.core.design.HotelTheme
-import com.hotelapp.staff.core.print.InvoicePdfPrinter
 import com.hotelapp.staff.navigation.HotelAppRoot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,28 +44,47 @@ class MainActivity : FragmentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        InvoicePdfPrinter.clearCachedInvoices(applicationContext)
+        savedInstanceState?.getString(STATE_PENDING_DEEP_LINK)?.let { savedLink ->
+            if (_pendingDeepLink.value.isNullOrBlank()) {
+                _pendingDeepLink.value = savedLink
+            }
+        }
         captureDeepLink(intent)
         val container = (application as HotelStaffApp).container
+        if (!container.serverConfigStore.isLoaded.value ||
+            container.isAppLocked.value ||
+            container.serverConfigStore.config.value.biometricLockEnabled
+        ) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         splashScreen.setKeepOnScreenCondition {
-            container.sessionManager.authState.value is AuthState.Checking
+            !container.serverConfigStore.isLoaded.value ||
+                container.sessionManager.authState.value is AuthState.Checking
         }
 
         setContent {
             val windowSizeClass = calculateWindowSizeClass(this)
+            val isConfigLoaded by container.serverConfigStore.isLoaded.collectAsStateWithLifecycle()
             val serverConfig by container.serverConfigStore.config.collectAsStateWithLifecycle()
             val authState by container.sessionManager.authState.collectAsStateWithLifecycle()
+            val isAppLocked by container.isAppLocked.collectAsStateWithLifecycle()
+            val hasUnlockedInProcess by container.hasUnlockedInProcess.collectAsStateWithLifecycle()
             val scope = rememberCoroutineScope()
 
-            var isAppLocked by rememberSaveable { mutableStateOf(false) }
+            var isSigningOutFromLock by rememberSaveable { mutableStateOf(false) }
             var lockError by remember { mutableStateOf<String?>(null) }
-            var lastBackgroundedAtMs by rememberSaveable { mutableLongStateOf(0L) }
-            var hasTriggeredColdLock by rememberSaveable { mutableStateOf(false) }
-            var previousAuthWasChecking by remember { mutableStateOf(authState is AuthState.Checking) }
+
+            val needsColdLock = isConfigLoaded &&
+                authState is AuthState.Authenticated &&
+                serverConfig.biometricLockEnabled &&
+                !hasUnlockedInProcess
+            val effectiveLocked = isAppLocked || needsColdLock
 
             fun promptUnlock() {
+                if (isSigningOutFromLock) return
                 if (!BiometricLockManager.canAuthenticate(this@MainActivity)) {
-                    isAppLocked = false
+                    container.setAppLocked(true)
+                    lockError = "Device screen lock or biometrics are unavailable. Re-enable device lock in Android Settings or sign out."
                     return
                 }
                 lockError = null
@@ -73,8 +92,13 @@ class MainActivity : FragmentActivity() {
                     activity = this@MainActivity,
                     title = "Unlock ${serverConfig.hotelName}",
                     onSuccess = {
-                        isAppLocked = false
+                        container.markUnlockedInProcess()
+                        container.setAppLocked(false)
+                        container.lastBackgroundedElapsedMs = 0L
                         lockError = null
+                        if (container.sessionManager.authState.value is AuthState.Authenticated) {
+                            container.realtimeSocketClient.start()
+                        }
                     },
                     onError = { err ->
                         lockError = err
@@ -87,60 +111,64 @@ class MainActivity : FragmentActivity() {
                 container.authRepository.restoreSession()
             }
 
-            LaunchedEffect(authState) {
+            LaunchedEffect(isConfigLoaded, authState, serverConfig.biometricLockEnabled, hasUnlockedInProcess) {
+                if (!isConfigLoaded) return@LaunchedEffect
                 when (authState) {
-                    AuthState.Checking -> {
-                        previousAuthWasChecking = true
-                    }
+                    AuthState.Checking -> Unit
                     is AuthState.Authenticated -> {
-                        if (previousAuthWasChecking &&
-                            serverConfig.biometricLockEnabled &&
-                            !hasTriggeredColdLock &&
-                            BiometricLockManager.canAuthenticate(this@MainActivity)
-                        ) {
-                            hasTriggeredColdLock = true
-                            isAppLocked = true
-                            promptUnlock()
+                        isSigningOutFromLock = false
+                        if (serverConfig.biometricLockEnabled && !hasUnlockedInProcess) {
+                            container.setAppLocked(true)
+                            if (!container.hasTriggeredColdLock) {
+                                container.hasTriggeredColdLock = true
+                                promptUnlock()
+                            }
+                        } else if (!serverConfig.biometricLockEnabled && !hasUnlockedInProcess) {
+                            container.markUnlockedInProcess()
                         }
-                        previousAuthWasChecking = false
                     }
                     AuthState.Unauthenticated -> {
-                        isAppLocked = false
-                        hasTriggeredColdLock = false
-                        lastBackgroundedAtMs = 0L
-                        previousAuthWasChecking = false
+                        container.resetLockState()
+                        _pendingDeepLink.value = null
+                        isSigningOutFromLock = false
+                        lockError = null
                     }
                 }
             }
 
             LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
-                lastBackgroundedAtMs = System.currentTimeMillis()
+                container.lastBackgroundedElapsedMs = SystemClock.elapsedRealtime()
             }
 
             LifecycleEventEffect(Lifecycle.Event.ON_START) {
-                if (authState is AuthState.Authenticated &&
+                if (isConfigLoaded &&
+                    authState is AuthState.Authenticated &&
+                    !isSigningOutFromLock &&
                     serverConfig.biometricLockEnabled &&
-                    lastBackgroundedAtMs > 0L &&
-                    System.currentTimeMillis() - lastBackgroundedAtMs >= LOCK_IDLE_THRESHOLD_MS &&
-                    BiometricLockManager.canAuthenticate(this@MainActivity)
+                    hasUnlockedInProcess &&
+                    container.lastBackgroundedElapsedMs > 0L &&
+                    SystemClock.elapsedRealtime() - container.lastBackgroundedElapsedMs >= LOCK_IDLE_THRESHOLD_MS
                 ) {
-                    isAppLocked = true
+                    container.setAppLocked(true)
                     promptUnlock()
                 }
             }
 
-            LifecycleStartEffect(authState) {
-                if (authState is AuthState.Authenticated) {
+            LifecycleStartEffect(isConfigLoaded, authState, effectiveLocked) {
+                if (isConfigLoaded && authState is AuthState.Authenticated && !effectiveLocked) {
                     container.realtimeSocketClient.start()
+                } else {
+                    container.realtimeSocketClient.stop()
                 }
                 onStopOrDispose {
                     container.realtimeSocketClient.stop()
                 }
             }
 
-            LaunchedEffect(isAppLocked, authState, serverConfig.biometricLockEnabled) {
-                val shouldSecureWindow = authState is AuthState.Authenticated &&
-                    (isAppLocked || serverConfig.biometricLockEnabled)
+            LaunchedEffect(isConfigLoaded, effectiveLocked, authState, serverConfig.biometricLockEnabled) {
+                val shouldSecureWindow = !isConfigLoaded ||
+                    effectiveLocked ||
+                    authState !is AuthState.Unauthenticated
                 if (shouldSecureWindow) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 } else {
@@ -148,30 +176,61 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
+            val signOutFromLock: () -> Unit = {
+                if (!isSigningOutFromLock) {
+                    isSigningOutFromLock = true
+                    lockError = null
+                    scope.launch {
+                        if (!BiometricLockManager.canAuthenticate(this@MainActivity)) {
+                            container.serverConfigStore.setBiometricLockEnabled(false)
+                        }
+                        container.authRepository.logout()
+                    }
+                }
+            }
+
             HotelTheme(themePreference = serverConfig.themePreference) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (isAppLocked && authState is AuthState.Authenticated) {
-                        BiometricLockOverlay(
-                            hotelName = serverConfig.hotelName,
-                            errorMessage = lockError,
-                            onUnlockClick = { promptUnlock() },
-                            onSignOut = {
-                                isAppLocked = false
-                                scope.launch { container.authRepository.logout() }
-                            },
-                        )
-                    } else {
-                        HotelAppRoot(
-                            container = container,
-                            windowWidthSizeClass = windowSizeClass.widthSizeClass,
-                            pendingDeepLink = pendingDeepLink,
-                            onConsumeDeepLink = { _pendingDeepLink.value = null },
-                            deferDeepLinks = isAppLocked,
-                        )
+                    when {
+                        !isConfigLoaded || authState is AuthState.Checking -> {
+                            Surface(modifier = Modifier.fillMaxSize()) {}
+                        }
+                        needsColdLock -> {
+                            BiometricLockOverlay(
+                                hotelName = serverConfig.hotelName,
+                                errorMessage = lockError,
+                                isSigningOut = isSigningOutFromLock,
+                                onUnlockClick = { promptUnlock() },
+                                onSignOut = signOutFromLock,
+                            )
+                        }
+                        else -> {
+                            HotelAppRoot(
+                                container = container,
+                                windowWidthSizeClass = windowSizeClass.widthSizeClass,
+                                pendingDeepLink = pendingDeepLink,
+                                onConsumeDeepLink = { _pendingDeepLink.value = null },
+                                deferDeepLinks = effectiveLocked,
+                            )
+                            if (authState is AuthState.Authenticated && effectiveLocked) {
+                                BiometricLockOverlay(
+                                    hotelName = serverConfig.hotelName,
+                                    errorMessage = lockError,
+                                    isSigningOut = isSigningOutFromLock,
+                                    onUnlockClick = { promptUnlock() },
+                                    onSignOut = signOutFromLock,
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        _pendingDeepLink.value?.let { outState.putString(STATE_PENDING_DEEP_LINK, it) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -181,16 +240,15 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun captureDeepLink(intent: Intent?) {
-        val data = intent?.dataString ?: intent?.getStringExtra(EXTRA_DEEP_LINK)
+        val data = intent?.dataString
         if (!data.isNullOrBlank()) {
             _pendingDeepLink.value = data
-            intent?.data = null
-            intent?.removeExtra(EXTRA_DEEP_LINK)
+            intent.data = null
         }
     }
 
     companion object {
-        const val EXTRA_DEEP_LINK = "extra_hotel_deep_link"
+        private const val STATE_PENDING_DEEP_LINK = "state_pending_deep_link"
         private const val LOCK_IDLE_THRESHOLD_MS = 30_000L
     }
 }

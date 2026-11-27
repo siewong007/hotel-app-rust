@@ -66,6 +66,31 @@ impl GuestPortalRepository {
         .map_err(ApiError::from)
     }
 
+    /// Whether any active login-capable account is bound to `guest_id`,
+    /// covering legacy `users.guest_id`, multi-guest `user_guests` links,
+    /// password credentials, and Google-linked identities.
+    pub async fn guest_has_active_account(pool: &DbPool, guest_id: i64) -> Result<bool, ApiError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM users u \
+                WHERE u.deleted_at IS NULL \
+                  AND u.is_active = true \
+                  AND (u.password_hash IS NOT NULL OR u.google_subject IS NOT NULL) \
+                  AND ( \
+                      u.guest_id = $1 \
+                      OR EXISTS ( \
+                          SELECT 1 FROM user_guests ug \
+                          WHERE ug.user_id = u.id AND ug.guest_id = $1 \
+                      ) \
+                  ) \
+             )",
+        )
+        .bind(guest_id)
+        .fetch_one(pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
     /// Outstanding receipt request for a token-authenticated booking.
     pub async fn find_booking_receipt_request(
         pool: &DbPool,

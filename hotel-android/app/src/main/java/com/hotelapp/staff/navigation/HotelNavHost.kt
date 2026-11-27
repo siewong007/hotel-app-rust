@@ -22,9 +22,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -78,11 +81,14 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,10 +96,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -110,6 +122,7 @@ import com.hotelapp.staff.core.design.HotelLogoMark
 import com.hotelapp.staff.core.design.HotelSnackbarHost
 import com.hotelapp.staff.core.design.HotelTheme
 import com.hotelapp.staff.core.design.HotelTooltipIconButton
+import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
 import com.hotelapp.staff.core.design.rememberReducedMotion
 import com.hotelapp.staff.core.network.RealtimeConnectionState
@@ -152,6 +165,9 @@ import com.hotelapp.staff.widget.WidgetRefreshWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import kotlin.reflect.KClass
 
 private data class NavTab(
@@ -252,11 +268,28 @@ private fun AuthenticatedNavHost(
     val pendingSyncCount by container.offlineOpsCoordinator.pendingCount.collectAsStateWithLifecycle()
     val incomingDeepLink by pendingDeepLink.collectAsStateWithLifecycle()
 
-    val notificationsViewModel = rememberViewModel(key = "notif_${session.user.id}") {
-        NotificationsViewModel(container.notificationsRepository, container.realtimeSocketClient)
+    val notifStoreOwner = remember(session.user.id) {
+        object : ViewModelStoreOwner {
+            override val viewModelStore: ViewModelStore = ViewModelStore()
+        }
+    }
+    DisposableEffect(notifStoreOwner) {
+        onDispose { notifStoreOwner.viewModelStore.clear() }
+    }
+    val notificationsViewModel = remember(notifStoreOwner, session.user.id) {
+        ViewModelProvider(
+            notifStoreOwner,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    NotificationsViewModel(container.notificationsRepository, container.realtimeSocketClient) as T
+            },
+        )["notif_${session.user.id}", NotificationsViewModel::class.java]
     }
     val notificationsState by notificationsViewModel.uiState.collectAsStateWithLifecycle()
     var showNotificationsSheet by remember { mutableStateOf(false) }
+
+    OnResumeRefreshEffect { notificationsViewModel.refresh(silent = true) }
 
     val useNavigationRail = windowWidthSizeClass != WindowWidthSizeClass.Compact
     val isExpandedWidth = windowWidthSizeClass == WindowWidthSizeClass.Expanded
@@ -298,7 +331,7 @@ private fun AuthenticatedNavHost(
                 add(
                     NavTab(
                         routeClass = RoomsRoute::class,
-                        destination = RoomsRoute,
+                        destination = RoomsRoute(),
                         label = "Rooms",
                         selectedIcon = Icons.Filled.KingBed,
                         unselectedIcon = Icons.Outlined.KingBed,
@@ -330,26 +363,47 @@ private fun AuthenticatedNavHost(
 
     val isTopTab = tabs.any { tab -> destination?.hasRoute(tab.routeClass) == true }
 
-    fun navigateTopTab(target: Any) {
+    fun navigateTopTab(target: Any, resetToRoot: Boolean = false) {
         haptics.tick()
         navController.navigate(target) {
             popUpTo(navController.graph.findStartDestination().id) {
-                saveState = true
+                saveState = !resetToRoot
             }
             launchSingleTop = true
-            restoreState = true
+            restoreState = !resetToRoot
         }
     }
 
     fun openStaffNotification(item: StaffNotificationItemDto) {
         haptics.click()
-        notificationsViewModel.markRead(item.id)
         showNotificationsSheet = false
+        val bookingIdFromUrl = extractPositiveIdFromActionUrl(item.actionUrl, "bookings", "booking_id")
+        if (bookingIdFromUrl != null) {
+            if (session.hasPermission("bookings:read")) {
+                notificationsViewModel.markRead(item.id)
+                navController.navigate(BookingDetailRoute(bookingIdFromUrl)) { launchSingleTop = true }
+            } else {
+                showMessage("Your role does not have permission to open bookings.")
+            }
+            return
+        }
+        val guestIdFromUrl = extractPositiveIdFromActionUrl(item.actionUrl, "guests", "guest_id")
+        if (guestIdFromUrl != null) {
+            if (session.hasPermission("guests:read")) {
+                notificationsViewModel.markRead(item.id)
+                navController.navigate(GuestDetailRoute(guestIdFromUrl)) { launchSingleTop = true }
+            } else {
+                showMessage("Your role does not have permission to open guests.")
+            }
+            return
+        }
+
         val kind = item.kind.lowercase()
         val category = item.category.lowercase()
         when {
             category == "payments" || kind in setOf("bank_transfer_pending", "payment_receipt_uploaded") -> {
                 if (session.hasPermission("payments:read")) {
+                    notificationsViewModel.markRead(item.id)
                     navController.navigate(PendingPaymentsRoute) { launchSingleTop = true }
                 } else {
                     showMessage("Your role does not have permission to open pending payments.")
@@ -357,6 +411,7 @@ private fun AuthenticatedNavHost(
             }
             category == "ekyc" || kind == "ekyc_pending_review" -> {
                 if (session.hasPermission("ekyc:read")) {
+                    notificationsViewModel.markRead(item.id)
                     navController.navigate(EkycQueueRoute) { launchSingleTop = true }
                 } else {
                     showMessage("Your role does not have permission to review eKYC applications.")
@@ -364,6 +419,7 @@ private fun AuthenticatedNavHost(
             }
             category == "maintenance" || kind in setOf("maintenance_critical", "maintenance_high") -> {
                 if (session.hasPermission("maintenance:read")) {
+                    notificationsViewModel.markRead(item.id)
                     navController.navigate(MaintenanceRoute) { launchSingleTop = true }
                 } else {
                     showMessage("Your role does not have permission to open maintenance tickets.")
@@ -371,14 +427,16 @@ private fun AuthenticatedNavHost(
             }
             category == "housekeeping" -> {
                 if (session.hasPermission("housekeeping:read")) {
-                    navigateTopTab(HousekeepingRoute)
+                    notificationsViewModel.markRead(item.id)
+                    navigateTopTab(HousekeepingRoute, resetToRoot = true)
                 } else {
                     showMessage("Your role does not have permission to open housekeeping.")
                 }
             }
             category == "bookings" || kind == "online_booking_created" -> {
                 if (session.hasPermission("bookings:read")) {
-                    navigateTopTab(BookingsRoute("all"))
+                    notificationsViewModel.markRead(item.id)
+                    navigateTopTab(BookingsRoute("all"), resetToRoot = true)
                 } else {
                     showMessage("Your role does not have permission to open bookings.")
                 }
@@ -413,8 +471,19 @@ private fun AuthenticatedNavHost(
         if (parsed != null) {
             if (!DeepLinkRouter.canAccess(parsed, session)) {
                 showMessage("Your role does not have permission to open that section.")
-            } else if (parsed == DashboardRoute || parsed == RoomsRoute || parsed == HousekeepingRoute || parsed == MoreRoute || (parsed is BookingsRoute && parsed.view == "all")) {
-                navigateTopTab(parsed)
+            } else if (parsed == DashboardRoute || parsed is RoomsRoute || parsed == HousekeepingRoute || parsed == MoreRoute) {
+                navigateTopTab(
+                    target = parsed,
+                    resetToRoot = parsed is RoomsRoute && parsed.focusRoomId != null,
+                )
+            } else if (parsed is BookingsRoute) {
+                navController.navigate(parsed) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = parsed.view == "all"
+                    }
+                    launchSingleTop = true
+                    restoreState = parsed.view == "all"
+                }
             } else {
                 navController.navigate(parsed) {
                     launchSingleTop = true
@@ -432,7 +501,12 @@ private fun AuthenticatedNavHost(
     Scaffold(
         containerColor = colors.surfaceApp,
         contentWindowInsets = if (isTopTab) ScaffoldDefaults.contentWindowInsets else WindowInsets(0, 0, 0, 0),
-        snackbarHost = { HotelSnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            HotelSnackbarHost(
+                hostState = snackbarHostState,
+                modifier = if (!isTopTab) Modifier.navigationBarsPadding().imePadding() else Modifier,
+            )
+        },
         topBar = {
             if (isTopTab) {
                 Column {
@@ -480,6 +554,7 @@ private fun AuthenticatedNavHost(
                             RealtimeStatusChip(
                                 isOnline = isOnline,
                                 state = wsState,
+                                showLabel = pendingSyncCount == 0,
                                 onClick = {
                                     haptics.click()
                                     if (!isOnline) {
@@ -549,7 +624,7 @@ private fun AuthenticatedNavHost(
                                         if (notificationsState.unreadCount > 0) {
                                             Badge(
                                                 containerColor = if (hasUrgent) colors.danger.fg else colors.primaryMain,
-                                                contentColor = if (hasUrgent) Color.White else colors.primaryContrastText,
+                                                contentColor = colors.primaryContrastText,
                                             ) {
                                                 Text(notificationsState.unreadCount.coerceAtMost(99).toString())
                                             }
@@ -675,14 +750,17 @@ private fun AuthenticatedNavHost(
             }
         },
     ) { padding ->
+        val contentInsets = if (isTopTab) padding else PaddingValues(0.dp)
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(if (isTopTab) padding else PaddingValues(0.dp)),
+                .padding(contentInsets)
+                .consumeWindowInsets(contentInsets),
         ) {
             if (isTopTab && useNavigationRail) {
                 NavigationRail(
                     containerColor = colors.surfaceBase,
+                    windowInsets = WindowInsets(0, 0, 0, 0),
                 ) {
                     Spacer(modifier = Modifier.weight(0.15f))
                     tabs.forEach { tab ->
@@ -746,6 +824,8 @@ private fun AuthenticatedNavHost(
                                     snapshot = snapshot,
                                 )
                             },
+                            hotelTimezoneProvider = { container.serverConfigStore.config.value.hotelTimezone },
+                            sessionProvider = { session },
                         )
                     }
                     DashboardScreen(
@@ -761,7 +841,7 @@ private fun AuthenticatedNavHost(
                             }
                         },
                         onOpenBookingDetail = { id -> navController.navigate(BookingDetailRoute(id)) },
-                        onOpenRooms = { navigateTopTab(RoomsRoute) },
+                        onOpenRooms = { navigateTopTab(RoomsRoute()) },
                         onOpenHousekeeping = { navigateTopTab(HousekeepingRoute) },
                         onOpenMaintenance = { navController.navigate(MaintenanceRoute) },
                         onOpenGuests = { navController.navigate(GuestsRoute) },
@@ -779,10 +859,10 @@ private fun AuthenticatedNavHost(
                             realtimeSocketClient = container.realtimeSocketClient,
                         )
                     }
+                    var selectedBookingId by rememberSaveable { mutableStateOf<Long?>(null) }
                     var showCreateBookingSheet by remember { mutableStateOf(false) }
                     val canCreateBooking = session.hasPermission("bookings:create")
                     if (isExpandedWidth) {
-                        var selectedBookingId by remember { mutableStateOf<Long?>(null) }
                         Row(modifier = Modifier.fillMaxSize()) {
                             BookingsScreen(
                                 viewModel = vm,
@@ -802,21 +882,29 @@ private fun AuthenticatedNavHost(
                                         icon = Icons.Outlined.TouchApp,
                                     )
                                 } else {
-                                    val detailVm = rememberViewModel(key = "booking_pane_$detailId") {
+                                    val detailVm = rememberViewModel(key = "booking_pane_${session.user.id}_${route.view}") {
                                         BookingDetailViewModel(
                                             bookingId = detailId,
                                             repository = container.bookingsRepository,
                                             paymentsRepository = container.paymentsRepository,
                                             canReadPayments = session.hasPermission("payments:read"),
+                                            realtimeSocketClient = container.realtimeSocketClient,
+                                            onBookingMutated = { vm.refresh(silent = true) },
+                                            sessionProvider = { session },
                                         )
                                     }
-                                    BookingDetailScreen(
-                                        session = session,
-                                        viewModel = detailVm,
-                                        serverConfigStore = container.serverConfigStore,
-                                        onBack = null,
-                                        onOpenGuest = { guestId -> navController.navigate(GuestDetailRoute(guestId)) },
-                                    )
+                                    LaunchedEffect(detailId) {
+                                        detailVm.setBookingId(detailId)
+                                    }
+                                    key(detailId) {
+                                        BookingDetailScreen(
+                                            session = session,
+                                            viewModel = detailVm,
+                                            serverConfigStore = container.serverConfigStore,
+                                            onBack = null,
+                                            onOpenGuest = { guestId -> navController.navigate(GuestDetailRoute(guestId)) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -841,8 +929,13 @@ private fun AuthenticatedNavHost(
                             onCreated = { createdId ->
                                 showCreateBookingSheet = false
                                 vm.refresh(silent = true)
-                                navController.navigate(BookingDetailRoute(createdId))
+                                if (isExpandedWidth) {
+                                    selectedBookingId = createdId
+                                } else {
+                                    navController.navigate(BookingDetailRoute(createdId))
+                                }
                             },
+                            hotelTimezone = serverConfig.hotelTimezone,
                         )
                     }
                 }
@@ -860,6 +953,8 @@ private fun AuthenticatedNavHost(
                             repository = container.bookingsRepository,
                             paymentsRepository = container.paymentsRepository,
                             canReadPayments = session.hasPermission("payments:read"),
+                            realtimeSocketClient = container.realtimeSocketClient,
+                            sessionProvider = { session },
                         )
                     }
                     BookingDetailScreen(
@@ -871,7 +966,8 @@ private fun AuthenticatedNavHost(
                     )
                 }
 
-                composable<RoomsRoute> {
+                composable<RoomsRoute> { entry ->
+                    val route = entry.toRoute<RoomsRoute>()
                     val vm = rememberViewModel(key = "rooms_${session.user.id}") {
                         RoomsViewModel(
                             repository = container.roomsRepository,
@@ -885,6 +981,7 @@ private fun AuthenticatedNavHost(
                         serverConfigStore = container.serverConfigStore,
                         onOpenBookingDetail = { id -> navController.navigate(BookingDetailRoute(id)) },
                         onShowMessage = showMessage,
+                        focusRoomId = route.focusRoomId,
                     )
                 }
 
@@ -921,6 +1018,7 @@ private fun AuthenticatedNavHost(
                         pendingSyncCount = pendingSyncCount,
                         onSyncNow = { container.triggerSyncNow() },
                         staffNotificationManager = container.staffNotificationManager,
+                        onBiometricEnabled = { container.markUnlockedInProcess() },
                     )
                 }
 
@@ -947,9 +1045,12 @@ private fun AuthenticatedNavHost(
                                 navController.navigate(GuestDetailRoute(id))
                             }
                         },
-                        onOpenRooms = {
+                        onOpenRooms = { roomId ->
                             if (session.hasPermission("rooms:read")) {
-                                navigateTopTab(RoomsRoute)
+                                navigateTopTab(
+                                    target = RoomsRoute(focusRoomId = roomId),
+                                    resetToRoot = roomId != null,
+                                )
                             }
                         },
                         session = session,
@@ -982,7 +1083,12 @@ private fun AuthenticatedNavHost(
                     popExitTransition = { detailPopExit },
                 ) {
                     val vm = rememberViewModel(key = "ekyc_${session.user.id}") {
-                        EkycViewModel(session, container.ekycRepository, container.realtimeSocketClient)
+                        EkycViewModel(
+                            session = session,
+                            repository = container.ekycRepository,
+                            realtimeSocketClient = container.realtimeSocketClient,
+                            sessionProvider = { session },
+                        )
                     }
                     EkycQueueScreen(
                         session = session,
@@ -1024,14 +1130,15 @@ private fun AuthenticatedNavHost(
                     val vm = rememberViewModel(key = "guests_${session.user.id}") {
                         GuestsViewModel(container.guestsRepository, container.realtimeSocketClient)
                     }
+                    var selectedGuestId by rememberSaveable { mutableStateOf<Long?>(null) }
                     if (isExpandedWidth) {
-                        var selectedGuestId by remember { mutableStateOf<Long?>(null) }
                         Row(modifier = Modifier.fillMaxSize()) {
                             GuestsScreen(
                                 viewModel = vm,
                                 onBack = { navController.popBackStack() },
                                 onOpenGuestDetail = { id -> selectedGuestId = id },
                                 modifier = Modifier.weight(0.44f),
+                                embeddedInSplitPane = true,
                             )
                             VerticalDivider(color = colors.borderSubtle, thickness = 1.dp)
                             Box(modifier = Modifier.weight(0.56f).fillMaxHeight()) {
@@ -1043,16 +1150,21 @@ private fun AuthenticatedNavHost(
                                         icon = Icons.Outlined.TouchApp,
                                     )
                                 } else {
-                                    val detailVm = rememberViewModel(key = "guest_pane_$guestId") {
+                                    val detailVm = rememberViewModel(key = "guest_pane_${session.user.id}") {
                                         GuestDetailViewModel(guestId, container.guestsRepository)
                                     }
-                                    GuestDetailScreen(
-                                        viewModel = detailVm,
-                                        serverConfigStore = container.serverConfigStore,
-                                        onBack = null,
-                                        onOpenBookingDetail = { id -> navController.navigate(BookingDetailRoute(id)) },
-                                        canReadBookings = session.hasPermission("bookings:read"),
-                                    )
+                                    LaunchedEffect(guestId) {
+                                        detailVm.setGuestId(guestId)
+                                    }
+                                    key(guestId) {
+                                        GuestDetailScreen(
+                                            viewModel = detailVm,
+                                            serverConfigStore = container.serverConfigStore,
+                                            onBack = null,
+                                            onOpenBookingDetail = { id -> navController.navigate(BookingDetailRoute(id)) },
+                                            canReadBookings = session.hasPermission("bookings:read"),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1093,6 +1205,8 @@ private fun AuthenticatedNavHost(
                     ServerConfigScreen(
                         serverConfigStore = container.serverConfigStore,
                         serverRepository = container.serverRepository,
+                        isAuthenticated = true,
+                        pendingSyncCount = pendingSyncCount,
                         onBack = { navController.popBackStack() },
                         onSaved = { navController.popBackStack() },
                     )
@@ -1115,6 +1229,7 @@ private fun AuthenticatedNavHost(
 private fun RealtimeStatusChip(
     isOnline: Boolean,
     state: RealtimeConnectionState,
+    showLabel: Boolean = true,
     onClick: () -> Unit,
 ) {
     val colors = HotelTheme.colors
@@ -1169,22 +1284,39 @@ private fun RealtimeStatusChip(
         AssistChip(
             onClick = onClick,
             shape = RoundedCornerShape(999.dp),
-            leadingIcon = {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .alpha(pulseAlpha)
-                        .clip(CircleShape)
-                        .background(tone.fg),
-                )
+            modifier = Modifier.semantics(mergeDescendants = true) {
+                contentDescription = tooltipText
+            },
+            leadingIcon = if (showLabel) {
+                {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .alpha(pulseAlpha)
+                            .clip(CircleShape)
+                            .background(tone.fg),
+                    )
+                }
+            } else {
+                null
             },
             label = {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    softWrap = false,
-                )
+                if (showLabel) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .alpha(pulseAlpha)
+                            .clip(CircleShape)
+                            .background(tone.fg),
+                    )
+                }
             },
             colors = AssistChipDefaults.assistChipColors(
                 containerColor = tone.bg,
@@ -1193,4 +1325,35 @@ private fun RealtimeStatusChip(
             border = BorderStroke(1.dp, tone.border),
         )
     }
+}
+
+private fun extractPositiveIdFromActionUrl(
+    actionUrl: String?,
+    segmentPrefix: String,
+    queryKey: String,
+): Long? {
+    val raw = actionUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val normalized = if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        raw
+    } else {
+        "https://local.invalid${if (raw.startsWith("/")) raw else "/$raw"}"
+    }
+    val uri = runCatching { URI.create(normalized) }.getOrNull() ?: return null
+    val segments = uri.path?.split('/')?.filter { it.isNotBlank() }.orEmpty()
+    val segIdx = segments.indexOfFirst { it.equals(segmentPrefix, ignoreCase = true) }
+    if (segIdx >= 0 && segIdx + 1 < segments.size) {
+        segments[segIdx + 1].toLongOrNull()?.takeIf { it > 0L }?.let { return it }
+    }
+    return uri.rawQuery
+        ?.split('&')
+        ?.firstNotNullOfOrNull { pair ->
+            val idx = pair.indexOf('=')
+            if (idx <= 0) {
+                null
+            } else {
+                val key = runCatching { URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8.name()) }.getOrNull()
+                val value = runCatching { URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8.name()) }.getOrNull()
+                if (key == queryKey) value?.toLongOrNull()?.takeIf { it > 0L } else null
+            }
+        }
 }

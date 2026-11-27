@@ -15,12 +15,18 @@ import { setBookingAccessToken } from '../../guest-portal/api/bookingAccessToken
 import { guestErrorMessage } from '../../guest-portal/utils/feedback';
 import { useTranslation } from '../../../i18n';
 import { useAutoFocusError } from '../../../hooks/useAutoFocusError';
+import { useTurnstile } from '../../auth/turnstile/useTurnstile';
+import { turnstileErrorMessage } from '../../auth/turnstile/turnstileError';
 
 export const GuestCheckInLanding: React.FC = () => {
   const { t } = useTranslation('guestPortal');
+  const { t: tAuth } = useTranslation('auth');
   const navigate = useNavigate();
+  const turnstile = useTurnstile('guest_portal_verify');
+  const awaitingTurnstile = turnstile.enabled && !turnstile.token && !turnstile.error;
   const [bookingNumber, setBookingNumber] = useState('');
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useAutoFocusError(error);
@@ -32,19 +38,34 @@ export const GuestCheckInLanding: React.FC = () => {
       setError(t('checkin.landing.errors.missingFields'));
       return;
     }
+    if (turnstile.enabled && !turnstile.token) {
+      setError(
+        turnstile.error
+          ? turnstileErrorMessage(new Error(turnstile.error), tAuth)
+          : tAuth('turnstile.incomplete'),
+      );
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     try {
-      const response = await GuestPortalService.verify({
+      const payload: { booking_number: string; name: string; email?: string } = {
         booking_number: bookingNumber.trim(),
         name: name.trim(),
-      });
+      };
+      if (email.trim()) {
+        payload.email = email.trim();
+      }
+      const response = turnstile.token
+        ? await GuestPortalService.verify(payload, turnstile.token)
+        : await GuestPortalService.verify(payload);
 
       setBookingAccessToken(response.token);
       navigate('/guest-checkin/verify');
     } catch (err) {
+      turnstile.reset();
       setError(guestErrorMessage(err, t('checkin.landing.errors.verifyFailed')));
     } finally {
       setLoading(false);
@@ -95,12 +116,30 @@ export const GuestCheckInLanding: React.FC = () => {
             disabled={loading}
           />
 
+          <TextField
+            fullWidth
+            type="email"
+            label={t('checkin.account.email')}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            margin="normal"
+            autoComplete="email"
+            disabled={loading}
+          />
+
+          {turnstile.enabled && (
+            <Box
+              ref={turnstile.setContainer}
+              sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }}
+            />
+          )}
+
           <Button
             type="submit"
             variant="contained"
             fullWidth
             size="large"
-            disabled={loading}
+            disabled={loading || awaitingTurnstile}
             sx={{ mt: 3 }}
             startIcon={loading && <CircularProgress size={20} />}
           >

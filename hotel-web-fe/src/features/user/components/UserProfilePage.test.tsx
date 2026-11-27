@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   sessions: { data: [] as unknown[] },
   twoFactorStatus: { data: { enabled: false, backup_codes_remaining: 0 } },
   addPasskeyMutateAsync: vi.fn(),
+  deletePasskeyMutateAsync: vi.fn(),
+  updateProfileMutateAsync: vi.fn(),
+  confirm: vi.fn(),
 }));
 
 const emptyMutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null };
@@ -25,7 +28,7 @@ vi.mock('../../../router', () => ({
 }));
 
 vi.mock('../../../components/common/ConfirmProvider', () => ({
-  useConfirm: () => vi.fn(),
+  useConfirm: () => mocks.confirm,
 }));
 
 vi.mock('../../../auth/AuthContext', () => ({
@@ -40,9 +43,15 @@ vi.mock('../hooks/useProfileQueries', () => ({
   useProfileQuery: () => mocks.profile,
   usePasskeysQuery: () => mocks.passkeys,
   useSessionsQuery: () => mocks.sessions,
-  useUpdateProfileMutation: () => emptyMutation,
+  useUpdateProfileMutation: () => ({
+    ...emptyMutation,
+    mutateAsync: mocks.updateProfileMutateAsync,
+  }),
   useUpdatePasswordMutation: () => emptyMutation,
-  useDeletePasskeyMutation: () => emptyMutation,
+  useDeletePasskeyMutation: () => ({
+    ...emptyMutation,
+    mutateAsync: mocks.deletePasskeyMutateAsync,
+  }),
   useRenamePasskeyMutation: () => emptyMutation,
   useRegisterPasskeyMutation: () => ({
     ...emptyMutation,
@@ -88,6 +97,9 @@ describe('UserProfilePage', () => {
     mocks.sessions = { data: [] };
     mocks.twoFactorStatus = { data: { enabled: false, backup_codes_remaining: 0 } };
     mocks.addPasskeyMutateAsync.mockReset().mockResolvedValue(undefined);
+    mocks.deletePasskeyMutateAsync.mockReset().mockResolvedValue(undefined);
+    mocks.updateProfileMutateAsync.mockReset().mockResolvedValue(profile);
+    mocks.confirm.mockReset().mockResolvedValue(true);
   });
 
   afterEach(cleanup);
@@ -163,6 +175,53 @@ describe('UserProfilePage', () => {
       expect(mocks.addPasskeyMutateAsync).toHaveBeenCalledWith({
         username: 'reception',
         stepUp: { password: undefined, totpCode: '654321' },
+      }),
+    );
+  });
+
+  it('requires step-up confirmation when a staff member changes their email', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Profile' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Email' }), {
+      target: { value: 'newdesk@hotel.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mocks.updateProfileMutateAsync).not.toHaveBeenCalled();
+    expect(await screen.findByText('Confirm it is you')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Your password'), { target: { value: 'Secret123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProfileMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'newdesk@hotel.test',
+          current_password: 'Secret123!',
+          totp_code: undefined,
+        }),
+      ),
+    );
+  });
+
+  it('requires step-up confirmation before deleting a passkey', async () => {
+    mocks.passkeys = {
+      data: [{ id: 'pk-1', credential_id: 'cred-1', device_name: 'Desk Key', created_at: '2026-01-01T00:00:00Z' }],
+    };
+    renderPage();
+
+    fireEvent.click(screen.getByTitle('Delete passkey'));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalled());
+    expect(mocks.deletePasskeyMutateAsync).not.toHaveBeenCalled();
+
+    expect(await screen.findByText('Confirm it is you')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Your password'), { target: { value: 'Secret123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mocks.deletePasskeyMutateAsync).toHaveBeenCalledWith({
+        id: 'pk-1',
+        stepUp: { password: 'Secret123!', totpCode: undefined },
       }),
     );
   });

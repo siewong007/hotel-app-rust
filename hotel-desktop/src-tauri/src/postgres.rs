@@ -7,8 +7,9 @@
 //! - Health checks
 
 use rand::RngExt;
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::sync::OnceLock;
@@ -955,14 +956,27 @@ pub async fn is_postgres_running(app_handle: &AppHandle) -> bool {
 /// port, or one whose process is dead (stale file after an unclean
 /// shutdown), means the port — if anything answers there at all — belongs to
 /// someone else.
-fn data_dir_owns_running_server() -> bool {
-    let Some((pid, port)) = read_postmaster_pid(get_pgdata_dir().join("postmaster.pid")) else {
+async fn data_dir_owns_running_server(app_handle: &AppHandle) -> bool {
+    let pgdata = get_pgdata_dir();
+    let Some((_pid, port)) = read_postmaster_pid(pgdata.join("postmaster.pid")) else {
         return false;
     };
-    if port != POSTGRES_PORT || !process_is_alive(pid) {
+    if port != POSTGRES_PORT {
         return false;
     }
-    true
+    let pg_ctl_path = get_pgsql_bin_dir(app_handle).join(format!("pg_ctl{}", EXE_SUFFIX));
+    if !pg_ctl_path.exists() {
+        return false;
+    }
+    let mut cmd = tokio::process::Command::new(&pg_ctl_path);
+    cmd.arg("status")
+        .arg("-D")
+        .arg(&pgdata)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    matches!(cmd.status().await, Ok(status) if status.success())
 }
 
 /// Parse `(pid, port)` from a postmaster.pid file; `None` when missing or
@@ -976,30 +990,6 @@ fn read_postmaster_pid(path: std::path::PathBuf) -> Option<(u32, u16)> {
     Some((pid, port))
 }
 
-/// Signal-0 liveness probe for the pidfile owner. `kill -0` succeeds for any
-/// process the caller may signal, and fails (ESRCH) once it has exited —
-/// which is exactly the stale-pidfile case. Windows keeps the previous
-/// accept behaviour: its pidfiles are written identically but probing needs
-/// OS-specific APIs, and unclean-shutdown-then-foreign-server is far less
-/// likely there than the plain foreign-server case this check targets.
-fn process_is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        std::process::Command::new("kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
-}
 /// Ensure PostgreSQL is running, starting it if necessary
 pub async fn ensure_postgres_running(app_handle: &AppHandle) -> Result<(), PostgresError> {
     let bundled_postgres_version = detect_bundled_postgres_version(app_handle).await?;
@@ -1013,7 +1003,7 @@ pub async fn ensure_postgres_running(app_handle: &AppHandle) -> Result<(), Postg
         // server made every later step fail with an opaque "password
         // authentication failed"; a live postmaster.pid in OUR pgdata is the
         // ownership proof.
-        if data_dir_owns_running_server() {
+        if data_dir_owns_running_server(app_handle).await {
             log::info!("PostgreSQL is already running");
             ensure_postgres_password_auth(app_handle).await?;
             return Ok(());
@@ -1068,6 +1058,7 @@ pub async fn create_database_if_needed(app_handle: &AppHandle) -> Result<(), Pos
             &format!("SELECT 1 FROM pg_database WHERE datname='{}'", POSTGRES_DB),
         ])
         .env("PGPASSWORD", read_or_create_postgres_password()?)
+        .env("PGREQUIREAUTH", "scram-sha-256")
         .env("PATH", &new_path)
         .current_dir(&pgsql_bin)
         .stdout(Stdio::piped())
@@ -1114,6 +1105,7 @@ pub async fn create_database_if_needed(app_handle: &AppHandle) -> Result<(), Pos
             &format!("CREATE DATABASE {} ENCODING 'UTF8'", POSTGRES_DB),
         ])
         .env("PGPASSWORD", read_or_create_postgres_password()?)
+        .env("PGREQUIREAUTH", "scram-sha-256")
         .env("PATH", &new_path)
         .current_dir(&pgsql_bin)
         .stdout(Stdio::piped())
@@ -1274,6 +1266,7 @@ async fn run_psql_stdin_sql_in_database(
         "-tA",
     ])
     .env("PGPASSWORD", read_or_create_postgres_password()?)
+    .env("PGREQUIREAUTH", "scram-sha-256")
     .env("PATH", &new_path)
     .current_dir(&pgsql_bin)
     .stdin(Stdio::piped())
@@ -1341,6 +1334,7 @@ async fn run_psql_scalar_sql_in_database(
         sql,
     ])
     .env("PGPASSWORD", read_or_create_postgres_password()?)
+    .env("PGREQUIREAUTH", "scram-sha-256")
     .env("PATH", &new_path)
     .current_dir(&pgsql_bin)
     .stdout(Stdio::piped())
@@ -1534,6 +1528,7 @@ async fn backup_database_inner(
         &backup_path.to_string_lossy(),
     ])
     .env("PGPASSWORD", read_or_create_postgres_password()?)
+    .env("PGREQUIREAUTH", "scram-sha-256")
     .env("PATH", &new_path)
     .current_dir(&pgsql_bin)
     .stdout(Stdio::piped())
@@ -1958,6 +1953,7 @@ async fn restore_backup_dump(
         &backup_path.to_string_lossy(),
     ])
     .env("PGPASSWORD", read_or_create_postgres_password()?)
+    .env("PGREQUIREAUTH", "scram-sha-256")
     .env("PATH", &new_path)
     .current_dir(&pgsql_bin)
     .stdout(Stdio::piped())
@@ -2056,6 +2052,26 @@ fn uploads_entry_is_restorable(
     Ok(())
 }
 
+const MAX_UPLOAD_RESTORE_ENTRIES: usize = 10_000;
+const MAX_UPLOAD_RESTORE_FILE_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_UPLOAD_RESTORE_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
+
+#[cfg(unix)]
+fn enforce_private_uploads_dir_modes(root: &Path, dir: &Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(rel) = dir.strip_prefix(root) else {
+        return Ok(());
+    };
+    let mut current = root.to_path_buf();
+    for component in rel.components() {
+        current.push(component);
+        if current.exists() {
+            std::fs::set_permissions(&current, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    Ok(())
+}
+
 /// Extract a `-uploads.tar.gz` into `data_dir` synchronously (meant to run under
 /// `spawn_blocking`). Validates and copies each entry from one open archive
 /// handle into a private staging directory (eliminating TOCTOU races), swaps
@@ -2074,29 +2090,71 @@ fn restore_uploads_tarball_sync(data_dir: &Path, tarball_path: &Path) -> Result<
     std::fs::create_dir_all(&staging_dir)?;
 
     let extract_result: Result<(), PostgresError> = (|| {
+        let mut entry_count = 0usize;
+        let mut total_bytes = 0u64;
         for entry in archive.entries()? {
-            let mut entry = entry?;
+            entry_count += 1;
+            if entry_count > MAX_UPLOAD_RESTORE_ENTRIES {
+                return Err(PostgresError::MigrationFailed(format!(
+                    "Refusing uploads archive: exceeds {} entry limit",
+                    MAX_UPLOAD_RESTORE_ENTRIES
+                )));
+            }
+            let entry = entry?;
             let path = entry.path()?.into_owned();
             let entry_type = entry.header().entry_type();
             uploads_entry_is_restorable(&path, entry_type).map_err(|err| {
                 PostgresError::MigrationFailed(format!("Refusing uploads archive: {}", err))
             })?;
 
+            let is_private = matches!(
+                path.components().next(),
+                Some(std::path::Component::Normal(name)) if name == "private_uploads"
+            );
             let dest = staging_dir.join(&path);
             match entry_type {
                 tar::EntryType::Directory => {
                     std::fs::create_dir_all(&dest)?;
+                    #[cfg(unix)]
+                    if is_private {
+                        enforce_private_uploads_dir_modes(&staging_dir, &dest)?;
+                    }
                 }
                 tar::EntryType::Regular => {
+                    let remaining_total =
+                        MAX_UPLOAD_RESTORE_TOTAL_BYTES.saturating_sub(total_bytes);
+                    let max_for_file = MAX_UPLOAD_RESTORE_FILE_BYTES.min(remaining_total);
+                    if entry.header().size()? > max_for_file {
+                        return Err(PostgresError::MigrationFailed(format!(
+                            "Refusing uploads archive: entry {:?} exceeds size limits",
+                            path
+                        )));
+                    }
                     if let Some(parent) = dest.parent() {
                         std::fs::create_dir_all(parent)?;
+                        #[cfg(unix)]
+                        if is_private {
+                            enforce_private_uploads_dir_modes(&staging_dir, parent)?;
+                        }
                     }
-                    let mut out = OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&dest)?;
-                    std::io::copy(&mut entry, &mut out)?;
+                    let mut opts = OpenOptions::new();
+                    opts.write(true).create_new(true);
+                    #[cfg(unix)]
+                    if is_private {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        opts.mode(0o600);
+                    }
+                    let mut out = opts.open(&dest)?;
+                    let mut limited = entry.take(max_for_file + 1);
+                    let written = std::io::copy(&mut limited, &mut out)?;
+                    if written > max_for_file {
+                        return Err(PostgresError::MigrationFailed(format!(
+                            "Refusing uploads archive: entry {:?} exceeded size limit while reading",
+                            path
+                        )));
+                    }
                     out.flush()?;
+                    total_bytes += written;
                 }
                 _ => unreachable!("uploads_entry_is_restorable restricts to Regular/Directory"),
             }
@@ -2112,7 +2170,13 @@ fn restore_uploads_tarball_sync(data_dir: &Path, tarball_path: &Path) -> Result<
     // Ensure both upload trees always exist after a restore, even when the
     // archive omitted an empty directory.
     for name in ["uploads", "private_uploads"] {
-        std::fs::create_dir_all(staging_dir.join(name))?;
+        let dir = staging_dir.join(name);
+        std::fs::create_dir_all(&dir)?;
+        #[cfg(unix)]
+        if name == "private_uploads" {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        }
     }
 
     let mut retired: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -2512,7 +2576,80 @@ fn bootstrap_password_file_path() -> PathBuf {
     get_data_directory().join("initial-login-password.txt")
 }
 
-fn read_bootstrap_password_file() -> Result<Option<String>, PostgresError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BootstrapCredentials {
+    PerAccount(BTreeMap<String, String>),
+    LegacyShared(String),
+}
+
+fn parse_bootstrap_password_content(content: &str) -> Option<BootstrapCredentials> {
+    let mut per_account = BTreeMap::new();
+    let mut legacy_password: Option<String> = None;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty()
+            || line.starts_with("Initial desktop login password")
+            || line.starts_with("Seeded usernames")
+            || line.starts_with("Change ")
+        {
+            continue;
+        }
+        let item = line.strip_prefix("- ").map(str::trim).unwrap_or(line);
+        if let Some((username, password)) = item.split_once(':') {
+            let username = username.trim();
+            let password = password.trim();
+            if !username.is_empty()
+                && !password.is_empty()
+                && !username.contains(char::is_whitespace)
+            {
+                per_account.insert(username.to_string(), password.to_string());
+                continue;
+            }
+        }
+        if !line.starts_with('-') && legacy_password.is_none() {
+            legacy_password = Some(line.to_string());
+        }
+    }
+
+    if !per_account.is_empty() {
+        Some(BootstrapCredentials::PerAccount(per_account))
+    } else {
+        legacy_password.map(BootstrapCredentials::LegacyShared)
+    }
+}
+
+fn bootstrap_credentials_fully_retired(
+    creds: &BootstrapCredentials,
+    active_users: &[(String, String)],
+    placeholder_hash: &str,
+) -> bool {
+    if active_users.is_empty() {
+        return false;
+    }
+    for (username, hash) in active_users {
+        if hash.is_empty() || hash == placeholder_hash {
+            return false;
+        }
+        match creds {
+            BootstrapCredentials::PerAccount(map) => {
+                if let Some(expected_pw) = map.get(username)
+                    && !matches!(bcrypt::verify(expected_pw, hash), Ok(false))
+                {
+                    return false;
+                }
+            }
+            BootstrapCredentials::LegacyShared(expected_pw) => {
+                if !matches!(bcrypt::verify(expected_pw, hash), Ok(false)) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn read_bootstrap_credentials_file() -> Result<Option<BootstrapCredentials>, PostgresError> {
     let password_file = bootstrap_password_file_path();
 
     if !password_file.exists() {
@@ -2520,59 +2657,64 @@ fn read_bootstrap_password_file() -> Result<Option<String>, PostgresError> {
     }
 
     let content = std::fs::read_to_string(&password_file)?;
-
-    for line in content.lines().map(str::trim) {
-        if line.is_empty()
-            || line.starts_with("Initial desktop login password")
-            || line.starts_with("Seeded usernames")
-            || line.starts_with("Change account passwords")
-            || line.starts_with('-')
-        {
-            continue;
-        }
-
-        return Ok(Some(line.to_string()));
+    let parsed = parse_bootstrap_password_content(&content);
+    if parsed.is_none() {
+        log::warn!(
+            "Initial login password file exists but no password could be parsed at {:?}",
+            password_file
+        );
     }
-
-    log::warn!(
-        "Initial login password file exists but no password could be parsed at {:?}",
-        password_file
-    );
-    Ok(None)
+    Ok(parsed)
 }
 
 async fn randomize_seed_passwords(app_handle: &AppHandle) -> Result<(), PostgresError> {
-    let password = generate_bootstrap_password();
-    let password_hash = hash_bootstrap_password(&password)?;
-    let sql = format!(
-        "UPDATE users SET password_hash = {}, failed_login_attempts = 0, is_locked = false, locked_until = NULL;",
-        sql_string_literal(&password_hash)
-    );
-
-    run_psql_scalar_sql(app_handle, "psql randomize seed passwords", &sql).await?;
     let usernames_output = run_psql_scalar_sql(
         app_handle,
         "psql list seeded usernames",
         "SELECT COALESCE(string_agg(username, E'\n' ORDER BY username), '') FROM users;",
     )
     .await?;
-    let usernames = trimmed_lossy(&usernames_output.stdout);
-    let username_lines = usernames
+    let usernames: Vec<String> = trimmed_lossy(&usernames_output.stdout)
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|username| format!("- {}", username))
+        .filter(|line| !line.is_empty() && *line != "<empty>")
+        .map(str::to_string)
+        .collect();
+    if usernames.is_empty() {
+        return Err(PostgresError::MigrationFailed(
+            "No seeded user accounts found while initializing desktop bootstrap passwords"
+                .to_string(),
+        ));
+    }
+
+    let mut per_account = BTreeMap::new();
+    let mut sql_updates = String::from("BEGIN;\n");
+    for username in &usernames {
+        let password = generate_bootstrap_password();
+        let password_hash = hash_bootstrap_password(&password)?;
+        sql_updates.push_str(&format!(
+            "UPDATE users SET password_hash = {}, failed_login_attempts = 0, is_locked = false, locked_until = NULL WHERE username = {};\n",
+            sql_string_literal(&password_hash),
+            sql_string_literal(username),
+        ));
+        per_account.insert(username.clone(), password);
+    }
+    sql_updates.push_str("COMMIT;\n");
+    run_psql_scalar_sql(app_handle, "psql randomize seed passwords", &sql_updates).await?;
+
+    let account_lines = per_account
+        .iter()
+        .map(|(username, password)| format!("- {}: {}", username, password))
         .collect::<Vec<_>>()
         .join("\n");
 
     let password_file = bootstrap_password_file_path();
     let contents = format!(
-        "Initial desktop login password for seeded accounts:\n{}\n\nSeeded usernames:\n{}\n\nChange account passwords after first login.\n",
-        password, username_lines
+        "Initial desktop login passwords for seeded accounts:\n{}\n\nChange all initial account passwords after first login.\n",
+        account_lines
     );
-    // 0600 like the postgres password file: this contains the cleartext
-    // initial admin password, and shared front-desk machines have multiple
-    // local OS accounts. Default umask would land it world-readable.
+    // 0600 like the postgres password file: this contains cleartext initial
+    // credentials, and shared front-desk machines have multiple OS accounts.
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -2582,11 +2724,9 @@ async fn randomize_seed_passwords(app_handle: &AppHandle) -> Result<(), Postgres
     }
     match options.open(&password_file) {
         Ok(mut file) => {
-            use std::io::Write;
             file.write_all(contents.as_bytes())?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Retry flow: tighten the existing file instead of recreating it.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -2599,7 +2739,8 @@ async fn randomize_seed_passwords(app_handle: &AppHandle) -> Result<(), Postgres
         Err(error) => return Err(error.into()),
     }
     log::info!(
-        "Seed account passwords randomized. Initial login password written to {:?}",
+        "Seed account passwords randomized cleanly for {} account(s). Initial credentials written to {:?}",
+        per_account.len(),
         password_file
     );
 
@@ -2609,13 +2750,45 @@ async fn randomize_seed_passwords(app_handle: &AppHandle) -> Result<(), Postgres
 async fn repair_bootstrap_password_hashes_if_needed(
     app_handle: &AppHandle,
 ) -> Result<(), PostgresError> {
-    let Some(password) = read_bootstrap_password_file()? else {
+    let Some(creds) = read_bootstrap_credentials_file()? else {
         return Ok(());
     };
 
-    let password_hash = hash_bootstrap_password(&password)?;
-    let sql = format!(
-        r#"
+    let sql = match &creds {
+        BootstrapCredentials::PerAccount(map) => {
+            let mut batch = String::from("WITH updated AS (\n");
+            let mut count = 0usize;
+            for (idx, (username, password)) in map.iter().enumerate() {
+                let password_hash = hash_bootstrap_password(password)?;
+                let cte = format!("u_{idx}");
+                if idx > 0 {
+                    batch.push_str(",\n");
+                } else {
+                    batch = String::from("WITH ");
+                }
+                batch.push_str(&format!(
+                    "{cte} AS (UPDATE users SET password_hash = {}, failed_login_attempts = 0, is_locked = false, locked_until = NULL WHERE username = {} AND password_hash = {} RETURNING 1)",
+                    sql_string_literal(&password_hash),
+                    sql_string_literal(username),
+                    sql_string_literal(SEED_PLACEHOLDER_PASSWORD_HASH),
+                ));
+                count += 1;
+            }
+            if count == 0 {
+                return Ok(());
+            }
+            batch.push_str("\nSELECT ");
+            let terms: Vec<String> = (0..count)
+                .map(|idx| format!("(SELECT COUNT(*) FROM u_{idx})"))
+                .collect();
+            batch.push_str(&terms.join(" + "));
+            batch.push(';');
+            batch
+        }
+        BootstrapCredentials::LegacyShared(password) => {
+            let password_hash = hash_bootstrap_password(password)?;
+            format!(
+                r#"
 WITH updated AS (
     UPDATE users
     SET password_hash = {},
@@ -2627,9 +2800,11 @@ WITH updated AS (
 )
 SELECT COUNT(*) FROM updated;
 "#,
-        sql_string_literal(&password_hash),
-        sql_string_literal(SEED_PLACEHOLDER_PASSWORD_HASH)
-    );
+                sql_string_literal(&password_hash),
+                sql_string_literal(SEED_PLACEHOLDER_PASSWORD_HASH)
+            )
+        }
+    };
 
     let output =
         run_psql_scalar_sql(app_handle, "psql repair bootstrap password hashes", &sql).await?;
@@ -2643,27 +2818,24 @@ SELECT COUNT(*) FROM updated;
         );
     }
 
-    // Remove initial-login-password.txt once no active user retains the seed
-    // placeholder hash and the seeded admin account has changed away from the
-    // generated bootstrap password.
-    let verify_sql = format!(
-        "SELECT COALESCE((SELECT password_hash FROM users WHERE username = 'admin' AND deleted_at IS NULL LIMIT 1), '') \
-         || '|' || \
-         CASE WHEN EXISTS (SELECT 1 FROM users WHERE password_hash = {} AND deleted_at IS NULL) THEN '1' ELSE '0' END;",
-        sql_string_literal(SEED_PLACEHOLDER_PASSWORD_HASH)
-    );
+    // Remove initial-login-password.txt only once NO active user retains the
+    // seed placeholder hash AND NO active user (including superadmin/admin)
+    // still authenticates with a bootstrap password.
+    let verify_sql = "SELECT COALESCE(string_agg(username || '|' || COALESCE(password_hash, ''), E'\n' ORDER BY username), '') FROM users WHERE deleted_at IS NULL;";
     let verify_output = run_psql_scalar_sql(
         app_handle,
         "psql check bootstrap password removal eligibility",
-        &verify_sql,
+        verify_sql,
     )
     .await?;
-    let verify_row = trimmed_lossy(&verify_output.stdout);
-    if let Some((admin_hash, has_placeholder)) = verify_row.rsplit_once('|')
-        && has_placeholder == "0"
-        && !admin_hash.is_empty()
-        && matches!(bcrypt::verify(&password, admin_hash), Ok(false))
-    {
+    let active_users: Vec<(String, String)> = trimmed_lossy(&verify_output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (u, h) = line.trim().split_once('|')?;
+            Some((u.to_string(), h.to_string()))
+        })
+        .collect();
+    if bootstrap_credentials_fully_retired(&creds, &active_users, SEED_PLACEHOLDER_PASSWORD_HASH) {
         let password_file = bootstrap_password_file_path();
         if let Err(err) = std::fs::remove_file(&password_file) {
             if err.kind() != std::io::ErrorKind::NotFound {
@@ -2675,7 +2847,7 @@ SELECT COUNT(*) FROM updated;
             }
         } else {
             log::info!(
-                "Removed initial bootstrap password file {:?} because bootstrap credentials are no longer active.",
+                "Removed initial bootstrap password file {:?} because all bootstrap credentials have been rotated.",
                 password_file
             );
         }
@@ -2778,6 +2950,7 @@ async fn run_sql_file(app_handle: &AppHandle, file_path: &Path) -> Result<(), Po
         .arg("-f")
         .arg(file_path)
         .env("PGPASSWORD", read_or_create_postgres_password()?)
+        .env("PGREQUIREAUTH", "scram-sha-256")
         .env("PATH", &new_path)
         .current_dir(&pgsql_bin)
         .stdout(Stdio::piped())
@@ -3189,6 +3362,134 @@ mod tests {
         );
         assert!(base.join("private_uploads").is_dir());
         assert!(!base.join("private_uploads/old.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn parse_bootstrap_password_content_supports_per_account_and_legacy_formats() {
+        let per_account = parse_bootstrap_password_content(
+            "Initial desktop login passwords for seeded accounts:\n- admin: Alpha#123\n- superadmin: Beta#456\n\nChange all initial account passwords after first login.\n",
+        )
+        .expect("per-account credentials");
+        assert_eq!(
+            per_account,
+            BootstrapCredentials::PerAccount(BTreeMap::from([
+                ("admin".to_string(), "Alpha#123".to_string()),
+                ("superadmin".to_string(), "Beta#456".to_string()),
+            ]))
+        );
+
+        let legacy = parse_bootstrap_password_content(
+            "Initial desktop login password for seeded accounts:\nSharedPass!99\n\nSeeded usernames:\n- admin\n\nChange account passwords after first login.\n",
+        )
+        .expect("legacy shared credentials");
+        assert_eq!(
+            legacy,
+            BootstrapCredentials::LegacyShared("SharedPass!99".to_string())
+        );
+    }
+
+    #[test]
+    fn bootstrap_credentials_fully_retired_checks_all_active_users() {
+        let creds = BootstrapCredentials::PerAccount(BTreeMap::from([
+            ("admin".to_string(), "AdminInit#1".to_string()),
+            ("superadmin".to_string(), "SuperInit#2".to_string()),
+        ]));
+        let admin_changed = bcrypt::hash("NewAdmin#1", 4).unwrap();
+        let super_still_init = bcrypt::hash("SuperInit#2", 4).unwrap();
+        let super_changed = bcrypt::hash("NewSuper#2", 4).unwrap();
+
+        assert!(
+            !bootstrap_credentials_fully_retired(
+                &creds,
+                &[
+                    ("admin".to_string(), admin_changed.clone()),
+                    ("superadmin".to_string(), super_still_init),
+                ],
+                SEED_PLACEHOLDER_PASSWORD_HASH,
+            ),
+            "must keep bootstrap file while superadmin still uses initial password"
+        );
+        assert!(
+            !bootstrap_credentials_fully_retired(
+                &creds,
+                &[
+                    ("admin".to_string(), admin_changed.clone()),
+                    (
+                        "superadmin".to_string(),
+                        SEED_PLACEHOLDER_PASSWORD_HASH.to_string(),
+                    ),
+                ],
+                SEED_PLACEHOLDER_PASSWORD_HASH,
+            ),
+            "must keep bootstrap file while any active user holds placeholder hash"
+        );
+        assert!(bootstrap_credentials_fully_retired(
+            &creds,
+            &[
+                ("admin".to_string(), admin_changed),
+                ("superadmin".to_string(), super_changed),
+            ],
+            SEED_PLACEHOLDER_PASSWORD_HASH,
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_uploads_tarball_enforces_private_upload_permissions_and_caps() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = std::env::temp_dir().join(format!("hotel-uploads-sec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        let tarball = base.join("private-uploads.tar.gz");
+        {
+            let gz = flate2::write::GzEncoder::new(
+                std::fs::File::create(&tarball).unwrap(),
+                flate2::Compression::default(),
+            );
+            let mut builder = tar::Builder::new(gz);
+            let mut dir_hdr = tar::Header::new_gnu();
+            dir_hdr.set_entry_type(tar::EntryType::Directory);
+            dir_hdr.set_size(0);
+            dir_hdr.set_mode(0o755);
+            dir_hdr.set_cksum();
+            builder
+                .append_data(&mut dir_hdr, "private_uploads/ekyc", std::io::empty())
+                .unwrap();
+
+            let mut file_hdr = tar::Header::new_gnu();
+            let payload = b"kyc-doc";
+            file_hdr.set_size(payload.len() as u64);
+            file_hdr.set_mode(0o644);
+            file_hdr.set_cksum();
+            builder
+                .append_data(&mut file_hdr, "private_uploads/ekyc/id.bin", &payload[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+
+        restore_uploads_tarball_sync(&base, &tarball).unwrap();
+        let priv_mode = std::fs::metadata(base.join("private_uploads"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let sub_mode = std::fs::metadata(base.join("private_uploads/ekyc"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = std::fs::metadata(base.join("private_uploads/ekyc/id.bin"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(priv_mode, 0o700);
+        assert_eq!(sub_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
 
         let _ = std::fs::remove_dir_all(&base);
     }

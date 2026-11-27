@@ -3,10 +3,14 @@ package com.hotelapp.staff.core.format
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import kotlin.math.abs
 
 object DateFormatter {
     private val shortDateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
@@ -15,19 +19,39 @@ object DateFormatter {
     private val sameYearDateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM, HH:mm", Locale.US)
     private val timeOnlyFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
     private val todayHeaderFormatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy", Locale.US)
+    private val pgOffsetSuffixRegex = Regex("""[+-]\d{2}$""")
+    private val colonlessOffsetSuffixRegex = Regex("""([+-]\d{2})(\d{2})$""")
+
+    private fun parseInstant(raw: String): Instant {
+        val trimmed = raw.trim()
+        runCatching { return Instant.parse(trimmed) }
+        runCatching { return OffsetDateTime.parse(trimmed).toInstant() }
+        val pgNormalized = trimmed
+            .replace(' ', 'T')
+            .let { s ->
+                when {
+                    pgOffsetSuffixRegex.containsMatchIn(s) -> "$s:00"
+                    colonlessOffsetSuffixRegex.containsMatchIn(s) ->
+                        colonlessOffsetSuffixRegex.replace(s, "$1:$2")
+                    else -> s
+                }
+            }
+        runCatching { return OffsetDateTime.parse(pgNormalized).toInstant() }
+        return LocalDateTime.parse(pgNormalized).toInstant(ZoneOffset.UTC)
+    }
 
     fun formatDate(raw: String?): String {
         if (raw.isNullOrBlank()) return "—"
         return runCatching {
-            LocalDate.parse(raw.take(10)).format(shortDateFormatter)
+            LocalDate.parse(raw.trim().take(10)).format(shortDateFormatter)
         }.getOrElse { raw }
     }
 
     fun nightsCount(checkIn: String?, checkOut: String?): Long? {
         if (checkIn.isNullOrBlank() || checkOut.isNullOrBlank()) return null
         return runCatching {
-            val start = LocalDate.parse(checkIn.take(10))
-            val end = LocalDate.parse(checkOut.take(10))
+            val start = LocalDate.parse(checkIn.trim().take(10))
+            val end = LocalDate.parse(checkOut.trim().take(10))
             ChronoUnit.DAYS.between(start, end).takeIf { it > 0 }
         }.getOrNull()
     }
@@ -35,8 +59,8 @@ object DateFormatter {
     fun formatDateRange(checkIn: String?, checkOut: String?): String {
         if (checkIn.isNullOrBlank() || checkOut.isNullOrBlank()) return "—"
         return runCatching {
-            val start = LocalDate.parse(checkIn.take(10))
-            val end = LocalDate.parse(checkOut.take(10))
+            val start = LocalDate.parse(checkIn.trim().take(10))
+            val end = LocalDate.parse(checkOut.trim().take(10))
             if (start.year == end.year) {
                 "${start.format(shortMonthDayFormatter)} – ${end.format(shortDateFormatter)}"
             } else {
@@ -52,11 +76,11 @@ object DateFormatter {
         return if (nights != null) "$range · ${nights}n" else range
     }
 
-    fun formatTimestamp(raw: String?): String {
+    fun formatTimestamp(raw: String?, zoneId: ZoneId = ZoneId.systemDefault()): String {
         if (raw.isNullOrBlank()) return "—"
         return runCatching {
-            Instant.parse(raw)
-                .atZone(ZoneId.systemDefault())
+            parseInstant(raw)
+                .atZone(zoneId)
                 .format(dateTimeFormatter)
         }.getOrElse { raw }
     }
@@ -68,16 +92,21 @@ object DateFormatter {
     ): String {
         if (raw.isNullOrBlank()) return "—"
         return runCatching {
-            val instant = Instant.parse(raw)
+            val instant = parseInstant(raw)
             val duration = Duration.between(instant, now)
+            val seconds = duration.seconds
             val minutes = duration.toMinutes()
             val hours = duration.toHours()
             val targetZoned = instant.atZone(zoneId)
             val nowZoned = now.atZone(zoneId)
 
             when {
-                duration.isNegative -> targetZoned.format(sameYearDateTimeFormatter)
-                minutes < 1 -> "Just now"
+                abs(seconds) < 60 -> "Just now"
+                duration.isNegative -> if (targetZoned.year == nowZoned.year) {
+                    targetZoned.format(sameYearDateTimeFormatter)
+                } else {
+                    targetZoned.format(dateTimeFormatter)
+                }
                 minutes < 60 -> "${minutes}m ago"
                 hours < 24 && targetZoned.toLocalDate() == nowZoned.toLocalDate() -> "${hours}h ago"
                 targetZoned.toLocalDate() == nowZoned.toLocalDate().minusDays(1) ->

@@ -25,9 +25,9 @@ BEGIN
     -- refused anything but beta2, so `make db-pg19-tune` and the pg19-tuned
     -- Compose profile could never apply. The settings below have NOT been
     -- re-benchmarked on beta3 — run pg19_beta2_benchmark.sql before and after.
-    IF version() !~ '^PostgreSQL 19beta[23] ' THEN
+    IF current_setting('server_version_num')::integer < 190000 THEN
         RAISE EXCEPTION
-            'pg19_beta2.sql requires PostgreSQL 19 Beta 2 or Beta 3; connected to %',
+            'pg19_beta2.sql requires PostgreSQL 19+; connected to %',
             version();
     END IF;
 END;
@@ -129,31 +129,31 @@ $$;
 DO $$
 BEGIN
     IF to_regclass('public.bookings') IS NOT NULL THEN
-        CREATE STATISTICS IF NOT EXISTS stats_bookings_commercial_state
+        CREATE STATISTICS IF NOT EXISTS public.stats_bookings_commercial_state
             (mcv, dependencies)
             ON status, payment_status, source, booking_channel_id
             FROM public.bookings;
-        ALTER STATISTICS stats_bookings_commercial_state SET STATISTICS 500;
+        ALTER STATISTICS public.stats_bookings_commercial_state SET STATISTICS 500;
         ALTER TABLE public.bookings ALTER COLUMN status SET STATISTICS 500;
         ALTER TABLE public.bookings ALTER COLUMN payment_status SET STATISTICS 500;
         ANALYZE public.bookings;
     END IF;
 
     IF to_regclass('public.ekyc_verifications') IS NOT NULL THEN
-        CREATE STATISTICS IF NOT EXISTS stats_ekyc_review_queue
+        CREATE STATISTICS IF NOT EXISTS public.stats_ekyc_review_queue
             (mcv, dependencies)
             ON status, manual_review_required, risk_level, assigned_reviewer_id
             FROM public.ekyc_verifications;
-        ALTER STATISTICS stats_ekyc_review_queue SET STATISTICS 500;
+        ALTER STATISTICS public.stats_ekyc_review_queue SET STATISTICS 500;
         ANALYZE public.ekyc_verifications;
     END IF;
 
     IF to_regclass('public.customer_ledgers') IS NOT NULL THEN
-        CREATE STATISTICS IF NOT EXISTS stats_customer_ledgers_work_queue
+        CREATE STATISTICS IF NOT EXISTS public.stats_customer_ledgers_work_queue
             (mcv, dependencies)
             ON status, is_posted, folio_type, posting_date
             FROM public.customer_ledgers;
-        ALTER STATISTICS stats_customer_ledgers_work_queue SET STATISTICS 500;
+        ALTER STATISTICS public.stats_customer_ledgers_work_queue SET STATISTICS 500;
         ANALYZE public.customer_ledgers;
     END IF;
 

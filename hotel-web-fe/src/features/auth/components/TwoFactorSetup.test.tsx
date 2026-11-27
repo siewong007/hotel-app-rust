@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   setup: vi.fn(),
   enable: vi.fn(),
+  disable: vi.fn(),
 }));
 vi.mock('../../../api/auth.service', () => ({
   AuthService: {
     getTwoFactorStatus: (...args: unknown[]) => mocks.status(...args),
     setupTwoFactor: (...args: unknown[]) => mocks.setup(...args),
     enableTwoFactor: (...args: unknown[]) => mocks.enable(...args),
+    disableTwoFactor: (...args: unknown[]) => mocks.disable(...args),
   },
 }));
 import TwoFactorSetup from './TwoFactorSetup';
@@ -30,6 +32,7 @@ describe('TwoFactorSetup password verification', () => {
     mocks.status.mockResolvedValue({ enabled: false, backup_codes_remaining: 0 });
     mocks.setup.mockResolvedValue({ secret: 'secret', qr_code_url: 'otpauth://totp/test', challenge_code: 'challenge' });
     mocks.enable.mockResolvedValue({ message: 'ok', backup_codes: ['AAAA-BBBB'] });
+    mocks.disable.mockResolvedValue(undefined);
   });
   afterEach(cleanup);
 
@@ -62,6 +65,32 @@ describe('TwoFactorSetup password verification', () => {
     expect(password.value).toBe('');
     expect(setup.hasAttribute('disabled')).toBe(true);
     expect(mocks.enable).not.toHaveBeenCalled();
+    await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
+  });
+
+  it('requires the current password alongside the 2FA code to disable 2FA and clears mutation state', async () => {
+    mocks.status.mockResolvedValue({ enabled: true, backup_codes_remaining: 5 });
+    const client = renderSetup();
+
+    const openDisable = await screen.findByRole('button', { name: 'Disable 2FA' });
+    fireEvent.click(openDisable);
+
+    const dialogConfirm = screen.getAllByRole('button', { name: 'Disable 2FA' }).at(-1)!;
+    expect(dialogConfirm.hasAttribute('disabled')).toBe(true);
+
+    const passwordInput = screen.getByLabelText('Current Password') as HTMLInputElement;
+    const codeInput = screen.getByLabelText(/Enter your current 2FA code/);
+
+    fireEvent.change(codeInput, { target: { value: '123456' } });
+    expect(dialogConfirm.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(passwordInput, { target: { value: 'secret-pass' } });
+    expect(dialogConfirm.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(dialogConfirm);
+    await waitFor(() =>
+      expect(mocks.disable).toHaveBeenCalledWith('123456', 'secret-pass', undefined),
+    );
     await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
   });
 });

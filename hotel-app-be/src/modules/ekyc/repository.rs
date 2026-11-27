@@ -671,7 +671,9 @@ impl EkycRepository {
                          AND submitted_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
                          AND status NOT IN ('approved', 'rejected', 'expired', 'void')
                     THEN 1 ELSE 0 END), 0)::BIGINT AS nearing_sla,
-                COALESCE(SUM(CASE WHEN submitted_at::date = CURRENT_DATE THEN 1 ELSE 0 END), 0)::BIGINT AS daily_trend,
+                COALESCE(SUM(CASE WHEN submitted_at >= CURRENT_DATE::timestamp AT TIME ZONE current_setting('TimeZone')
+                         AND submitted_at < (CURRENT_DATE + 1)::timestamp AT TIME ZONE current_setting('TimeZone')
+                    THEN 1 ELSE 0 END), 0)::BIGINT AS daily_trend,
                 COALESCE(SUM(CASE WHEN submitted_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 ELSE 0 END), 0)::BIGINT AS weekly_trend,
                 COALESCE(SUM(CASE WHEN submitted_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 ELSE 0 END), 0)::BIGINT AS monthly_trend
             FROM ekyc_verifications

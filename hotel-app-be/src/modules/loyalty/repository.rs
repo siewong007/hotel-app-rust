@@ -32,19 +32,13 @@ impl LoyaltyRepository {
         user_id: i64,
     ) -> Result<Option<LoyaltyGuestProfile>, ApiError> {
         let sql = r#"
-                SELECT guest_id, nick_name, email, phone
-                FROM (
-                    SELECT 0 AS match_priority, g.id AS guest_id, g.nick_name, g.email, g.phone
-                    FROM users u
-                    JOIN guests g ON g.id = u.guest_id
-                    WHERE u.id = $1
-                    UNION ALL
-                    SELECT 1 AS match_priority, g.id AS guest_id, g.nick_name, g.email, g.phone
-                    FROM users u
-                    JOIN guests g ON lower(g.email) = lower(u.email)
-                    WHERE u.id = $1 AND u.guest_id IS NULL
-                ) matched
-                ORDER BY match_priority ASC, guest_id DESC
+                SELECT g.id AS guest_id, g.nick_name, g.email, g.phone
+                FROM users u
+                JOIN guests g ON g.id = u.guest_id
+                WHERE u.id = $1
+                  AND u.user_type = 'guest'
+                  AND u.deleted_at IS NULL
+                  AND u.guest_id IS NOT NULL
                 LIMIT 1
             "#;
 
@@ -182,6 +176,32 @@ impl LoyaltyRepository {
         Ok(row.as_ref().map(row_to_member_summary))
     }
 
+    pub async fn member_by_guest_for_update_tx(
+        tx: &mut DbTransaction<'_>,
+        guest_id: i64,
+    ) -> Result<Option<LoyaltyMemberSummary>, ApiError> {
+        let locked_id: Option<i64> = sqlx::query_scalar(
+            "SELECT lm.id FROM loyalty_members lm \
+             JOIN loyalty_accounts la ON la.member_id = lm.id \
+             WHERE lm.guest_id = $1 FOR UPDATE OF lm, la",
+        )
+        .bind(guest_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
+        if locked_id.is_none() {
+            return Ok(None);
+        }
+        let row = sqlx::query(sqlx::AssertSqlSafe(&*member_summary_sql(
+            "WHERE lm.guest_id = $1",
+        )))
+        .bind(guest_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
+        Ok(row.as_ref().map(row_to_member_summary))
+    }
+
     pub async fn lock_member_account_tx(
         tx: &mut DbTransaction<'_>,
         member_id: i64,
@@ -250,7 +270,7 @@ impl LoyaltyRepository {
             .is_some_and(|v| !v.trim().is_empty())
         {
             conditions.push(
-                "(lower(g.nick_name) LIKE lower($1) ESCAPE '\\' OR lower(COALESCE(g.email, '')) LIKE lower($1) ESCAPE '\\' OR lower(lm.member_number) LIKE lower($1) ESCAPE '\\')",
+                "(lower(g.nick_name) LIKE lower($1) ESCAPE '\\' OR lower(g.email) LIKE lower($1) ESCAPE '\\' OR lower(lm.member_number) LIKE lower($1) ESCAPE '\\')",
             );
             bind_search = true;
         }
@@ -334,13 +354,16 @@ impl LoyaltyRepository {
             .ok_or_else(|| ApiError::Internal("Created loyalty member was not found".to_string()))
     }
 
-    pub async fn has_source_transaction(
-        pool: &DbPool,
+    pub async fn has_source_transaction<'e, E>(
+        executor: E,
         member_id: i64,
         source_type: &str,
         source_id: i64,
         transaction_type: &str,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<bool, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
@@ -352,23 +375,26 @@ impl LoyaltyRepository {
         .bind(source_type)
         .bind(source_id)
         .bind(transaction_type)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .map_err(ApiError::from)?;
         Ok(count > 0)
     }
 
-    pub async fn earned_booking_transaction_count(
-        pool: &DbPool,
+    pub async fn earned_booking_transaction_count<'e, E>(
+        executor: E,
         member_id: i64,
         booking_id: i64,
-    ) -> Result<i64, ApiError> {
+    ) -> Result<i64, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar(
             "SELECT COUNT(*) FROM loyalty_transactions WHERE member_id = $1 AND booking_id = $2 AND transaction_type = 'earned'",
         )
         .bind(member_id)
         .bind(booking_id)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .map_err(ApiError::from)
     }
@@ -975,6 +1001,41 @@ impl LoyaltyRepository {
         if remaining.is_none() {
             return Err(ApiError::Conflict("Reward is out of stock.".to_string()));
         }
+        Ok(())
+    }
+
+    pub async fn booking_belongs_to_guest(
+        pool: &DbPool,
+        booking_id: i64,
+        guest_id: i64,
+    ) -> Result<bool, ApiError> {
+        let belongs: Option<bool> = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM bookings WHERE id = $1 AND guest_id = $2)",
+        )
+        .bind(booking_id)
+        .bind(guest_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(ApiError::from)?;
+        Ok(belongs.unwrap_or(false))
+    }
+
+    pub async fn increment_reward_inventory(
+        tx: &mut DbTransaction<'_>,
+        reward_id: i64,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"
+                UPDATE loyalty_rewards
+                SET inventory_count = inventory_count + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND inventory_count IS NOT NULL
+            "#,
+        )
+        .bind(reward_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
         Ok(())
     }
 }

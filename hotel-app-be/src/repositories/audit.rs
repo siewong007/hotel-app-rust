@@ -329,9 +329,9 @@ impl AuditRepository {
     pub async fn list_users(pool: &DbPool) -> Result<Vec<AuditUserOption>, ApiError> {
         sqlx::query_as::<_, AuditUserOption>(
             r#"
-            SELECT DISTINCT u.id, u.username
+            SELECT u.id, u.username
             FROM users u
-            INNER JOIN audit_logs a ON u.id = a.user_id
+            WHERE EXISTS (SELECT 1 FROM audit_logs a WHERE a.user_id = u.id)
             ORDER BY u.username
             "#,
         )
@@ -364,7 +364,10 @@ impl AuditRepository {
             query = query.bind(end_date);
         }
         if let Some(ref search) = params.search {
-            query = query.bind(format!("%{}%", search));
+            query = query.bind(format!(
+                "%{}%",
+                crate::utils::sanitization::Sanitizer::escape_like_pattern(search)
+            ));
         }
 
         query

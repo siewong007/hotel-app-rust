@@ -7,6 +7,10 @@ import com.hotelapp.staff.data.dto.EkycApplicationDetailDto
 import com.hotelapp.staff.data.dto.EkycDashboardMetricsDto
 import com.hotelapp.staff.data.dto.EkycReasonCodeDto
 import com.hotelapp.staff.data.dto.EkycReviewActionRequestDto
+import com.hotelapp.staff.data.dto.EkycSensitiveRevealRequestDto
+import com.hotelapp.staff.data.dto.EkycSensitiveRevealResponseDto
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 interface EkycRepository {
     suspend fun dashboard(): Result<EkycDashboardMetricsDto>
@@ -19,6 +23,10 @@ interface EkycRepository {
     suspend fun applicationDetail(id: Long): Result<EkycApplicationDetailDto>
     suspend fun applyAction(id: Long, request: EkycReviewActionRequestDto): Result<EkycApplicationDetailDto>
     suspend fun reasonCodes(): Result<List<EkycReasonCodeDto>>
+    suspend fun fetchDocumentBytes(id: Long, kind: String): Result<ByteArray> =
+        Result.failure(UnsupportedOperationException("Document download not supported."))
+    suspend fun revealSensitive(id: Long, field: String, reason: String): Result<EkycSensitiveRevealResponseDto> =
+        Result.failure(UnsupportedOperationException("Sensitive reveal not supported."))
 }
 
 class DefaultEkycRepository(
@@ -50,4 +58,18 @@ class DefaultEkycRepository(
     ): Result<EkycApplicationDetailDto> = safeApiCall { api.applyAction(id, request) }
 
     override suspend fun reasonCodes(): Result<List<EkycReasonCodeDto>> = safeApiCall { api.reasonCodes() }
+
+    override suspend fun fetchDocumentBytes(id: Long, kind: String): Result<ByteArray> = safeApiCall {
+        withContext(Dispatchers.IO) {
+            api.document(id, kind).use { it.bytes() }
+        }
+    }
+
+    override suspend fun revealSensitive(
+        id: Long,
+        field: String,
+        reason: String,
+    ): Result<EkycSensitiveRevealResponseDto> = safeApiCall {
+        api.revealSensitive(id, EkycSensitiveRevealRequestDto(field = field.trim(), reason = reason.trim()))
+    }
 }

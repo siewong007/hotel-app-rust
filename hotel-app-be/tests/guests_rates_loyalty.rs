@@ -95,13 +95,15 @@ mod postgres_tests {
         email: &str,
         guest_id: Option<i64>,
     ) {
+        let user_type = if guest_id.is_some() { "guest" } else { "staff" };
         sqlx::query(
             "INSERT INTO users (id, username, email, full_name, user_type, is_active, is_verified, guest_id)
-             OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, 'staff', true, true, $5)
+             OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $6::usertype, true, true, $5)
              ON CONFLICT (id) DO UPDATE SET
                 username = EXCLUDED.username,
                 email = EXCLUDED.email,
                 full_name = EXCLUDED.full_name,
+                user_type = EXCLUDED.user_type,
                 is_active = true,
                 is_verified = true,
                 guest_id = EXCLUDED.guest_id",
@@ -111,6 +113,7 @@ mod postgres_tests {
         .bind(email)
         .bind(format!("Gst985 Actor {user_id}"))
         .bind(guest_id)
+        .bind(user_type)
         .execute(pool)
         .await
         .unwrap();
@@ -962,13 +965,14 @@ mod postgres_tests {
         let room_id = 985_301;
         let conflict_booking_id = 985_101;
         let actor_id = 985_004;
+        let guest_only_id = 985_022;
 
         async fn cleanup(
             pool: &PgPool,
             guest_id: i64,
             room_type_id: i64,
             room_id: i64,
-            actor_id: i64,
+            user_ids: &[i64],
         ) {
             delete_room_status_log(pool, &[room_id]).await;
             // Deleting the guest cascades away BOTH the fixed conflicting
@@ -977,10 +981,18 @@ mod postgres_tests {
             delete_guests(pool, &[guest_id]).await;
             delete_rooms(pool, &[room_id]).await;
             delete_room_types(pool, &[room_type_id]).await;
-            delete_users(pool, &[actor_id]).await;
+            delete_users(pool, user_ids).await;
+            hotel_app_be::core::rbac_cache::clear_all();
         }
 
-        cleanup(&pool, guest_id, room_type_id, room_id, actor_id).await;
+        cleanup(
+            &pool,
+            guest_id,
+            room_type_id,
+            room_id,
+            &[actor_id, guest_only_id],
+        )
+        .await;
 
         upsert_user(
             &pool,
@@ -990,6 +1002,16 @@ mod postgres_tests {
             None,
         )
         .await;
+        sqlx::query(
+            "INSERT INTO user_roles (user_id, role_id)
+             SELECT $1, id FROM roles WHERE name = 'admin'
+             ON CONFLICT (user_id, role_id) DO NOTHING",
+        )
+        .bind(actor_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
         upsert_guest(
             &pool,
             guest_id,
@@ -999,6 +1021,32 @@ mod postgres_tests {
             None,
         )
         .await;
+
+        sqlx::query(
+            "INSERT INTO users (id, username, email, full_name, user_type, is_active, is_verified, guest_id)
+             OVERRIDING SYSTEM VALUE VALUES ($1, 'gst985_bwc_guest_only', 'gst985.bwcguestonly@hotel.local', 'Gst985 Guest Only', 'guest', true, true, $2)
+             ON CONFLICT (id) DO UPDATE SET
+                user_type = 'guest',
+                is_active = true,
+                is_verified = true,
+                guest_id = EXCLUDED.guest_id",
+        )
+        .bind(guest_only_id)
+        .bind(guest_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_roles (user_id, role_id)
+             SELECT $1, id FROM roles WHERE name = 'guest'
+             ON CONFLICT (user_id, role_id) DO NOTHING",
+        )
+        .bind(guest_only_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        hotel_app_be::core::rbac_cache::clear_all();
         seed_room_type(
             &pool,
             room_type_id,
@@ -1010,10 +1058,10 @@ mod postgres_tests {
         .await;
         seed_room(&pool, room_id, "GST985R1", room_type_id, "available").await;
 
-        // Ownership link grants `can_book_with_credits_for_guest` access
-        // without needing RBAC role/permission fixtures.
+        // Even with a user_guests ownership link, a guest-only account must be
+        // rejected from the staff book-with-credits endpoint.
         sqlx::query("INSERT INTO user_guests (user_id, guest_id) VALUES ($1, $2)")
-            .bind(actor_id)
+            .bind(guest_only_id)
             .bind(guest_id)
             .execute(&pool)
             .await
@@ -1025,12 +1073,32 @@ mod postgres_tests {
             Json(AddGuestCreditsRequest {
                 guest_id,
                 room_type_id,
-                nights: 2,
+                nights: 4,
                 reason: Some("Gst985 test grant".to_string()),
             }),
         )
         .await
         .expect("grant must succeed");
+
+        let guest_only_attempt = book_with_credits_handler(
+            State(pool.clone()),
+            bearer_header_for(guest_only_id),
+            Json(BookWithCreditsRequest {
+                guest_id,
+                room_id,
+                check_in_date: "2031-09-10".to_string(),
+                check_out_date: "2031-09-12".to_string(),
+                adults: Some(1),
+                children: Some(0),
+                special_requests: None,
+                complimentary_dates: vec!["2031-09-10".to_string(), "2031-09-11".to_string()],
+            }),
+        )
+        .await;
+        assert!(
+            matches!(guest_only_attempt, Err(ApiError::Forbidden(_))),
+            "guest-only caller must receive Forbidden from staff book_with_credits_handler: {guest_only_attempt:?}"
+        );
 
         seed_booking(
             &pool,
@@ -1063,7 +1131,7 @@ mod postgres_tests {
             "an overlapping active booking on the same room must block availability: {conflict_attempt:?}"
         );
 
-        // Credits must be untouched by the rejected attempt.
+        // Credits must be untouched by the rejected attempts.
         let credits_after_conflict: i32 = sqlx::query_scalar(
             "SELECT nights_available FROM guest_complimentary_credits WHERE guest_id = $1 AND room_type_id = $2",
         )
@@ -1072,7 +1140,7 @@ mod postgres_tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(credits_after_conflict, 2);
+        assert_eq!(credits_after_conflict, 4);
 
         let success = book_with_credits_handler(
             State(pool.clone()),
@@ -1095,12 +1163,58 @@ mod postgres_tests {
         assert_eq!(success["complimentary_nights"].as_i64(), Some(2));
         assert_eq!(success["paid_nights"].as_i64(), Some(0));
         assert_eq!(success["is_free_gift"].as_bool(), Some(true));
+        assert_eq!(success["payment_status"].as_str(), Some("paid"));
         let total_amount = Decimal::from_str(success["total_amount"].as_str().unwrap()).unwrap();
         assert_eq!(
             total_amount,
             Decimal::ZERO,
             "fully complimentary stay must bill nothing"
         );
+        let local_tax = Decimal::from_str(success["tourism_tax_amount"].as_str().unwrap()).unwrap();
+        assert_eq!(local_tax, Decimal::ZERO);
+
+        // Foreign tourist stays still incur statutory tourism tax even when all
+        // room nights are complimentary, so payment_status must be 'unpaid'.
+        sqlx::query("UPDATE guests SET tourism_type = 'foreign' WHERE id = $1")
+            .bind(guest_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let foreign_success = book_with_credits_handler(
+            State(pool.clone()),
+            bearer_header_for(actor_id),
+            Json(BookWithCreditsRequest {
+                guest_id,
+                room_id,
+                check_in_date: "2031-10-10".to_string(),
+                check_out_date: "2031-10-12".to_string(),
+                adults: Some(1),
+                children: Some(0),
+                special_requests: None,
+                complimentary_dates: vec!["2031-10-10".to_string(), "2031-10-11".to_string()],
+            }),
+        )
+        .await
+        .expect("foreign tourist complimentary booking must succeed")
+        .0;
+        let foreign_booking_id = foreign_success["booking_id"].as_i64().unwrap();
+        let foreign_tax =
+            Decimal::from_str(foreign_success["tourism_tax_amount"].as_str().unwrap()).unwrap();
+        assert!(
+            foreign_tax > Decimal::ZERO,
+            "foreign tourist comp stay must carry positive tourism tax, got {foreign_tax}"
+        );
+        assert_eq!(foreign_success["payment_status"].as_str(), Some("unpaid"));
+        let persisted_row: (bool, Decimal, String) = sqlx::query_as(
+            "SELECT is_tourist, tourism_tax_amount, payment_status FROM bookings WHERE id = $1",
+        )
+        .bind(foreign_booking_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(persisted_row.0);
+        assert_eq!(persisted_row.1, foreign_tax);
+        assert_eq!(persisted_row.2, "unpaid");
 
         let remaining_nights: i32 = sqlx::query_scalar(
             "SELECT nights_available FROM guest_complimentary_credits WHERE guest_id = $1 AND room_type_id = $2",
@@ -1110,9 +1224,16 @@ mod postgres_tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(remaining_nights, 0, "2 granted minus 2 consumed");
+        assert_eq!(remaining_nights, 0, "4 granted minus 2 + 2 consumed");
 
-        cleanup(&pool, guest_id, room_type_id, room_id, actor_id).await;
+        cleanup(
+            &pool,
+            guest_id,
+            room_type_id,
+            room_id,
+            &[actor_id, guest_only_id],
+        )
+        .await;
     }
 
     // -----------------------------------------------------------------
@@ -1463,14 +1584,13 @@ mod postgres_tests {
             None,
         )
         .await;
-        // `find_guest_for_user` resolves an unlinked user (guest_id IS NULL)
-        // to a guest by matching email, case-insensitively.
+        // `find_guest_for_user` resolves strictly through explicit `users.guest_id`.
         upsert_user(
             &pool,
             enrolling_user_id,
             "gst985_loyalty_user1",
             email,
-            None,
+            Some(guest_id),
         )
         .await;
 
@@ -1587,7 +1707,7 @@ mod postgres_tests {
             enrolling_user_id,
             "gst985_loyalty_user2",
             email,
-            None,
+            Some(guest_id),
         )
         .await;
 
@@ -1952,5 +2072,298 @@ mod postgres_tests {
             .execute(&pool)
             .await
             .unwrap();
+    }
+
+    /// F-10 regression: guest reward redemption rejects a foreign `booking_id`,
+    /// `reject_redemption` restores limited inventory alongside the points
+    /// reversal, and concurrent rejections settle at most once.
+    #[tokio::test]
+    async fn loyalty_redemption_checks_booking_ownership_and_rejection_restocks_once() {
+        let Some(pool) = setup_pg_pool().await else {
+            return;
+        };
+        let guest_a = 985_250;
+        let guest_b = 985_251;
+        let user_a = 985_020;
+        let actor_id = 985_021;
+        let room_type_id = 985_430;
+        let room_id = 985_330;
+        let guest_b_booking_id = 985_130;
+        let reward_name_prefix = "f10_loyalty_985";
+        let reward_name = "f10_loyalty_985 limited reward";
+
+        delete_guests(&pool, &[guest_a, guest_b]).await;
+        delete_loyalty_rewards(&pool, reward_name_prefix).await;
+        delete_rooms(&pool, &[room_id]).await;
+        delete_room_types(&pool, &[room_type_id]).await;
+        delete_users(&pool, &[user_a, actor_id]).await;
+
+        upsert_user(
+            &pool,
+            actor_id,
+            "gst985_f10_actor",
+            "gst985.f10actor@hotel.local",
+            None,
+        )
+        .await;
+        upsert_guest(
+            &pool,
+            guest_a,
+            "Gst985 F10 Guest A",
+            Some("gst985.f10a@hotel.local"),
+            None,
+            None,
+        )
+        .await;
+        upsert_guest(
+            &pool,
+            guest_b,
+            "Gst985 F10 Guest B",
+            Some("gst985.f10b@hotel.local"),
+            None,
+            None,
+        )
+        .await;
+        upsert_user(
+            &pool,
+            user_a,
+            "gst985_f10_user_a",
+            "gst985.f10a@hotel.local",
+            Some(guest_a),
+        )
+        .await;
+        seed_room_type(
+            &pool,
+            room_type_id,
+            "G985F10",
+            "Gst985 F10 Room Type",
+            "100.00",
+            2,
+        )
+        .await;
+        seed_room(&pool, room_id, "985F10", room_type_id, "available").await;
+        seed_booking(
+            &pool,
+            guest_b_booking_id,
+            guest_b,
+            room_id,
+            "2030-05-01",
+            "2030-05-03",
+            "confirmed",
+        )
+        .await;
+
+        let enrollment = loyalty_service::enroll(&pool, user_a)
+            .await
+            .expect("enroll must succeed");
+        let member_id = enrollment.member.id;
+
+        loyalty_service::gift_points(
+            &pool,
+            actor_id,
+            member_id,
+            GiftPointsInput {
+                points: 500,
+                reason: "Gst985 F10 initial points".to_string(),
+            },
+        )
+        .await
+        .expect("gift_points must succeed");
+
+        let reward = loyalty_service::create_reward(
+            &pool,
+            RewardInput {
+                name: reward_name.to_string(),
+                description: None,
+                category: "gift".to_string(),
+                points_cost: 100,
+                minimum_tier_id: None,
+                requires_approval: Some(true),
+                is_active: Some(true),
+                inventory_count: Some(2),
+                valid_from: None,
+                valid_to: None,
+                terms_conditions: None,
+            },
+        )
+        .await
+        .expect("reward create must succeed");
+
+        // Foreign booking_id must be rejected without touching points or stock.
+        let wrong_booking = loyalty_service::redeem_reward_for_guest(
+            &pool,
+            guest_a,
+            Some(user_a),
+            reward.id,
+            RedeemRewardInput {
+                booking_id: Some(guest_b_booking_id),
+                notes: None,
+            },
+        )
+        .await;
+        assert!(
+            matches!(wrong_booking, Err(ApiError::BadRequest(_))),
+            "redeeming against another guest's booking must fail: {wrong_booking:?}"
+        );
+        assert_eq!(
+            loyalty_service::admin_member_detail(&pool, member_id)
+                .await
+                .unwrap()
+                .member
+                .available_points,
+            500
+        );
+        let inv_after_wrong: Option<i32> =
+            sqlx::query_scalar("SELECT inventory_count FROM loyalty_rewards WHERE id = $1")
+                .bind(reward.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(inv_after_wrong, Some(2));
+
+        // Valid redemption spends points and decrements inventory.
+        let redemption = loyalty_service::redeem_reward_for_guest(
+            &pool,
+            guest_a,
+            Some(user_a),
+            reward.id,
+            RedeemRewardInput {
+                booking_id: None,
+                notes: None,
+            },
+        )
+        .await
+        .expect("valid redemption must succeed");
+        assert_eq!(redemption.status, "pending");
+        assert_eq!(
+            loyalty_service::admin_member_detail(&pool, member_id)
+                .await
+                .unwrap()
+                .member
+                .available_points,
+            400
+        );
+        let inv_after_redeem: Option<i32> =
+            sqlx::query_scalar("SELECT inventory_count FROM loyalty_rewards WHERE id = $1")
+                .bind(reward.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(inv_after_redeem, Some(1));
+
+        // Rejection refunds points and restocks inventory; second reject fails.
+        let rejected = loyalty_service::reject_redemption(
+            &pool,
+            actor_id,
+            redemption.id,
+            hotel_app_be::modules::loyalty::models::RejectRedemptionInput {
+                reason: "Item temporarily unavailable".to_string(),
+            },
+        )
+        .await
+        .expect("first reject must succeed");
+        assert_eq!(rejected.status, "rejected");
+        assert_eq!(
+            loyalty_service::admin_member_detail(&pool, member_id)
+                .await
+                .unwrap()
+                .member
+                .available_points,
+            500
+        );
+        let inv_after_reject: Option<i32> =
+            sqlx::query_scalar("SELECT inventory_count FROM loyalty_rewards WHERE id = $1")
+                .bind(reward.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(inv_after_reject, Some(2));
+
+        let second_reject = loyalty_service::reject_redemption(
+            &pool,
+            actor_id,
+            redemption.id,
+            hotel_app_be::modules::loyalty::models::RejectRedemptionInput {
+                reason: "Duplicate reject attempt".to_string(),
+            },
+        )
+        .await;
+        assert!(
+            matches!(
+                second_reject,
+                Err(ApiError::BadRequest(_)) | Err(ApiError::Conflict(_))
+            ),
+            "re-rejecting an already rejected redemption must fail: {second_reject:?}"
+        );
+        assert_eq!(
+            loyalty_service::admin_member_detail(&pool, member_id)
+                .await
+                .unwrap()
+                .member
+                .available_points,
+            500
+        );
+        let inv_after_dup: Option<i32> =
+            sqlx::query_scalar("SELECT inventory_count FROM loyalty_rewards WHERE id = $1")
+                .bind(reward.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(inv_after_dup, Some(2));
+
+        // Concurrent rejections settle at most once under row lock.
+        let redemption_two = loyalty_service::redeem_reward_for_guest(
+            &pool,
+            guest_a,
+            Some(user_a),
+            reward.id,
+            RedeemRewardInput {
+                booking_id: None,
+                notes: None,
+            },
+        )
+        .await
+        .expect("second redemption must succeed");
+        let (r1, r2) = tokio::join!(
+            loyalty_service::reject_redemption(
+                &pool,
+                actor_id,
+                redemption_two.id,
+                hotel_app_be::modules::loyalty::models::RejectRedemptionInput {
+                    reason: "Concurrent reject A".to_string(),
+                },
+            ),
+            loyalty_service::reject_redemption(
+                &pool,
+                actor_id,
+                redemption_two.id,
+                hotel_app_be::modules::loyalty::models::RejectRedemptionInput {
+                    reason: "Concurrent reject B".to_string(),
+                },
+            ),
+        );
+        assert_eq!(usize::from(r1.is_ok()) + usize::from(r2.is_ok()), 1);
+        assert_eq!(usize::from(r1.is_err()) + usize::from(r2.is_err()), 1);
+        assert_eq!(
+            loyalty_service::admin_member_detail(&pool, member_id)
+                .await
+                .unwrap()
+                .member
+                .available_points,
+            500
+        );
+        let inv_after_concurrent: Option<i32> =
+            sqlx::query_scalar("SELECT inventory_count FROM loyalty_rewards WHERE id = $1")
+                .bind(reward.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(inv_after_concurrent, Some(2));
+
+        delete_guests(&pool, &[guest_a, guest_b]).await;
+        delete_loyalty_rewards(&pool, reward_name_prefix).await;
+        delete_rooms(&pool, &[room_id]).await;
+        delete_room_types(&pool, &[room_type_id]).await;
+        delete_users(&pool, &[user_a, actor_id]).await;
     }
 }

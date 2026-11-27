@@ -37,12 +37,12 @@ WITH current_bookings AS (
         status as booking_status,
         check_in_date
     FROM bookings
-    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in',
+    WHERE status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'late_checkout',
                      'pending', 'pending_payment', 'pending_confirmation')
       AND check_out_date >= $1
     ORDER BY room_id,
         CASE
-            WHEN status IN ('checked_in', 'auto_checked_in') THEN 1
+            WHEN status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN 1
             WHEN status = 'confirmed' AND check_in_date <= $1 THEN 2
             WHEN status = 'confirmed' THEN 3
             WHEN status IN ('pending', 'pending_payment', 'pending_confirmation')
@@ -54,7 +54,7 @@ WITH current_bookings AS (
 SELECT
     rt.name AS room_type,
     CASE
-        WHEN cb.booking_status IN ('checked_in', 'auto_checked_in') THEN 'occupied'
+        WHEN cb.booking_status IN ('checked_in', 'auto_checked_in', 'late_checkout') THEN 'occupied'
         WHEN r.status IN ('maintenance', 'out_of_order', 'dirty', 'cleaning', 'reserved_dirty')
             THEN r.status
         WHEN cb.booking_status IN ('confirmed', 'pending', 'pending_payment', 'pending_confirmation')
@@ -165,7 +165,9 @@ pub async fn revenue_for_date(pool: &DbPool, date: NaiveDate) -> Result<f64, Api
     let row = sqlx::query(
         "SELECT COALESCE(SUM(total_amount), 0) AS revenue
          FROM bookings
-         WHERE status != 'voided' AND created_at::date = $1",
+         WHERE status != 'voided'
+           AND created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+           AND created_at < (($1::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))",
     )
     .bind(date)
     .fetch_one(pool)
@@ -175,6 +177,47 @@ pub async fn revenue_for_date(pool: &DbPool, date: NaiveDate) -> Result<f64, Api
     Ok(decimal_to_f64(crate::models::row_mappers::get_decimal(
         &row, "revenue",
     )))
+}
+
+/// Daily revenue series from non-voided bookings created within `[start, end]`,
+/// returning one `(date, revenue)` entry per calendar day in ascending order.
+pub async fn revenue_for_date_range(
+    pool: &DbPool,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<(NaiveDate, f64)>, ApiError> {
+    let rows = sqlx::query(
+        "WITH days AS (
+             SELECT generate_series($1::date, $2::date, interval '1 day')::date AS day
+         ),
+         daily AS (
+             SELECT (created_at AT TIME ZONE current_setting('TimeZone'))::date AS day,
+                    SUM(total_amount) AS revenue
+             FROM bookings
+             WHERE status != 'voided'
+               AND created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+               AND created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+             GROUP BY 1
+         )
+         SELECT d.day, COALESCE(daily.revenue, 0) AS revenue
+         FROM days d
+         LEFT JOIN daily ON daily.day = d.day
+         ORDER BY d.day",
+    )
+    .bind(start)
+    .bind(end)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let day: NaiveDate = row.get("day");
+            let revenue = decimal_to_f64(crate::models::row_mappers::get_decimal(row, "revenue"));
+            (day, revenue)
+        })
+        .collect())
 }
 
 /// Open folio balance per booking — posted, non-voided ledger lines only.

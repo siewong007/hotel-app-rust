@@ -77,15 +77,44 @@ pub(crate) const EFFECTIVE_ROLE_NAMES_SQL: &str = "\
     FROM roles r \
     INNER JOIN effective_roles er ON er.role_id = r.id";
 
-/// The soonest instant at which any of `$1`'s grants lapses, so the cache
-/// entry can be expired then rather than at the end of a fixed TTL.
-const NEXT_GRANT_EXPIRY_SQL: &str = "\
-    SELECT LEAST( \
-        (SELECT MIN(ur.expires_at) FROM user_roles ur \
-          WHERE ur.user_id = $1 AND ur.expires_at > CURRENT_TIMESTAMP), \
-        (SELECT MIN(tm.expires_at) FROM team_members tm \
-          WHERE tm.user_id = $1 AND tm.expires_at > CURRENT_TIMESTAMP) \
-    )";
+/// Single roundtrip resolving permissions, effective role names, and soonest
+/// grant expiry together.
+const RESOLVE_RBAC_SQL: &str = "\
+    WITH effective_roles AS ( \
+        SELECT ur.role_id \
+        FROM user_roles ur \
+        WHERE ur.user_id = $1 \
+          AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP) \
+        UNION \
+        SELECT tr.role_id \
+        FROM team_roles tr \
+        INNER JOIN team_members tm ON tm.team_id = tr.team_id \
+        INNER JOIN teams t ON t.id = tm.team_id \
+        WHERE tm.user_id = $1 \
+          AND t.is_active \
+          AND t.deleted_at IS NULL \
+          AND (tm.expires_at IS NULL OR tm.expires_at > CURRENT_TIMESTAMP) \
+    ) \
+    SELECT \
+        COALESCE(ARRAY( \
+            SELECT DISTINCT p.name \
+            FROM permissions p \
+            INNER JOIN role_permissions rp ON p.id = rp.permission_id \
+            INNER JOIN effective_roles er ON er.role_id = rp.role_id \
+        ), ARRAY[]::text[]), \
+        COALESCE(ARRAY( \
+            SELECT DISTINCT r.name \
+            FROM roles r \
+            INNER JOIN effective_roles er ON er.role_id = r.id \
+        ), ARRAY[]::text[]), \
+        LEAST( \
+            (SELECT MIN(ur.expires_at) FROM user_roles ur \
+              WHERE ur.user_id = $1 AND ur.expires_at > CURRENT_TIMESTAMP), \
+            (SELECT MIN(tm.expires_at) FROM team_members tm \
+              WHERE tm.user_id = $1 AND tm.expires_at > CURRENT_TIMESTAMP) \
+        )";
+
+const MAX_CACHE_ENTRIES: usize = 4_096;
 
 /// A user's resolved RBAC sets plus when they were loaded.
 struct CachedUser {
@@ -129,6 +158,12 @@ impl RbacCache {
         roles: Arc<HashSet<String>>,
     ) {
         let mut map = self.entries.lock().unwrap();
+        if map.len() >= MAX_CACHE_ENTRIES && !map.contains_key(&user_id) {
+            map.retain(|_, entry| entry.loaded_at.elapsed() < entry.ttl);
+            if map.len() >= MAX_CACHE_ENTRIES {
+                map.clear();
+            }
+        }
         map.insert(
             user_id,
             CachedUser {
@@ -149,32 +184,21 @@ async fn resolve(pool: &DbPool, user_id: i64) -> Result<RbacSets, sqlx::Error> {
         return Ok(hit);
     }
 
-    let permissions: HashSet<String> = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(
-        format!("{EFFECTIVE_ROLES_CTE}{EFFECTIVE_PERMISSIONS_SQL}"),
-    ))
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .collect();
+    let (permissions_vec, roles_vec, next_expiry): (
+        Vec<String>,
+        Vec<String>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(RESOLVE_RBAC_SQL)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
 
-    let roles: HashSet<String> = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
-        "{EFFECTIVE_ROLES_CTE}{EFFECTIVE_ROLE_NAMES_SQL}"
-    )))
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .collect();
+    let permissions: HashSet<String> = permissions_vec.into_iter().collect();
+    let roles: HashSet<String> = roles_vec.into_iter().collect();
 
     // Cap the entry's lifetime at the next grant expiry. Without this a grant
     // that lapses at 09:00 would keep working until the TTL rolls over, which
     // makes "expires at" merely advisory.
-    let next_expiry: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar(NEXT_GRANT_EXPIRY_SQL)
-            .bind(user_id)
-            .fetch_one(pool)
-            .await?;
     let ttl = match next_expiry {
         Some(at) => {
             let secs = (at - chrono::Utc::now()).num_seconds().max(0) as u64;
@@ -206,6 +230,25 @@ pub async fn has_permission(
 pub async fn has_role(pool: &DbPool, user_id: i64, role_name: &str) -> Result<bool, sqlx::Error> {
     let (_permissions, roles) = resolve(pool, user_id).await?;
     Ok(roles.contains(role_name))
+}
+
+/// Return the cached effective role names for `user_id` (direct grants plus
+/// active team grants, excluding expired assignments).
+pub async fn effective_roles(
+    pool: &DbPool,
+    user_id: i64,
+) -> Result<Arc<HashSet<String>>, sqlx::Error> {
+    let (_permissions, roles) = resolve(pool, user_id).await?;
+    Ok(roles)
+}
+
+/// Return the cached effective permission names for `user_id`.
+pub async fn effective_permissions(
+    pool: &DbPool,
+    user_id: i64,
+) -> Result<Arc<HashSet<String>>, sqlx::Error> {
+    let (permissions, _roles) = resolve(pool, user_id).await?;
+    Ok(permissions)
 }
 
 /// Drop all cached entries. Call after any RBAC mutation so changes apply

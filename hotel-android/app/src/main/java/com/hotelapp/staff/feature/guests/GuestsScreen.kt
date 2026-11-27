@@ -8,15 +8,22 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -28,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -50,6 +58,7 @@ import com.hotelapp.staff.core.design.HotelOutlinedButton
 import com.hotelapp.staff.core.design.HotelPullToRefreshBox
 import com.hotelapp.staff.core.design.HotelSearchBar
 import com.hotelapp.staff.core.design.HotelTheme
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.ListCardSkeleton
 import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
@@ -63,16 +72,19 @@ fun GuestsScreen(
     onBack: () -> Unit,
     onOpenGuestDetail: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    embeddedInSplitPane: Boolean = false,
 ) {
     val colors = HotelTheme.colors
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
-    val shouldLoadMore by remember(state.items.size, state.total, state.isLoadingMore) {
+    val shouldLoadMore by remember(state.items.size, state.total, state.isLoadingMore, state.endReached, state.error) {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             state.items.isNotEmpty() &&
+                !state.endReached &&
+                state.error == null &&
                 state.items.size < state.total &&
                 !state.isLoadingMore &&
                 lastVisible >= state.items.size - 4
@@ -90,6 +102,11 @@ fun GuestsScreen(
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = colors.surfaceApp,
+        contentWindowInsets = if (embeddedInSplitPane) {
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)
+        } else {
+            ScaffoldDefaults.contentWindowInsets
+        },
         topBar = {
             Column {
                 TopAppBar(
@@ -113,6 +130,7 @@ fun GuestsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -139,7 +157,7 @@ fun GuestsScreen(
                 state.isLoading -> ListCardSkeleton()
                 state.error != null && state.items.isEmpty() -> ErrorStateView(
                     message = state.error!!,
-                    onRetry = { viewModel.refresh() },
+                    onRetry = viewModel::retry,
                 )
                 else -> HotelPullToRefreshBox(
                     isRefreshing = state.isRefreshing,
@@ -147,11 +165,18 @@ fun GuestsScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     if (state.items.isEmpty()) {
-                        EmptyStateView(
-                            title = "No guests found",
-                            subtitle = "Try another name, email, or phone number.",
-                            icon = Icons.Outlined.PersonSearch,
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            EmptyStateView(
+                                title = "No guests found",
+                                subtitle = "Try another name, email, or phone number.",
+                                icon = Icons.Outlined.PersonSearch,
+                            )
+                        }
                     } else {
                         LazyColumn(
                             state = listState,
@@ -159,11 +184,13 @@ fun GuestsScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             items(state.items, key = { it.id }) { guest ->
+                                val hasVip = !guest.vipStatus.isNullOrBlank() &&
+                                    !guest.vipStatus.equals("none", ignoreCase = true)
                                 HotelCard(
                                     onClick = { onOpenGuestDetail(guest.id) },
                                     accentColor = when {
                                         guest.isBlacklisted == true -> colors.danger.fg
-                                        !guest.vipStatus.isNullOrBlank() && guest.vipStatus != "none" -> colors.warning.fg
+                                        hasVip -> colors.warning.fg
                                         else -> null
                                     },
                                     modifier = Modifier.animateItem(),
@@ -179,24 +206,23 @@ fun GuestsScreen(
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Text(
-                                                    text = guest.displayName(),
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    color = colors.textPrimary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f),
-                                                )
-                                                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(
+                                                text = guest.displayName(),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = colors.textPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            if (guest.isBlacklisted == true || hasVip) {
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                ) {
                                                     if (guest.isBlacklisted == true) {
                                                         StatusPill("Blacklisted", colors.danger)
                                                     }
-                                                    if (!guest.vipStatus.isNullOrBlank() && guest.vipStatus != "none") {
+                                                    if (hasVip) {
                                                         val vipLabel = if (guest.vipStatus.equals("vip", ignoreCase = true)) {
                                                             "VIP"
                                                         } else {
@@ -237,7 +263,21 @@ fun GuestsScreen(
                                     }
                                 }
                             }
-                            if (state.items.size < state.total) {
+                            if (state.error != null) {
+                                item(key = "guests_inline_error") {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        InlineAlertBanner(
+                                            message = state.error!!,
+                                            tone = colors.danger,
+                                        )
+                                        HotelOutlinedButton(
+                                            text = "Retry",
+                                            onClick = viewModel::loadMore,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
+                            } else if (!state.endReached && state.items.size < state.total) {
                                 item(key = "guests_load_more") {
                                     if (state.isLoadingMore) {
                                         Box(

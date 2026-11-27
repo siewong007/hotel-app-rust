@@ -13,6 +13,9 @@ pub struct GuestPortalVerifyRequest {
     pub booking_number: String,
     /// Guest name as registered on the booking (matched case-insensitively).
     pub name: String,
+    /// Guest email as registered on the booking (verified when one is on file).
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// Response for guest portal verification.

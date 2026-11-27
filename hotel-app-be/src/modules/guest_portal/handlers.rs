@@ -465,11 +465,13 @@ pub(crate) async fn receipt_upload_bytes(mut multipart: Multipart) -> Result<Vec
 
 pub async fn session_upload_payment_receipt(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
     headers: HeaderMap,
     Path(payment_id): Path<i64>,
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let guest_id = guest_portal_service::require_guest_session(&headers, &pool).await?;
+    check_guest_payment_rate_limit(&limiters, guest_id).await?;
     let bytes = receipt_upload_bytes(multipart).await?;
     guest_portal_service::session_upload_payment_receipt(&pool, guest_id, payment_id, &bytes)
         .await?;

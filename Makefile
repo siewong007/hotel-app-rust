@@ -167,7 +167,7 @@ db-baseline: require-database-url ## Canonical: create schema + system bootstrap
 	$(MAKE) db-patch
 
 db-seed: require-database-url ## Canonical: populate comprehensive deterministic staging data (requires DATABASE_URL)
-	cd hotel-app-be && cargo run --quiet --bin seed -- --all
+	cd hotel-app-be && cargo run --quiet --bin seed -- --all $(if $(SEED_STAFF_PASSWORD),,--allow-dev-default-password)
 
 db-setup: db-baseline ## DEPRECATED alias for db-baseline (kept for compatibility)
 	@printf '%s\n' 'warning: `db-setup` is deprecated — use `db-baseline` (structure) + `db-seed` (staging data)' >&2
@@ -179,7 +179,7 @@ db-schema-drift: require-schema-drift-urls ## Compare target schema with a curre
 	hotel-app-be/database/postgres/report-schema-drift.sh
 
 db-reset: ## Reset and re-create PostgreSQL database structure only (no staging data)
-	psql "$$DATABASE_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+	psql "$$DATABASE_URL" -c "DROP SCHEMA IF EXISTS public, app CASCADE; CREATE SCHEMA public;"
 	$(MAKE) db-baseline
 
 db-pg19-tune: ## Apply opt-in PostgreSQL 19 Beta 2/3 physical/planner tuning (values benchmarked on beta2 only)

@@ -72,6 +72,8 @@ impl RevenueRepository {
                     interval '1 day'
                 ) AS gs
                 WHERE b.status NOT IN ('voided', 'comp_void', 'no_show')
+                  AND b.check_in_date <= $2
+                  AND b.check_out_date >= $1
                   AND ($3::bigint IS NULL OR r.room_type_id = $3)
                   AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
                   AND gs::date BETWEEN $1 AND $2
@@ -80,7 +82,8 @@ impl RevenueRepository {
                 SELECT b.status
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
-                WHERE b.created_at::date BETWEEN $1 AND $2
+                WHERE b.created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+                  AND b.created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
                   AND ($3::bigint IS NULL OR r.room_type_id = $3)
                   AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
             )
@@ -134,6 +137,8 @@ impl RevenueRepository {
                     interval '1 day'
                 ) AS gs
                 WHERE b.status NOT IN ('voided', 'comp_void', 'no_show')
+                  AND b.check_in_date <= $2
+                  AND b.check_out_date >= $1
                   AND ($3::bigint IS NULL OR r.room_type_id = $3)
                   AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
                   AND gs::date BETWEEN $1 AND $2
@@ -184,7 +189,8 @@ impl RevenueRepository {
             JOIN rooms r ON r.id = b.room_id
             WHERE bs.status <> 'void'
               AND b.status NOT IN ('voided', 'comp_void', 'no_show')
-              AND bs.service_date::date BETWEEN $1 AND $2
+              AND bs.service_date >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+              AND bs.service_date < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
               AND ($3::bigint IS NULL OR r.room_type_id = $3)
               AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
             "#,
@@ -215,7 +221,8 @@ impl RevenueRepository {
             JOIN rooms r ON r.id = b.room_id
             WHERE bs.status <> 'void'
               AND b.status NOT IN ('voided', 'comp_void', 'no_show')
-              AND bs.service_date::date BETWEEN $1 AND $2
+              AND bs.service_date >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+              AND bs.service_date < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
               AND ($3::bigint IS NULL OR r.room_type_id = $3)
               AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
             GROUP BY bs.service_date::date
@@ -318,7 +325,8 @@ impl RevenueRepository {
                  FROM payments p
                  WHERE p.status = 'completed'
                    AND COALESCE(p.payment_type, 'booking') NOT IN ('deposit', 'refund', 'deposit_forfeited')
-                   AND p.created_at::date BETWEEN $1 AND $2) AS collected,
+                   AND p.created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+                   AND p.created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))) AS collected,
                 (SELECT COALESCE(SUM(
                     CASE
                         WHEN COALESCE(p.payment_type, '') = 'refund' AND p.status = 'refunded' THEN p.amount
@@ -326,11 +334,24 @@ impl RevenueRepository {
                     END
                  ), 0)
                  FROM payments p
-                 WHERE (COALESCE(p.payment_type, '') = 'refund' AND p.status = 'refunded' AND p.created_at::date BETWEEN $1 AND $2)
-                    OR (p.refund_amount IS NOT NULL AND p.refunded_at::date BETWEEN $1 AND $2)) AS refunded,
-                (SELECT COALESCE(SUM(i.balance_due), 0)
+                 WHERE (
+                        COALESCE(p.payment_type, '') = 'refund'
+                        AND p.status = 'refunded'
+                        AND COALESCE(p.notes, '') NOT LIKE 'Keycard deposit refund%'
+                        AND p.created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+                        AND p.created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+                    )
+                    OR (
+                        p.refund_amount IS NOT NULL
+                        AND p.refund_amount > 0
+                        AND p.status <> 'void'
+                        AND COALESCE(p.payment_type, 'booking') NOT IN ('deposit', 'deposit_forfeited')
+                        AND p.refunded_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+                        AND p.refunded_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+                    )) AS refunded,
+                (SELECT COALESCE(SUM(i.total_amount - i.paid_amount), 0)
                  FROM invoices i
-                 WHERE i.balance_due > 0
+                 WHERE (i.total_amount - i.paid_amount) > 0
                    AND i.status IN ('issued', 'overdue')) AS outstanding
             "#,
         )
@@ -365,7 +386,7 @@ impl RevenueRepository {
             LEFT JOIN corporate_accounts ca ON ca.id = i.bill_to_corporate_id
             LEFT JOIN bookings b ON b.id = i.booking_id
             LEFT JOIN rooms r ON r.id = b.room_id
-            WHERE i.balance_due > 0
+            WHERE (i.total_amount - i.paid_amount) > 0
               AND i.status IN ('issued', 'overdue')
             ORDER BY i.balance_due DESC
             "#,
@@ -416,7 +437,8 @@ impl RevenueRepository {
             FROM bookings b
             JOIN rooms r ON r.id = b.room_id
             LEFT JOIN booking_channels bc ON bc.id = b.booking_channel_id
-            WHERE b.created_at::date BETWEEN $1 AND $2
+            WHERE b.created_at >= ($1::date::timestamp AT TIME ZONE current_setting('TimeZone'))
+              AND b.created_at < (($2::date + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
               AND b.status NOT IN ('voided', 'comp_void')
               AND ($3::bigint IS NULL OR r.room_type_id = $3)
               AND ($4::bigint IS NULL OR b.booking_channel_id = $4)
@@ -465,6 +487,31 @@ impl RevenueRepository {
             ),
             rts AS (
                 SELECT id, code, name, base_price FROM room_types WHERE is_active = true
+            ),
+            phys AS (
+                SELECT r.room_type_id, COUNT(*)::bigint AS cnt
+                FROM rooms r
+                WHERE r.is_active = true
+                  AND COALESCE(r.status, 'available')
+                      NOT IN ('maintenance', 'out_of_order')
+                GROUP BY r.room_type_id
+            ),
+            sold AS (
+                SELECT r.room_type_id, gs::date AS stay_date, COUNT(*)::bigint AS cnt
+                FROM bookings b
+                JOIN rooms r ON r.id = b.room_id
+                CROSS JOIN LATERAL generate_series(
+                    GREATEST(b.check_in_date, $1::date),
+                    LEAST(b.check_out_date - 1, $2::date),
+                    interval '1 day'
+                ) AS gs
+                WHERE r.is_active = true
+                  AND COALESCE(r.status, 'available')
+                      NOT IN ('maintenance', 'out_of_order')
+                  AND b.status NOT IN ('voided', 'comp_void', 'no_show')
+                  AND b.check_in_date <= $2::date
+                  AND b.check_out_date > $1::date
+                GROUP BY r.room_type_id, gs::date
             )
             SELECT rt.id AS room_type_id, rt.code, rt.name, d.stay_date,
                    COALESCE(resolved.price, rt.base_price) AS plan_rate,
@@ -473,10 +520,12 @@ impl RevenueRepository {
                    a.custom_price AS custom_price,
                    COALESCE(a.online_booking_enabled, true) AS online_booking_enabled,
                    COALESCE(a.walk_in_reserved_rooms, 0)::bigint AS walk_in_reserved_rooms,
-                   phys.cnt AS physical_rooms,
+                   COALESCE(phys.cnt, 0)::bigint AS physical_rooms,
                    COALESCE(sold.cnt, 0)::bigint AS sold_rooms
             FROM rts rt
             CROSS JOIN dates d
+            LEFT JOIN phys ON phys.room_type_id = rt.id
+            LEFT JOIN sold ON sold.room_type_id = rt.id AND sold.stay_date = d.stay_date
             LEFT JOIN LATERAL (
                 SELECT rr.price, rp.code AS rate_plan_code
                 FROM room_rates rr
@@ -501,23 +550,6 @@ impl RevenueRepository {
             ) resolved ON true
             LEFT JOIN online_inventory_allocations a
                    ON a.room_type_id = rt.id AND a.stay_date = d.stay_date
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*)::bigint AS cnt FROM rooms r
-                WHERE r.room_type_id = rt.id AND r.is_active = true
-                  AND COALESCE(r.status, 'available')
-                      NOT IN ('maintenance', 'out_of_order')
-            ) phys ON true
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*) AS cnt FROM bookings b
-                JOIN rooms r ON r.id = b.room_id
-                WHERE r.room_type_id = rt.id
-                  AND r.is_active = true
-                  AND COALESCE(r.status, 'available')
-                      NOT IN ('maintenance', 'out_of_order')
-                  AND b.status NOT IN ('voided', 'comp_void', 'no_show')
-                  AND b.check_in_date <= d.stay_date
-                  AND b.check_out_date > d.stay_date
-            ) sold ON true
             ORDER BY rt.name, d.stay_date
             "#,
         )

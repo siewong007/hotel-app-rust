@@ -166,6 +166,10 @@ resource "oci_core_instance" "this" {
 
   preserve_boot_volume = false
 
+  instance_options {
+    are_legacy_imds_endpoints_disabled = true
+  }
+
   lifecycle {
     precondition {
       condition     = var.shape == "VM.Standard.A1.Flex"
@@ -221,13 +225,14 @@ resource "oci_core_volume" "data" {
 resource "oci_core_volume_attachment" "data" {
   count = var.create_data_volume ? 1 : 0
 
-  attachment_type = "paravirtualized"
-  device          = var.data_volume_device
-  display_name    = "${var.name_prefix}-data"
-  instance_id     = oci_core_instance.this.id
-  volume_id       = oci_core_volume.data[0].id
-  is_read_only    = false
-  is_shareable    = false
+  attachment_type                     = "paravirtualized"
+  device                              = var.data_volume_device
+  display_name                        = "${var.name_prefix}-data"
+  instance_id                         = oci_core_instance.this.id
+  volume_id                           = oci_core_volume.data[0].id
+  is_read_only                        = false
+  is_shareable                        = false
+  is_pv_encryption_in_transit_enabled = true
 }
 
 output "instance_id" {

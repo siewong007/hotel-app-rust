@@ -9,6 +9,6 @@ interface SearchApi {
     suspend fun search(
         @Query("q") query: String,
         @Query("types") types: String? = null,
-        @Query("limit") limit: Int = 20,
+        @Query("limit") limit: Int = 15,
     ): GlobalSearchResponseDto
 }

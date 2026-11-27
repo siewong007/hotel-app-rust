@@ -4,6 +4,7 @@ import {
   UserProfile,
   UserProfileUpdate,
   PasswordUpdate,
+  PasskeyDeleteInput,
   PasskeyInfo,
   PasskeyUpdateInput,
   AccessSnapshot,
@@ -157,8 +158,23 @@ export class AuthService {
     await api.patch(`profile/passkeys/${passkeyId}`, { json: data, ...apiRequestOptions(options) });
   }
 
-  static async deletePasskey(passkeyId: string, options?: ApiRequestOptions): Promise<void> {
-    await api.delete(`profile/passkeys/${passkeyId}`, apiRequestOptions(options));
+  static async deletePasskey(
+    passkeyId: string,
+    stepUp?: PasskeyDeleteInput,
+    options?: ApiRequestOptions
+  ): Promise<void> {
+    const requestOptions = apiRequestOptions(options);
+    const body = stepUp
+      ? {
+          ...(stepUp.password ? { password: stepUp.password } : {}),
+          ...(stepUp.totp_code ? { totp_code: stepUp.totp_code } : {}),
+        }
+      : undefined;
+    const init =
+      body && Object.keys(body).length > 0
+        ? { json: body, ...requestOptions }
+        : requestOptions;
+    await api.delete(`profile/passkeys/${passkeyId}`, init);
   }
 
   static async listSessions(options?: ApiRequestOptions): Promise<UserSessionInfo[]> {
@@ -192,8 +208,15 @@ export class AuthService {
       .json();
   }
 
-  static async disableTwoFactor(code: string, options?: ApiRequestOptions): Promise<void> {
-    await api.post('profile/2fa/disable', { json: { code }, ...apiRequestOptions(options) });
+  static async disableTwoFactor(
+    code: string,
+    password?: string,
+    options?: ApiRequestOptions
+  ): Promise<void> {
+    await api.post('profile/2fa/disable', {
+      json: { code, ...(password ? { password } : {}) },
+      ...apiRequestOptions(options),
+    });
   }
 
   static async getTwoFactorStatus(options?: ApiRequestOptions): Promise<{

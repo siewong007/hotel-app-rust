@@ -21,6 +21,8 @@ use crate::core::db::DbPool;
 use crate::core::error::ApiError;
 use crate::core::middleware::{require_auth, require_permission_helper};
 use crate::core::rate_limiter::RateLimiters;
+use crate::models::AuditEvent;
+use crate::services::audit::AuditLog;
 
 /// Create eKYC routes.
 pub fn routes() -> Router<DbPool> {
@@ -110,7 +112,7 @@ async fn enforce_account_ekyc_limit(
 }
 
 async fn upload_document(
-    State(_pool): State<DbPool>,
+    State(pool): State<DbPool>,
     Extension(limiters): Extension<RateLimiters>,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -118,9 +120,24 @@ async fn upload_document(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = require_auth(&headers).await?;
     enforce_account_ekyc_limit(&limiters, user_id, &headers, peer_addr).await?;
-    Ok(Json(
-        service::store_document_upload(multipart, user_id).await?,
-    ))
+    let response = service::store_document_upload(multipart, user_id).await?;
+    let _ = AuditLog::log_event(
+        &pool,
+        AuditEvent {
+            user_id: Some(user_id),
+            action: "ekyc_document_uploaded",
+            resource_type: "ekyc",
+            resource_id: None,
+            details: Some(serde_json::json!({
+                "document_type": response.get("document_type"),
+                "filename": response.get("filename"),
+            })),
+            ip_address: client_ip(&headers, peer_addr),
+            user_agent: user_agent(&headers),
+        },
+    )
+    .await;
+    Ok(Json(response))
 }
 
 async fn submit_ekyc(

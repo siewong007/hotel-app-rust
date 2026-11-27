@@ -14,7 +14,7 @@
 !macro _hotel_stop_services
   ; Stop the backend sidecar first (it holds connections to PostgreSQL).
   ; The image name is unique to this app, so matching by name is safe.
-  nsExec::ExecToLog `taskkill /F /T /IM hotel-app-be.exe`
+  nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /F /T /IM hotel-app-be.exe`
   ; Gracefully stop the embedded PostgreSQL (clean shutdown, data preserved).
   IfFileExists "$INSTDIR\pgsql\bin\pg_ctl.exe" 0 +2
     nsExec::ExecToLog `"$INSTDIR\pgsql\bin\pg_ctl.exe" stop -D "$LOCALAPPDATA\HotelApp\pgdata" -m fast -w -t 30`
@@ -23,7 +23,7 @@
   ; itself is never touched. Pass $INSTDIR via environment variable so quotes
   ; or wildcard brackets in the install path cannot break PowerShell parsing.
   System::Call 'Kernel32::SetEnvironmentVariable(t "HOTEL_INSTDIR", t "$INSTDIR")'
-  nsExec::ExecToLog `powershell -NoProfile -Command "Get-Process postgres -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith($$env:HOTEL_INSTDIR + '\', [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"`
+  nsExec::ExecToLog `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "Get-Process postgres -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith($$env:HOTEL_INSTDIR + '\', [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"`
   ; Give Windows a moment to release file locks after process termination.
   Sleep 2000
 !macroend

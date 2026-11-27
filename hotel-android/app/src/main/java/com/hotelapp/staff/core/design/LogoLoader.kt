@@ -159,6 +159,10 @@ fun AnimatedHotelLogoMark(
     }
 
     val pathMeasure = remember { PathMeasure() }
+    val fullRoof = remember { Path() }
+    val fullMonogram = remember { Path() }
+    val segmentPath = remember { Path() }
+    val clipRectPath = remember { Path() }
 
     Canvas(
         modifier = modifier
@@ -188,35 +192,33 @@ fun AnimatedHotelLogoMark(
         )
 
         // Roofline
-        val fullRoof = Path().apply {
-            moveTo(13f * s, 27f * s)
-            lineTo(32f * s, 13f * s)
-            lineTo(51f * s, 27f * s)
-        }
+        fullRoof.reset()
+        fullRoof.moveTo(13f * s, 27f * s)
+        fullRoof.lineTo(32f * s, 13f * s)
+        fullRoof.lineTo(51f * s, 27f * s)
         if (roofProgress.value > 0f) {
-            val seg = Path()
+            segmentPath.reset()
             pathMeasure.setPath(fullRoof, false)
-            pathMeasure.getSegment(0f, pathMeasure.length * roofProgress.value, seg, true)
+            pathMeasure.getSegment(0f, pathMeasure.length * roofProgress.value, segmentPath, true)
             drawPath(
-                path = seg,
+                path = segmentPath,
                 color = Color(0xFFD9B572),
                 style = Stroke(width = 3.5f * s, cap = StrokeCap.Round, join = StrokeJoin.Round),
             )
         }
 
         // S-Monogram
-        val fullMonogram = Path().apply {
-            moveTo(42f * s, 28f * s)
-            cubicTo(42f * s, 22f * s, 22f * s, 22f * s, 22f * s, 29f * s)
-            cubicTo(22f * s, 37f * s, 42f * s, 33f * s, 42f * s, 42f * s)
-            cubicTo(42f * s, 50f * s, 22f * s, 50f * s, 22f * s, 43f * s)
-        }
+        fullMonogram.reset()
+        fullMonogram.moveTo(42f * s, 28f * s)
+        fullMonogram.cubicTo(42f * s, 22f * s, 22f * s, 22f * s, 22f * s, 29f * s)
+        fullMonogram.cubicTo(22f * s, 37f * s, 42f * s, 33f * s, 42f * s, 42f * s)
+        fullMonogram.cubicTo(42f * s, 50f * s, 22f * s, 50f * s, 22f * s, 43f * s)
         if (monogramProgress.value > 0f) {
-            val seg = Path()
+            segmentPath.reset()
             pathMeasure.setPath(fullMonogram, false)
-            pathMeasure.getSegment(0f, pathMeasure.length * monogramProgress.value, seg, true)
+            pathMeasure.getSegment(0f, pathMeasure.length * monogramProgress.value, segmentPath, true)
             drawPath(
-                path = seg,
+                path = segmentPath,
                 color = Color(0xFFFFFDF7),
                 style = Stroke(width = 4f * s, cap = StrokeCap.Round),
             )
@@ -238,18 +240,17 @@ fun AnimatedHotelLogoMark(
 
         // Periodic champagne sheen clipped inside tile
         if (sheenFraction in -0.45f..1.55f) {
-            val clip = Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        left = 0f,
-                        top = 0f,
-                        right = w,
-                        bottom = h,
-                        cornerRadius = corner,
-                    ),
-                )
-            }
-            clipPath(clip) {
+            clipRectPath.reset()
+            clipRectPath.addRoundRect(
+                androidx.compose.ui.geometry.RoundRect(
+                    left = 0f,
+                    top = 0f,
+                    right = w,
+                    bottom = h,
+                    cornerRadius = corner,
+                ),
+            )
+            clipPath(clipRectPath) {
                 val bandWidth = w * 0.45f
                 val centerX = w * sheenFraction
                 drawRect(

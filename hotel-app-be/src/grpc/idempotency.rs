@@ -19,8 +19,9 @@ use tonic::{Response, Status};
 
 const TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ENTRIES: usize = 10_000;
+const MAX_REQUEST_ID_BYTES: usize = 128;
 
-type CacheKey = (i64, String, String);
+type CacheKey = (i64, String, [u8; 32]);
 type Fingerprint = [u8; 32];
 
 struct CacheEntry {
@@ -92,8 +93,14 @@ impl IdempotencyCache {
         if request_id.is_empty() {
             return f().await;
         }
+        if request_id.len() > MAX_REQUEST_ID_BYTES {
+            return Err(Status::invalid_argument(format!(
+                "request_id must not exceed {MAX_REQUEST_ID_BYTES} bytes"
+            )));
+        }
 
-        let key = (user_id, method.to_string(), request_id.to_string());
+        let request_id_hash: [u8; 32] = Sha256::digest(request_id.as_bytes()).into();
+        let key = (user_id, method.to_string(), request_id_hash);
         let fingerprint: Fingerprint = Sha256::digest(req.encode_to_vec()).into();
 
         let guard = loop {
@@ -295,13 +302,28 @@ mod tests {
     fn capacity_eviction_does_not_underflow_and_bounds_size() {
         let mut entries = HashMap::new();
         for i in 0..=(MAX_ENTRIES + 5) {
+            let key_hash: [u8; 32] = Sha256::digest(format!("req-{i}").as_bytes()).into();
             IdempotencyCache::insert_entry(
                 &mut entries,
-                (1, "Op".to_string(), format!("req-{i}")),
+                (1, "Op".to_string(), key_hash),
                 vec![1],
                 [0u8; 32],
             );
         }
         assert!(entries.len() <= MAX_ENTRIES);
+    }
+
+    #[tokio::test]
+    async fn rejects_overlong_request_id() {
+        let cache = IdempotencyCache::default();
+        let req = TestReq { value: "x".into() };
+        let long_id = "a".repeat(MAX_REQUEST_ID_BYTES + 1);
+        let err = cache
+            .run(1, "Op", &long_id, &req, || async {
+                Ok(Response::new(TestRes { count: 1 }))
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }

@@ -133,7 +133,7 @@ pub async fn preview(pool: &DbPool, audit_date: NaiveDate) -> Result<NightAuditP
         r#"
         SELECT
             COUNT(*) as total,
-            COUNT(*) FILTER (WHERE status IN ('available', 'clean')) as available,
+            COUNT(*) FILTER (WHERE status = 'available') as available,
             COUNT(*) FILTER (WHERE status = 'occupied') as occupied,
             COUNT(*) FILTER (WHERE status = 'reserved') as reserved,
             COUNT(*) FILTER (WHERE status IN ('maintenance', 'out_of_order')) as maintenance,
@@ -155,12 +155,12 @@ pub async fn preview(pool: &DbPool, audit_date: NaiveDate) -> Result<NightAuditP
     let maintenance: i64 = room_row.get("maintenance");
     let dirty: i64 = room_row.get("dirty");
 
-    let occupied_from_bookings: i64 = sqlx::query_scalar::<_, Option<i64>>(
+    let occupied_from_bookings: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(DISTINCT r.id)
         FROM rooms r
         JOIN bookings b ON r.id = b.room_id
-        WHERE b.status = 'checked_in'
+        WHERE b.status IN ('checked_in', 'auto_checked_in', 'late_checkout')
         AND b.check_in_date <= $1
         AND b.check_out_date > $1
         "#,
@@ -168,8 +168,10 @@ pub async fn preview(pool: &DbPool, audit_date: NaiveDate) -> Result<NightAuditP
     .bind(audit_date)
     .fetch_one(pool)
     .await
-    .unwrap_or(Some(0))
-    .unwrap_or(0);
+    .map_err(|e| {
+        log::error!("Error fetching occupied rooms from bookings: {:?}", e);
+        ApiError::Database(e.to_string())
+    })?;
 
     let journal_sections = generate_journal_sections(pool, audit_date, false).await;
 
@@ -451,6 +453,15 @@ pub async fn backfill_booking_posted_nights(
     booking_id: i64,
     posted_by: i64,
 ) -> Result<u32, ApiError> {
+    let tax_rate_pct =
+        settings_cache::get_positive_decimal(pool, "service_tax_rate", Decimal::new(8, 0)).await;
+    let divisor = Decimal::ONE + tax_rate_pct / Decimal::new(100, 0);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
     let row = sqlx::query(
         r#"
         SELECT b.check_in_date, b.check_out_date, b.room_rate, b.total_amount,
@@ -466,10 +477,11 @@ pub async fn backfill_booking_posted_nights(
                b.status
         FROM bookings b
         WHERE b.id = $1
+        FOR UPDATE OF b
         "#,
     )
     .bind(booking_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?
     .ok_or_else(|| ApiError::NotFound(format!("Booking {} not found", booking_id)))?;
@@ -479,6 +491,9 @@ pub async fn backfill_booking_posted_nights(
         status.as_str(),
         "checked_in" | "auto_checked_in" | "late_checkout" | "checked_out" | "completed"
     ) {
+        tx.rollback()
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
         return Ok(0);
     }
 
@@ -505,7 +520,7 @@ pub async fn backfill_booking_posted_nights(
         "#,
     )
     .bind(booking_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
     let mut allocations: HashMap<NaiveDate, Decimal> = HashMap::new();
@@ -513,10 +528,6 @@ pub async fn backfill_booking_posted_nights(
         let d: NaiveDate = ar.get("stay_date");
         allocations.insert(d, row_mappers::get_decimal(ar, "net_amount"));
     }
-
-    let tax_rate_pct =
-        settings_cache::get_positive_decimal(pool, "service_tax_rate", Decimal::new(8, 0)).await;
-    let divisor = Decimal::ONE + tax_rate_pct / Decimal::new(100, 0);
 
     let is_hourly = check_in == check_out;
     let nights_total = (check_out - check_in).num_days().max(1);
@@ -552,7 +563,7 @@ pub async fn backfill_booking_posted_nights(
             "SELECT id FROM night_audit_runs WHERE audit_date = $1 AND status = 'completed' LIMIT 1",
         )
         .bind(date)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -635,7 +646,7 @@ pub async fn backfill_booking_posted_nights(
             .bind(decimal_to_db(night_total))
             .bind(run_id)
             .bind(posted_by)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -650,7 +661,7 @@ pub async fn backfill_booking_posted_nights(
                 )
                 .bind(run_id)
                 .bind(decimal_to_db(night_total))
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| ApiError::Database(e.to_string()))?;
 
@@ -662,6 +673,10 @@ pub async fn backfill_booking_posted_nights(
             .succ_opt()
             .ok_or_else(|| ApiError::Database("Date overflow".to_string()))?;
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     Ok(inserted)
 }
@@ -1221,7 +1236,8 @@ pub async fn generate_journal_sections(
         )
         AND COALESCE(LOWER(TRIM(p.payment_type)), '') != 'refund'
         AND b.status != 'voided'
-        AND (p.created_at AT TIME ZONE $2)::date = $1
+        AND p.created_at >= ($1::date::timestamp AT TIME ZONE $2)
+        AND p.created_at < (($1::date + 1)::timestamp AT TIME ZONE $2)
         ORDER BY r.room_number
     "#;
 
@@ -1301,7 +1317,8 @@ pub async fn generate_journal_sections(
         )
         AND (p.status <> 'void' OR p.void_reversal_date IS NOT NULL)
         AND b.status != 'voided'
-        AND (p.created_at AT TIME ZONE $2)::date = $1
+        AND p.created_at >= ($1::date::timestamp AT TIME ZONE $2)
+        AND p.created_at < (($1::date + 1)::timestamp AT TIME ZONE $2)
         ORDER BY r.room_number
     "#;
 
@@ -1400,7 +1417,8 @@ pub async fn generate_journal_sections(
         FROM customer_ledger_payments clp
         JOIN customer_ledgers cl ON clp.ledger_id = cl.id
         WHERE cl.void_at IS NULL
-        AND (clp.payment_date AT TIME ZONE $2)::date = $1
+        AND clp.payment_date >= ($1::date::timestamp AT TIME ZONE $2)
+        AND clp.payment_date < (($1::date + 1)::timestamp AT TIME ZONE $2)
         ORDER BY cl.company_name
     "#;
 

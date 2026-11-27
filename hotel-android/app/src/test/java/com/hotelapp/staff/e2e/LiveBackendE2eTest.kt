@@ -111,7 +111,14 @@ private class E2eStack(
         .cookieJar(cookieJar)
         .addInterceptor(forwardedIpInterceptor)
         .addInterceptor(BaseUrlInterceptor { baseUrl })
-        .addInterceptor(AuthInterceptor(accessTokenProvider = { sessionManager.getAccessToken() }))
+        .addInterceptor(
+            AuthInterceptor(
+                accessTokenProvider = { sessionManager.getAccessToken() },
+                baseUrlProvider = { baseUrl },
+                tokenForOriginProvider = { origin -> sessionManager.getAccessTokenForOrigin(origin) },
+                requestAuthContextForOriginProvider = { origin -> sessionManager.getRequestAuthContextForOrigin(origin) },
+            ),
+        )
         .authenticator(
             TokenAuthenticator(sessionManager) {
                 NetworkFactory.refreshAccessTokenSync(refreshClient)
@@ -148,6 +155,7 @@ private class E2eStack(
         sessionManager = sessionManager,
         cookieJar = cookieJar,
         realtimeSocketClient = socketClient,
+        currentServerUrlProvider = { baseUrl },
     )
     val bookingsRepo = DefaultBookingsRepository(retrofit.create(BookingsApi::class.java))
     val roomsRepo = DefaultRoomsRepository(retrofit.create(RoomsApi::class.java))

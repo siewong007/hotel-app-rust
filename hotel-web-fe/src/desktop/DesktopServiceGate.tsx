@@ -22,6 +22,7 @@ import {
   getDesktopStatus,
   getTauriCoreApi,
   getTauriEventApi,
+  openLogsFolder,
   setRuntimeApiBaseUrl,
   shouldUseDesktopRuntime,
   upgradeDatabaseFromBackup,
@@ -149,10 +150,9 @@ export function DesktopServiceGate({ children }: DesktopServiceGateProps) {
     }
   };
 
-  const openDataFolder = async () => {
+  const handleOpenLogsFolder = async () => {
     try {
-      const { invoke } = await getTauriCoreApi();
-      await invoke('open_data_folder', { accessToken: getAccessToken() });
+      await openLogsFolder();
     } catch (folderError) {
       setError(folderError instanceof Error ? folderError.message : t('desktop.errors.openFolderFailed'));
     }
@@ -214,7 +214,7 @@ export function DesktopServiceGate({ children }: DesktopServiceGateProps) {
           {/* Three actions when a backup exists; wrap so longer ms labels
               cannot overflow a narrow window. */}
           <DialogActions sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-            <Button startIcon={<FolderOpenIcon />} onClick={openDataFolder} disabled={isUpgrading}>
+            <Button startIcon={<FolderOpenIcon />} onClick={handleOpenLogsFolder} disabled={isUpgrading}>
               {t('desktop.openDataFolder')}
             </Button>
             {latestBackup && (
@@ -272,7 +272,7 @@ export function DesktopServiceGate({ children }: DesktopServiceGateProps) {
             <Button startIcon={<RefreshIcon />} variant="contained" onClick={restartBackend} disabled={isRestarting}>
               {t('desktop.restartServices')}
             </Button>
-            <Button startIcon={<FolderOpenIcon />} variant="outlined" onClick={openDataFolder}>
+            <Button startIcon={<FolderOpenIcon />} variant="outlined" onClick={handleOpenLogsFolder}>
               {t('desktop.openDataFolder')}
             </Button>
           </Stack>

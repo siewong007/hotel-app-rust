@@ -230,9 +230,15 @@ async fn special_types_survive_export_and_reimport() {
     .expect("template row_to_json must run");
 
     // The real export path — the fixture rows must appear verbatim.
-    let body = export_booking_data_body(&pool, 0, hotel_app_be::models::ExportScope::Full, None)
-        .await
-        .expect("streamed export must build");
+    let actor_id = any_user_id(&pool).await;
+    let body = export_booking_data_body(
+        &pool,
+        actor_id,
+        hotel_app_be::models::ExportScope::Full,
+        None,
+    )
+    .await
+    .expect("streamed export must build");
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .expect("export body must collect");
@@ -1952,14 +1958,18 @@ impl AuthFixture {
         if method == "POST" {
             builder = builder.header(header::CONTENT_TYPE, "application/json");
         }
+        let mut req = builder
+            .body(Body::from(body.to_vec()))
+            .expect("request must build");
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 95, 1],
+                40_000,
+            ))));
         let response = self
             .app
             .clone()
-            .oneshot(
-                builder
-                    .body(Body::from(body.to_vec()))
-                    .expect("request must build"),
-            )
+            .oneshot(req)
             .await
             .expect("router response must complete");
         response.status()
@@ -2134,21 +2144,25 @@ async fn import_endpoints_require_authentication_and_data_transfer_import() {
     let response = {
         use axum::http::{Request, header};
         use tower::ServiceExt;
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/data-transfer/import/uploads")
+            .header(header::AUTHORIZATION, fixture.admin_auth.as_str())
+            .body(Body::from(v1_document(&[V1Entity {
+                name: "public.amenities",
+                primary_key: &["id"],
+                rows: vec![],
+            }])))
+            .expect("request must build");
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 95, 1],
+                40_000,
+            ))));
         fixture
             .app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/data-transfer/import/uploads")
-                    .header(header::AUTHORIZATION, fixture.admin_auth.as_str())
-                    .body(Body::from(v1_document(&[V1Entity {
-                        name: "public.amenities",
-                        primary_key: &["id"],
-                        rows: vec![],
-                    }])))
-                    .expect("request must build"),
-            )
+            .oneshot(req)
             .await
             .expect("router response must complete")
     };

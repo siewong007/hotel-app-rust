@@ -67,4 +67,39 @@ class BookingsViewModelTest {
 
         assertEquals(listOf<String?>("Amina"), queries)
     }
+
+    @Test
+    fun `hasMore stops pagination when total reached or page returns empty`() = runTest {
+        val repo = FakeBookingsRepository()
+        repo.listHandler = { page, _, _ ->
+            Result.success(
+                PaginatedResponseDto(
+                    data = if (page == 1L) listOf(TestFixtures.sampleBooking(id = 1L)) else emptyList(),
+                    total = 1L,
+                    page = page,
+                ),
+            )
+        }
+        val vm = BookingsViewModel("all", repo, TestFixtures.idleSocketClient())
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.hasMore)
+
+        repo.listHandler = { page, _, _ ->
+            Result.success(
+                PaginatedResponseDto(
+                    data = if (page == 1L) listOf(TestFixtures.sampleBooking(id = 1L)) else emptyList(),
+                    total = 5L,
+                    page = page,
+                ),
+            )
+        }
+        vm.refresh()
+        advanceUntilIdle()
+        org.junit.Assert.assertTrue(vm.uiState.value.hasMore)
+
+        vm.loadMore()
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.hasMore)
+    }
 }

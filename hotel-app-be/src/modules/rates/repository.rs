@@ -57,7 +57,7 @@ impl RateRepository {
             .bind(user_id)
             .fetch_one(pool)
             .await
-            .map_err(ApiError::from)?;
+            .map_err(map_rate_write_error)?;
 
             Ok(row_mappers::row_to_rate_plan(&row))
         }
@@ -220,7 +220,7 @@ impl RateRepository {
             .fetch_one(pool)
             .await
             .map(|row| row_mappers::row_to_rate_plan(&row))
-            .map_err(map_not_found)
+            .map_err(map_rate_write_error)
     }
 
     pub async fn delete_rate_plan(pool: &DbPool, rate_plan_id: i64) -> Result<RatePlan, ApiError> {
@@ -271,7 +271,7 @@ impl RateRepository {
         .fetch_one(pool)
         .await
         .map(|row| row_mappers::row_to_room_rate(&row))
-        .map_err(ApiError::from)
+        .map_err(map_rate_write_error)
     }
 
     /// Upserts one rate band inside an existing transaction. A band for the
@@ -319,7 +319,7 @@ impl RateRepository {
         .fetch_one(&mut **tx)
         .await
         .map(|row| row_mappers::row_to_room_rate(&row))
-        .map_err(ApiError::from)
+        .map_err(map_rate_write_error)
     }
 
     /// Snapshot of the bands a bulk upsert is about to write: one row per
@@ -539,7 +539,10 @@ impl RateRepository {
         .map_err(ApiError::from)
     }
 
-    pub async fn find_room_type(pool: &DbPool, room_type_id: i64) -> Result<RoomType, ApiError> {
+    pub async fn find_room_type<'e, E>(executor: E, room_type_id: i64) -> Result<RoomType, ApiError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query(
             "SELECT id, name, code, description, base_price, weekday_rate, weekend_rate, \
              max_occupancy, bed_type, bed_count, allows_extra_bed, max_extra_beds, \
@@ -547,7 +550,7 @@ impl RateRepository {
              FROM room_types WHERE id = $1",
         )
         .bind(room_type_id)
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .map(|row| row_mappers::row_to_room_type(&row))
         .map_err(map_not_found)
@@ -588,4 +591,21 @@ fn map_not_found(error: sqlx::Error) -> ApiError {
         sqlx::Error::RowNotFound => ApiError::NotFound("Resource not found".to_string()),
         other => ApiError::Database(other.to_string()),
     }
+}
+
+fn map_rate_write_error(error: sqlx::Error) -> ApiError {
+    if let sqlx::Error::Database(db_err) = &error {
+        match db_err.code().as_deref() {
+            Some("23505") => {
+                return ApiError::Conflict("Rate record already exists".to_string());
+            }
+            Some("23P01") => {
+                return ApiError::BadRequest(
+                    "Rate dates conflict with an existing rate band".to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+    map_not_found(error)
 }

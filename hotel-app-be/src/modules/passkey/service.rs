@@ -8,9 +8,9 @@ use crate::core::error::ApiError;
 use crate::core::settings_cache;
 use crate::models::AuditEvent;
 use crate::models::{
-    AuthResponse, PasskeyInfo, PasskeyLoginFinish, PasskeyLoginStart, PasskeyRegistrationFinish,
-    PasskeyRegistrationStart, PasskeySecondFactorFinish, PasskeySecondFactorStart,
-    PasskeyUpdateInput, User,
+    AuthResponse, PasskeyDeleteRequest, PasskeyInfo, PasskeyLoginFinish, PasskeyLoginStart,
+    PasskeyRegistrationFinish, PasskeyRegistrationStart, PasskeySecondFactorFinish,
+    PasskeySecondFactorStart, PasskeyUpdateInput, User,
 };
 use crate::modules::auth::repository::AuthRepository;
 use crate::services::audit::AuditLog;
@@ -39,8 +39,29 @@ pub async fn delete_passkey(
     pool: &DbPool,
     user_id: i64,
     passkey_id: uuid::Uuid,
+    req: PasskeyDeleteRequest,
 ) -> Result<(), ApiError> {
+    crate::modules::auth::service::ensure_step_up(
+        pool,
+        user_id,
+        req.password.as_deref(),
+        req.totp_code.as_deref(),
+    )
+    .await?;
+
     if PasskeyRepository::delete_passkey(pool, user_id, passkey_id).await? {
+        let _ = AuditLog::log_event(
+            pool,
+            AuditEvent {
+                user_id: Some(user_id),
+                action: "passkey_deleted",
+                resource_type: "passkey",
+                resource_id: None,
+                details: Some(json!({ "passkey_id": passkey_id.to_string() })),
+                ..Default::default()
+            },
+        )
+        .await;
         Ok(())
     } else {
         Err(ApiError::NotFound("Passkey not found".to_string()))
@@ -398,17 +419,7 @@ pub async fn login_finish(
 ) -> Result<(AuthResponse, String), ApiError> {
     let user = PasskeyRepository::find_active_user_by_username(pool, &req.username)
         .await?
-        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
-
-    // Account lockout applies to every login door, not just the password one.
-    crate::modules::auth::service::ensure_not_locked(
-        pool,
-        user.id,
-        &req.username,
-        ip_address,
-        user_agent,
-    )
-    .await?;
+        .ok_or_else(|| ApiError::Unauthorized("Invalid credentials".to_string()))?;
 
     verify_assertion(
         pool,
@@ -425,6 +436,26 @@ pub async fn login_finish(
         user_agent,
     )
     .await?;
+
+    // Account lockout applies to every login door, not just the password one.
+    // Run after cryptographic assertion verification so an unauthenticated
+    // caller cannot distinguish a locked username from a missing one.
+    crate::modules::auth::service::ensure_not_locked(
+        pool,
+        user.id,
+        &req.username,
+        ip_address,
+        user_agent,
+    )
+    .await?;
+
+    let skip_email_verification = crate::core::config::get().skip_email_verification;
+    if !skip_email_verification && !user.is_verified {
+        return Err(ApiError::Unauthorized(
+            "Please verify your email address before logging in. Check your email for the verification link."
+                .to_string(),
+        ));
+    }
 
     // Passkey logins were completely invisible (no audit row on success or
     // failure), unlike password logins. Mirror the password path.

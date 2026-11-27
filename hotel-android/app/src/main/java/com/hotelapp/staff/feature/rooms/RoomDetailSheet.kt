@@ -31,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import com.hotelapp.staff.core.design.FilterChipRow
 import com.hotelapp.staff.core.design.FilterOption
 import com.hotelapp.staff.core.design.HotelCard
@@ -61,15 +63,31 @@ fun RoomDetailSheet(
     onEndCleaning: (Long) -> Unit,
     onEndMaintenance: (Long) -> Unit,
     onUpdateStatus: (Long, String, String?) -> Unit,
+    isOfflineFallback: Boolean = false,
 ) {
     val colors = HotelTheme.colors
-    var selectedTargetStatus by remember(detail?.id, detail?.status) {
-        val initial = detail?.status?.takeIf { it in setOf("available", "dirty", "maintenance") } ?: "available"
-        mutableStateOf(initial)
+    val normalizedStatus = detail?.status?.trim()?.lowercase(Locale.US).orEmpty()
+    val isOccupied = normalizedStatus == "occupied" || detail?.currentBooking != null
+    val manualStatusOptions = remember(isOccupied, colors) {
+        buildList {
+            if (!isOccupied) {
+                add(FilterOption("available", "Available", dotColor = colors.success.fg))
+            }
+            add(FilterOption("dirty", "Dirty", dotColor = colors.orange.fg))
+            add(FilterOption("maintenance", "Maintenance", dotColor = colors.danger.fg))
+        }
+    }
+    var selectedTargetStatus by remember(detail?.id, normalizedStatus, isOccupied) {
+        val defaultCandidate = manualStatusOptions.firstOrNull { it.value != normalizedStatus }?.value
+            ?: manualStatusOptions.first().value
+        mutableStateOf(defaultCandidate)
     }
     var statusNotes by remember(detail?.id) { mutableStateOf("") }
 
-    HotelModalSheetContainer(onDismiss = { if (!isMutating) onDismiss() }) {
+    HotelModalSheetContainer(
+        dismissible = !isMutating,
+        onDismiss = { if (!isMutating) onDismiss() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -110,6 +128,12 @@ fun RoomDetailSheet(
                         )
                     }
 
+                    if (isOfflineFallback) {
+                        InlineAlertBanner(
+                            message = "Showing cached room summary — live details unavailable offline.",
+                            tone = colors.warning,
+                        )
+                    }
                     if (error != null) {
                         InlineAlertBanner(message = error, tone = colors.danger)
                     }
@@ -228,7 +252,11 @@ fun RoomDetailSheet(
                                         text = StatusFormatter.humanize(ev.eventType),
                                         style = MaterialTheme.typography.labelLarge,
                                         color = colors.textPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
                                     )
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = DateFormatter.formatRelativeTimestamp(ev.createdAt),
                                         style = MaterialTheme.typography.labelSmall,
@@ -251,7 +279,7 @@ fun RoomDetailSheet(
                         HorizontalDivider(color = colors.borderSubtle)
                         Text("Quick Actions", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
 
-                        if (detail.status == "cleaning") {
+                        if (normalizedStatus == "cleaning") {
                             HotelPrimaryButton(
                                 text = "Complete Cleaning",
                                 icon = Icons.Outlined.CheckCircleOutline,
@@ -261,7 +289,7 @@ fun RoomDetailSheet(
                                 onClick = { onEndCleaning(detail.id) },
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                        } else if (detail.status in setOf("dirty", "reserved_dirty")) {
+                        } else if (!isOccupied && normalizedStatus in setOf("dirty", "reserved_dirty")) {
                             HotelPrimaryButton(
                                 text = "Mark Clean / Available",
                                 icon = Icons.Outlined.CleaningServices,
@@ -272,7 +300,7 @@ fun RoomDetailSheet(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        if (detail.status == "maintenance") {
+                        if (normalizedStatus == "maintenance" || normalizedStatus == "out_of_order") {
                             HotelPrimaryButton(
                                 text = "End Maintenance",
                                 icon = Icons.Outlined.Build,
@@ -286,11 +314,7 @@ fun RoomDetailSheet(
 
                         Text("Set Room Status", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                         FilterChipRow(
-                            options = listOf(
-                                FilterOption("available", "Available", dotColor = colors.success.fg),
-                                FilterOption("dirty", "Dirty", dotColor = colors.orange.fg),
-                                FilterOption("maintenance", "Maintenance", dotColor = colors.danger.fg),
-                            ),
+                            options = manualStatusOptions,
                             selected = selectedTargetStatus,
                             onSelect = { selectedTargetStatus = it },
                         )
@@ -306,7 +330,7 @@ fun RoomDetailSheet(
                         HotelOutlinedButton(
                             text = if (isMutating) "Updating..." else "Apply Status Change",
                             isLoading = isMutating,
-                            enabled = selectedTargetStatus != detail.status,
+                            enabled = selectedTargetStatus != normalizedStatus,
                             onClick = { onUpdateStatus(detail.id, selectedTargetStatus, statusNotes) },
                             modifier = Modifier.fillMaxWidth(),
                         )

@@ -42,8 +42,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,13 +88,17 @@ import com.hotelapp.staff.data.repository.OperationsRepository
 import com.hotelapp.staff.data.repository.PaymentsRepository
 import com.hotelapp.staff.data.repository.RoomsRepository
 import com.hotelapp.staff.widget.OpsWidgetSnapshot
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 
 data class DashboardUiState(
     val isLoading: Boolean = true,
@@ -105,6 +111,7 @@ data class DashboardUiState(
     val pendingPaymentsCount: Long? = null,
     val pendingEkycCount: Long? = null,
     val error: String? = null,
+    val refreshWarning: String? = null,
 )
 
 class DashboardViewModel(
@@ -117,40 +124,61 @@ class DashboardViewModel(
     private val ekycRepository: EkycRepository? = null,
     private val hotelNameProvider: () -> String = { "Hotel Staff" },
     private val onWidgetSnapshotReady: (suspend (OpsWidgetSnapshot) -> Unit)? = null,
+    private val hotelTimezoneProvider: () -> String = { "Asia/Kuala_Lumpur" },
+    private val sessionProvider: () -> StaffSession = { session },
 ) : ViewModel() {
 
-    private val canReadBookings = session.hasPermission("bookings:read")
-    private val canReadRooms = session.hasPermission("rooms:read")
-    private val canReadNightAudit = session.hasPermission("night_audit:read")
-    private val canReadGuests = session.hasPermission("guests:read")
-    private val canReadPendingPayments = session.hasPermission("payments:read")
-    private val canReadEkyc = session.hasPermission("ekyc:read")
+    private fun currentHasAnyFeed(): Boolean {
+        val s = sessionProvider()
+        return s.hasPermission("bookings:read") ||
+            s.hasPermission("rooms:read") ||
+            s.hasPermission("night_audit:read") ||
+            s.hasPermission("guests:read") ||
+            s.hasPermission("payments:read") ||
+            s.hasPermission("ekyc:read")
+    }
 
-    private val hasAnyDashboardFeed =
-        canReadBookings || canReadRooms || canReadNightAudit || canReadGuests || canReadPendingPayments || canReadEkyc
-
-    private val _uiState = MutableStateFlow(DashboardUiState(isLoading = hasAnyDashboardFeed))
+    private val _uiState = MutableStateFlow(DashboardUiState(isLoading = currentHasAnyFeed()))
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
+
+    private var refreshJob: Job? = null
+    private var wsDebounceJob: Job? = null
 
     init {
         refresh()
         viewModelScope.launch {
             realtimeSocketClient.domainEvents.collect { domain ->
-                if (domain in setOf("bookings", "rooms", "payments", "housekeeping", "ekyc")) {
-                    refresh(silent = true)
+                if (domain in setOf("bookings", "rooms", "payments", "housekeeping", "ekyc", "night-audit", "guests", "support")) {
+                    wsDebounceJob?.cancel()
+                    wsDebounceJob = viewModelScope.launch {
+                        delay(250)
+                        refresh(silent = true)
+                    }
                 }
             }
         }
     }
 
     fun refresh(silent: Boolean = false) {
-        if (!hasAnyDashboardFeed) {
-            _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+        val currentSession = sessionProvider()
+        val canReadBookings = currentSession.hasPermission("bookings:read")
+        val canReadRooms = currentSession.hasPermission("rooms:read")
+        val canReadNightAudit = currentSession.hasPermission("night_audit:read")
+        val canReadGuests = currentSession.hasPermission("guests:read")
+        val canReadPendingPayments = currentSession.hasPermission("payments:read")
+        val canReadEkyc = currentSession.hasPermission("ekyc:read")
+        val hasAnyFeed = canReadBookings || canReadRooms || canReadNightAudit || canReadGuests || canReadPendingPayments || canReadEkyc
+
+        if (!hasAnyFeed) {
+            refreshJob?.cancel()
+            _uiState.update { it.copy(isLoading = false, isRefreshing = false, error = null, refreshWarning = null) }
             return
         }
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             val existing = _uiState.value
             val hasLoadedData = existing.bookingSummary != null ||
+                existing.newReservations != null ||
                 existing.occupancySummary != null ||
                 existing.nightAuditPreview != null ||
                 existing.guestRelationsOverview != null ||
@@ -161,12 +189,17 @@ class DashboardViewModel(
                     isLoading = !hasLoadedData,
                     isRefreshing = hasLoadedData,
                     error = null,
+                    refreshWarning = null,
                 )
             }
+            val hotelDate = runCatching {
+                LocalDate.now(ZoneId.of(hotelTimezoneProvider()))
+            }.getOrElse { LocalDate.now() }.toString()
+
             val bookingSummaryDef = if (canReadBookings) async { bookingsRepository.summary() } else null
             val newResDef = if (canReadBookings) async { bookingsRepository.newReservations() } else null
             val occDef = if (canReadRooms) async { roomsRepository.occupancySummary() } else null
-            val nightAuditDef = if (canReadNightAudit && operationsRepository != null) async { operationsRepository.nightAuditPreview() } else null
+            val nightAuditDef = if (canReadNightAudit && operationsRepository != null) async { operationsRepository.nightAuditPreview(hotelDate) } else null
             val guestRelDef = if (canReadGuests && operationsRepository != null) async { operationsRepository.guestRelationsOverview() } else null
             val pendingPayDef = if (canReadPendingPayments && paymentsRepository != null) async { paymentsRepository.pendingPayments(page = 1, perPage = 1) } else null
             val ekycDashDef = if (canReadEkyc && ekycRepository != null) async { ekycRepository.dashboard() } else null
@@ -181,6 +214,7 @@ class DashboardViewModel(
 
             val firstError = listOfNotNull(
                 bookingRes?.exceptionOrNull(),
+                newRes?.exceptionOrNull(),
                 occRes?.exceptionOrNull(),
                 pendingPayRes?.exceptionOrNull(),
                 ekycDashRes?.exceptionOrNull(),
@@ -190,12 +224,14 @@ class DashboardViewModel(
 
             _uiState.update { current ->
                 val updatedBookings = bookingRes?.getOrNull() ?: current.bookingSummary
+                val updatedNewRes = newRes?.getOrNull() ?: current.newReservations
                 val updatedOcc = occRes?.getOrNull() ?: current.occupancySummary
                 val updatedNightAudit = nightAuditRes?.getOrNull() ?: current.nightAuditPreview
                 val updatedGuestRel = guestRelRes?.getOrNull() ?: current.guestRelationsOverview
                 val updatedPayCount = pendingPayRes?.getOrNull()?.total ?: current.pendingPaymentsCount
-                val updatedEkycCount = ekycDashRes?.getOrNull()?.let { it.pendingReview + it.underManualReview } ?: current.pendingEkycCount
+                val updatedEkycCount = ekycDashRes?.getOrNull()?.pendingReview ?: current.pendingEkycCount
                 val anyDataNow = updatedBookings != null ||
+                    updatedNewRes != null ||
                     updatedOcc != null ||
                     updatedNightAudit != null ||
                     updatedGuestRel != null ||
@@ -206,13 +242,14 @@ class DashboardViewModel(
                     isLoading = false,
                     isRefreshing = false,
                     bookingSummary = updatedBookings,
-                    newReservations = newRes?.getOrNull() ?: current.newReservations,
+                    newReservations = updatedNewRes,
                     occupancySummary = updatedOcc,
                     nightAuditPreview = updatedNightAudit,
                     guestRelationsOverview = updatedGuestRel,
                     pendingPaymentsCount = updatedPayCount,
                     pendingEkycCount = updatedEkycCount,
                     error = if (!anyDataNow) firstError else null,
+                    refreshWarning = if (anyDataNow && !silent) firstError else if (firstError == null) null else current.refreshWarning,
                 )
             }
 
@@ -221,6 +258,18 @@ class DashboardViewModel(
                 val occ = updatedState.occupancySummary
                 val book = updatedState.bookingSummary
                 val na = updatedState.nightAuditPreview
+                val fallbackRooms = if (na == null && canReadRooms) {
+                    roomsRepository.roomsWithOccupancy().getOrNull()
+                } else null
+                val dirtyCount = na?.roomSnapshot?.dirty
+                    ?: fallbackRooms?.count { it.status.equals("dirty", ignoreCase = true) }
+                    ?: 0
+                val maintenanceCount = na?.roomSnapshot?.maintenance
+                    ?: fallbackRooms?.count {
+                        it.status.equals("maintenance", ignoreCase = true) ||
+                            it.status.equals("out_of_order", ignoreCase = true)
+                    }
+                    ?: 0
                 val rateText = occ?.occupancyRate?.let { "${it.stripTrailingZeros().toPlainString()}%" } ?: "0%"
                 onWidgetSnapshotReady.invoke(
                     OpsWidgetSnapshot(
@@ -229,8 +278,8 @@ class DashboardViewModel(
                         occupiedRooms = occ?.occupiedRooms ?: 0L,
                         totalRooms = occ?.totalRooms ?: 0L,
                         arrivingToday = book?.arriving ?: 0L,
-                        dirtyRooms = na?.roomSnapshot?.dirty ?: 0,
-                        openMaintenance = na?.roomSnapshot?.maintenance ?: 0,
+                        dirtyRooms = dirtyCount,
+                        openMaintenance = maintenanceCount,
                         updatedAtMs = System.currentTimeMillis(),
                         isAuthenticated = true,
                     ),
@@ -276,8 +325,12 @@ fun DashboardScreen(
     val firstName = remember(displayName) {
         displayName.trim().substringBefore(' ').ifBlank { displayName }
     }
-    val greeting = remember { DateFormatter.greetingForHour(LocalTime.now().hour) }
-    val todayLabel = remember { DateFormatter.formatTodayLabel() }
+    var clockTick by remember { mutableIntStateOf(0) }
+    val hotelZone = remember(config.hotelTimezone) {
+        runCatching { ZoneId.of(config.hotelTimezone) }.getOrElse { ZoneId.systemDefault() }
+    }
+    val greeting = remember(hotelZone, clockTick) { DateFormatter.greetingForHour(LocalTime.now(hotelZone).hour) }
+    val todayLabel = remember(hotelZone, clockTick) { DateFormatter.formatTodayLabel(zoneId = hotelZone) }
 
     val quickActions = remember(
         canReadRooms,
@@ -293,17 +346,26 @@ fun DashboardScreen(
         }
     }
 
-    OnResumeRefreshEffect { viewModel.refresh(silent = true) }
+    OnResumeRefreshEffect {
+        clockTick++
+        viewModel.refresh(silent = true)
+    }
 
     when {
         state.isLoading -> DashboardSkeleton()
-        state.error != null -> ErrorStateView(
+        state.error != null && quickActions.isEmpty() -> ErrorStateView(
             message = state.error!!,
-            onRetry = { viewModel.refresh() },
+            onRetry = {
+                clockTick++
+                viewModel.refresh()
+            },
         )
         else -> HotelPullToRefreshBox(
             isRefreshing = state.isRefreshing,
-            onRefresh = { viewModel.refresh() },
+            onRefresh = {
+                clockTick++
+                viewModel.refresh()
+            },
             modifier = Modifier.fillMaxSize(),
         ) {
             LazyColumn(
@@ -337,6 +399,16 @@ fun DashboardScreen(
                     }
                 }
 
+                val bannerMessage = state.error ?: state.refreshWarning
+                if (!bannerMessage.isNullOrBlank()) {
+                    item {
+                        InlineAlertBanner(
+                            message = bannerMessage,
+                            tone = if (state.error != null) colors.danger else colors.warning,
+                        )
+                    }
+                }
+
                 if (session.twoFactorEnrollmentRequired) {
                     item {
                         val deadline = session.twoFactorEnrollmentDeadline?.let {
@@ -350,11 +422,13 @@ fun DashboardScreen(
                 }
 
                 if (!canReadBookings && !canReadRooms) {
+                    val canReadEkyc = session.hasPermission("ekyc:read")
+                    val canReadPay = session.hasPermission("payments:read")
                     val hasAnyOpsWorkspace = canReadHousekeeping ||
                         canReadMaintenance ||
                         canReadGuests ||
-                        session.hasPermission("payments:read") ||
-                        session.hasPermission("ekyc:read")
+                        canReadPay ||
+                        canReadEkyc
                     item {
                         HotelCard {
                             Text(
@@ -372,30 +446,27 @@ fun DashboardScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary,
                             )
-                            if (canReadHousekeeping) {
+                            val workspaceButtons = buildList {
+                                if (canReadHousekeeping) add(Triple("Open Housekeeping Board", Icons.Outlined.CleaningServices, onOpenHousekeeping))
+                                if (canReadMaintenance) add(Triple("Open Maintenance Tickets", Icons.Outlined.Build, onOpenMaintenance))
+                                if (canReadGuests) add(Triple("Open Guest Directory", Icons.Outlined.Group, onOpenGuests))
+                                if (canReadEkyc) add(Triple("Open eKYC Review Queue", Icons.Outlined.Badge, onOpenEkycQueue))
+                                if (canReadPay) add(Triple("Open Payment Approvals", Icons.Outlined.Payments, onOpenPendingPayments))
+                            }
+                            if (workspaceButtons.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(12.dp))
-                                HotelPrimaryButton(
-                                    text = "Open Housekeeping Board",
-                                    icon = Icons.Outlined.CleaningServices,
-                                    onClick = onOpenHousekeeping,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            } else if (session.hasPermission("ekyc:read")) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                HotelPrimaryButton(
-                                    text = "Open eKYC Review Queue",
-                                    icon = Icons.Outlined.Badge,
-                                    onClick = onOpenEkycQueue,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            } else if (session.hasPermission("payments:read")) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                HotelPrimaryButton(
-                                    text = "Open Payment Approvals",
-                                    icon = Icons.Outlined.Payments,
-                                    onClick = onOpenPendingPayments,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    workspaceButtons.forEachIndexed { idx, (label, icon, action) ->
+                                        HotelPrimaryButton(
+                                            text = label,
+                                            icon = icon,
+                                            onClick = action,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            containerColor = if (idx == 0) colors.primaryMain else colors.surfaceRaised,
+                                            contentColor = if (idx == 0) colors.primaryContrastText else colors.textPrimary,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -654,24 +725,24 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             if (showPendingPayments) {
-                                val count = state.pendingPaymentsCount ?: 0L
+                                val count = state.pendingPaymentsCount
                                 KpiCard(
                                     title = "Pending Payments",
-                                    value = count.toString(),
-                                    subtitle = "Awaiting staff review",
-                                    tone = if (count > 0) colors.warning else colors.neutral,
+                                    value = count?.toString() ?: "—",
+                                    subtitle = if (count == null) "Unavailable" else "Awaiting staff review",
+                                    tone = if ((count ?: 0L) > 0) colors.warning else colors.neutral,
                                     icon = Icons.Outlined.Payments,
                                     onClick = onOpenPendingPayments,
                                     modifier = Modifier.weight(1f),
                                 )
                             }
                             if (showEkyc) {
-                                val count = state.pendingEkycCount ?: 0L
+                                val count = state.pendingEkycCount
                                 KpiCard(
                                     title = "eKYC Queue",
-                                    value = count.toString(),
-                                    subtitle = "Identity checks to review",
-                                    tone = if (count > 0) colors.info else colors.neutral,
+                                    value = count?.toString() ?: "—",
+                                    subtitle = if (count == null) "Unavailable" else "Identity checks to review",
+                                    tone = if ((count ?: 0L) > 0) colors.info else colors.neutral,
                                     icon = Icons.Outlined.Badge,
                                     onClick = onOpenEkycQueue,
                                     modifier = Modifier.weight(1f),
@@ -720,14 +791,30 @@ fun DashboardScreen(
                         HotelCard {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
                                     Icon(Icons.Outlined.NightlightRound, contentDescription = null, tint = colors.primaryOnSurface, modifier = Modifier.size(18.dp))
-                                    Column {
-                                        Text("Night Audit · ${DateFormatter.formatDate(na.auditDate)}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        Text("${na.totalUnposted} unposted · Est. ${MoneyFormatter.format(na.estimatedRevenue, currency)}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Night Audit · ${DateFormatter.formatDate(na.auditDate)}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = colors.textPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = "${na.totalUnposted} unposted · Est. ${MoneyFormatter.format(na.estimatedRevenue, currency)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.textSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
                                 }
                                 StatusPill(statusLabel, statusTone)

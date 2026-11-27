@@ -39,6 +39,10 @@ struct SiteVerifyResponse {
     success: bool,
     #[serde(default, rename = "error-codes")]
     error_codes: Vec<String>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    hostname: Option<String>,
 }
 
 /// Codes that mean *this deployment is misconfigured*, not *this visitor failed*.
@@ -147,11 +151,51 @@ pub async fn verify_request(
         ApiError::ServiceUnavailable(unavailable_message())
     })?;
 
-    if verdict.success {
-        return Ok(());
+    validate_verdict(&verdict, action, &turnstile.allowed_hostnames)
+}
+
+fn validate_verdict(
+    verdict: &SiteVerifyResponse,
+    expected_action: &str,
+    allowed_hostnames: &[String],
+) -> Result<(), ApiError> {
+    if !verdict.success {
+        return classify_failure(&verdict.error_codes, expected_action);
     }
 
-    classify_failure(&verdict.error_codes, action)
+    let action_matches = verdict
+        .action
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|actual| !actual.is_empty() && actual == expected_action);
+    if !action_matches {
+        log::warn!(
+            "Turnstile action mismatch: expected={expected_action} actual={:?}",
+            verdict.action
+        );
+        return Err(ApiError::BadRequest(challenge_failed_message()));
+    }
+
+    if !allowed_hostnames.is_empty() {
+        let hostname = verdict
+            .hostname
+            .as_deref()
+            .map(|h| h.trim().to_ascii_lowercase())
+            .filter(|h| !h.is_empty());
+        let host_allowed = hostname
+            .as_deref()
+            .is_some_and(|host| allowed_hostnames.iter().any(|allowed| allowed == host));
+        if !host_allowed {
+            log::warn!(
+                "Turnstile hostname mismatch for {expected_action}: actual={:?} allowed={:?}",
+                verdict.hostname,
+                allowed_hostnames
+            );
+            return Err(ApiError::BadRequest(challenge_failed_message()));
+        }
+    }
+
+    Ok(())
 }
 
 /// Splits a siteverify rejection into "the operator broke it" (503, logged) and
@@ -256,5 +300,57 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ApiError::ServiceUnavailable(_)));
+    }
+
+    #[test]
+    fn validate_verdict_enforces_action_and_hostname() {
+        let allowed = vec!["hotel.example.com".to_string()];
+        let ok = SiteVerifyResponse {
+            success: true,
+            error_codes: vec![],
+            action: Some("login".to_string()),
+            hostname: Some("Hotel.Example.Com".to_string()),
+        };
+        assert!(validate_verdict(&ok, "login", &allowed).is_ok());
+
+        let wrong_action = SiteVerifyResponse {
+            action: Some("register".to_string()),
+            ..ok
+        };
+        assert!(matches!(
+            validate_verdict(&wrong_action, "login", &allowed),
+            Err(ApiError::BadRequest(_))
+        ));
+
+        let missing_action = SiteVerifyResponse {
+            success: true,
+            error_codes: vec![],
+            action: None,
+            hostname: Some("hotel.example.com".to_string()),
+        };
+        assert!(matches!(
+            validate_verdict(&missing_action, "login", &allowed),
+            Err(ApiError::BadRequest(_))
+        ));
+
+        let wrong_host = SiteVerifyResponse {
+            success: true,
+            error_codes: vec![],
+            action: Some("login".to_string()),
+            hostname: Some("evil.example.net".to_string()),
+        };
+        assert!(matches!(
+            validate_verdict(&wrong_host, "login", &allowed),
+            Err(ApiError::BadRequest(_))
+        ));
+
+        let missing_host = SiteVerifyResponse {
+            hostname: None,
+            ..wrong_host
+        };
+        assert!(matches!(
+            validate_verdict(&missing_host, "login", &allowed),
+            Err(ApiError::BadRequest(_))
+        ));
     }
 }

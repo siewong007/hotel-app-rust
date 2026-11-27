@@ -7,6 +7,7 @@ const SCRIPT_ID = 'cloudflare-turnstile-script';
 
 type RenderOptions = {
   sitekey: string;
+  action?: string;
   callback?: (token: string) => void;
   'error-callback'?: (code?: string) => void;
   'expired-callback'?: () => void;
@@ -184,6 +185,18 @@ describe('useTurnstile inline widget', () => {
     await waitFor(() => expect(result.current.token).toBeUndefined());
     // refresh-expired: auto re-solves; this is not a failure to report.
     expect(result.current.error).toBeUndefined();
+  });
+
+  it('forwards the Turnstile action name when provided', async () => {
+    enable();
+    const stub = installTurnstileStub();
+    const { result } = renderHook(() => useTurnstile('claim_account'));
+
+    const node = document.createElement('div');
+    act(() => result.current.setContainer(node));
+
+    await waitFor(() => expect(stub.options).not.toBeNull());
+    expect(stub.options?.action).toBe('claim_account');
   });
 });
 

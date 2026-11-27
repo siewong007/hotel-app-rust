@@ -13,10 +13,12 @@ import com.hotelapp.staff.core.network.HotelJson
 import com.hotelapp.staff.core.network.NetworkFactory
 import com.hotelapp.staff.core.network.NetworkMonitor
 import com.hotelapp.staff.core.network.RealtimeSocketClient
+import com.hotelapp.staff.core.network.runSuspendCatching
 import com.hotelapp.staff.core.notifications.StaffNotificationManager
 import com.hotelapp.staff.core.print.InvoicePdfPrinter
 import com.hotelapp.staff.core.storage.HotelLocalDatabase
 import com.hotelapp.staff.core.storage.HotelLocalStore
+import com.hotelapp.staff.core.storage.LocalDataScope
 import com.hotelapp.staff.core.sync.OfflineOpsCoordinator
 import com.hotelapp.staff.core.sync.SyncPendingMutationsWorker
 import com.hotelapp.staff.data.api.AuthApi
@@ -60,7 +62,13 @@ import com.hotelapp.staff.widget.WidgetRefreshWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -70,7 +78,19 @@ class AppContainer(val application: Application) {
     val serverConfigStore = ServerConfigStore(application)
     val sessionManager = SessionManager()
     val networkMonitor: NetworkMonitor = AndroidNetworkMonitor(application)
-    val localStore: HotelLocalStore = HotelLocalDatabase(application)
+
+    private fun currentLocalScope(): LocalDataScope {
+        val rawBase = serverConfigStore.currentBaseUrl()
+        val origin = SessionManager.normalizeOrigin(rawBase) ?: rawBase
+        val userId = (sessionManager.authState.value as? AuthState.Authenticated)?.session?.user?.id ?: 0L
+        return LocalDataScope(serverOrigin = origin, userId = userId)
+    }
+
+    val localStore: HotelLocalStore = HotelLocalDatabase(
+        context = application,
+        scopeProvider = ::currentLocalScope,
+        cipher = AndroidKeystoreCipher(keyAlias = "hotel_local_db_key"),
+    )
     val credentialHelper = StaffCredentialHelper(application)
     val staffNotificationManager = StaffNotificationManager(
         context = application,
@@ -80,7 +100,9 @@ class AppContainer(val application: Application) {
 
     val offlineOpsCoordinator = OfflineOpsCoordinator(
         localStore = localStore,
-        scheduleSyncWorker = { SyncPendingMutationsWorker.schedule(application) },
+        scheduleSyncWorker = { SyncPendingMutationsWorker.schedule(application, replace = false) },
+        principalProvider = ::currentLocalScope,
+        generationProvider = { sessionManager.currentGeneration() },
     )
 
     private val cookieJar = EncryptedCookieJar(
@@ -89,11 +111,17 @@ class AppContainer(val application: Application) {
     )
 
     private val refreshClient = NetworkFactory.createRefreshClient(serverConfigStore, cookieJar)
+    private val tokenRefresher = NetworkFactory.createTokenRefresher(
+        sessionManager = sessionManager,
+        refreshClient = refreshClient,
+        baseUrlProvider = { serverConfigStore.currentBaseUrl() },
+    )
     private val mainClient = NetworkFactory.createMainClient(
         serverConfigStore = serverConfigStore,
         cookieJar = cookieJar,
         sessionManager = sessionManager,
         refreshClient = refreshClient,
+        tokenRefresher = tokenRefresher,
     )
     private val wsClient = NetworkFactory.createWebSocketClient(serverConfigStore)
 
@@ -101,9 +129,9 @@ class AppContainer(val application: Application) {
         client = wsClient,
         baseUrlProvider = { serverConfigStore.currentBaseUrl() },
         sessionManager = sessionManager,
-        onUnauthorized = { NetworkFactory.refreshAccessTokenSync(refreshClient) },
         isOnlineProvider = { networkMonitor.isOnline.value },
         networkOnlineFlow = networkMonitor.isOnline,
+        onUnauthorizedOutcome = { failedToken -> tokenRefresher.refreshIfStale(failedToken) },
     )
 
     private val retrofit: Retrofit = Retrofit.Builder()
@@ -134,21 +162,66 @@ class AppContainer(val application: Application) {
     private val ekycApi: EkycApi = retrofit.create(EkycApi::class.java)
     private val operationsApi: OperationsApi = retrofit.create(OperationsApi::class.java)
 
-    internal suspend fun clearTransientUserData() {
-        offlineOpsCoordinator.clearAll()
-        serverConfigStore.clearRecentSearches()
-        InvoicePdfPrinter.clearCachedInvoices(application)
-        WidgetRefreshWorker.clearWidget(
-            context = application,
-            localStore = localStore,
-            hotelName = serverConfigStore.config.value.hotelName,
-        )
+    private val sessionCleanupMutex = Mutex()
+    private val _isAppLocked = MutableStateFlow(false)
+    val isAppLocked: StateFlow<Boolean> = _isAppLocked.asStateFlow()
+
+    private val _hasUnlockedInProcess = MutableStateFlow(false)
+    val hasUnlockedInProcess: StateFlow<Boolean> = _hasUnlockedInProcess.asStateFlow()
+
+    @Volatile
+    var lastBackgroundedElapsedMs: Long = 0L
+
+    @Volatile
+    var hasTriggeredColdLock: Boolean = false
+
+    fun setAppLocked(locked: Boolean) {
+        _isAppLocked.value = locked
     }
 
-    internal suspend fun clearSessionData() {
-        cookieJar.clearAll()
-        clearTransientUserData()
-        serverConfigStore.setLastAuthenticatedUserId(null)
+    fun markUnlockedInProcess() {
+        _hasUnlockedInProcess.value = true
+    }
+
+    fun resetLockState() {
+        _isAppLocked.value = false
+        _hasUnlockedInProcess.value = false
+        lastBackgroundedElapsedMs = 0L
+        hasTriggeredColdLock = false
+    }
+
+    fun cancelInFlightNetwork() {
+        mainClient.dispatcher.cancelAll()
+        refreshClient.dispatcher.cancelAll()
+    }
+
+    internal suspend fun clearTransientUserData() {
+        runSuspendCatching { offlineOpsCoordinator.clearAll() }
+        runSuspendCatching { serverConfigStore.clearRecentSearches() }
+        runCatching { InvoicePdfPrinter.clearCachedInvoices(application) }
+        runCatching { File(application.cacheDir, "receipts").deleteRecursively() }
+        runCatching { staffNotificationManager.clearPostedAndPending() }
+        runSuspendCatching {
+            WidgetRefreshWorker.clearWidget(
+                context = application,
+                localStore = localStore,
+                hotelName = serverConfigStore.config.value.hotelName,
+            )
+        }
+    }
+
+    internal suspend fun clearSessionData(onlyIfUnauthenticated: Boolean = false) {
+        sessionCleanupMutex.withLock {
+            if (onlyIfUnauthenticated && sessionManager.authState.value is AuthState.Authenticated) {
+                return
+            }
+            realtimeSocketClient.stop()
+            cancelInFlightNetwork()
+            runCatching { SyncPendingMutationsWorker.cancel(application) }
+            runCatching { cookieJar.clearAll() }
+            clearTransientUserData()
+            runSuspendCatching { serverConfigStore.setLastAuthenticatedPrincipal(null) }
+        }
     }
 
     val serverRepository: ServerRepository = DefaultServerRepository(
@@ -158,6 +231,11 @@ class AppContainer(val application: Application) {
         realtimeSocketClient = realtimeSocketClient,
         onServerChanged = { clearSessionData() },
         probeSettingsApi = probeSettingsApi,
+        onBeforeServerChangeLogout = {
+            if (sessionManager.authState.value is AuthState.Authenticated) {
+                withTimeoutOrNull(2_000L) { authApi.logout() }
+            }
+        },
     )
     val authRepository: AuthRepository = DefaultAuthRepository(
         authApi = authApi,
@@ -168,12 +246,20 @@ class AppContainer(val application: Application) {
         realtimeSocketClient = realtimeSocketClient,
         onLoggedOut = { clearSessionData() },
         onAuthenticatedUser = { userId ->
-            val previousUserId = serverConfigStore.getLastAuthenticatedUserId()
-            if (previousUserId != null && previousUserId != userId) {
+            val rawBase = serverConfigStore.currentBaseUrl()
+            val origin = SessionManager.normalizeOrigin(rawBase) ?: rawBase
+            val principal = "$origin|$userId"
+            val previousPrincipal = serverConfigStore.getLastAuthenticatedPrincipal()
+            if (previousPrincipal != principal) {
                 clearTransientUserData()
             }
-            serverConfigStore.setLastAuthenticatedUserId(userId)
+            runSuspendCatching { localStore.purgeOtherScopes(origin, userId) }
+            serverConfigStore.setLastAuthenticatedPrincipal(principal)
         },
+        currentServerUrlProvider = { serverConfigStore.currentBaseUrl() },
+        shouldStartRealtime = { false },
+        onInteractiveLogin = { markUnlockedInProcess() },
+        cancelInFlightRequests = ::cancelInFlightNetwork,
     )
     val bookingsRepository: BookingsRepository = DefaultBookingsRepository(bookingsApi)
     val roomsRepository: RoomsRepository = DefaultRoomsRepository(roomsApi)
@@ -187,7 +273,7 @@ class AppContainer(val application: Application) {
     val operationsRepository: OperationsRepository = DefaultOperationsRepository(operationsApi)
 
     fun triggerSyncNow() {
-        SyncPendingMutationsWorker.schedule(application)
+        SyncPendingMutationsWorker.schedule(application, replace = true)
     }
 }
 
@@ -200,6 +286,7 @@ class HotelStaffApp : Application() {
     override fun onCreate() {
         super.onCreate()
         InvoicePdfPrinter.clearCachedInvoices(this)
+        runCatching { File(cacheDir, "receipts").deleteRecursively() }
         container = AppContainer(this)
         container.staffNotificationManager.ensureChannels()
         WidgetRefreshWorker.schedulePeriodic(this)
@@ -208,11 +295,23 @@ class HotelStaffApp : Application() {
             var wasAuthenticated = false
             container.sessionManager.authState.collect { state ->
                 when (state) {
-                    is AuthState.Authenticated -> wasAuthenticated = true
+                    is AuthState.Authenticated -> {
+                        val newlyAuthenticated = !wasAuthenticated
+                        wasAuthenticated = true
+                        container.offlineOpsCoordinator.refreshPendingCount()
+                        if (newlyAuthenticated &&
+                            container.offlineOpsCoordinator.pendingCount.value > 0 &&
+                            container.networkMonitor.isOnline.value
+                        ) {
+                            SyncPendingMutationsWorker.schedule(this@HotelStaffApp, replace = false)
+                        }
+                    }
                     AuthState.Unauthenticated -> {
                         if (wasAuthenticated) {
                             wasAuthenticated = false
-                            container.clearSessionData()
+                            container.clearSessionData(onlyIfUnauthenticated = true)
+                        } else {
+                            container.offlineOpsCoordinator.refreshPendingCount()
                         }
                     }
                     AuthState.Checking -> Unit
@@ -220,13 +319,14 @@ class HotelStaffApp : Application() {
             }
         }
         appScope.launch {
-            container.offlineOpsCoordinator.refreshPendingCount()
-        }
-        appScope.launch {
             var wasOnline = container.networkMonitor.isOnline.value
             container.networkMonitor.isOnline.collect { online ->
-                if (online && !wasOnline && container.offlineOpsCoordinator.pendingCount.value > 0) {
-                    SyncPendingMutationsWorker.schedule(this@HotelStaffApp)
+                if (online &&
+                    !wasOnline &&
+                    container.sessionManager.authState.value is AuthState.Authenticated &&
+                    container.offlineOpsCoordinator.pendingCount.value > 0
+                ) {
+                    SyncPendingMutationsWorker.schedule(this@HotelStaffApp, replace = false)
                 }
                 wasOnline = online
             }

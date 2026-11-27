@@ -380,6 +380,7 @@ async fn claim_account(
             retry_after,
         ));
     }
+    crate::modules::auth::turnstile::verify_request(&headers, ip, "claim_account").await?;
 
     let token = require_booking_token_for_write(
         &limiters,
@@ -477,6 +478,8 @@ async fn verify_booking(
             retry_after,
         ));
     }
+
+    crate::modules::auth::turnstile::verify_request(&headers, ip, "guest_portal_verify").await?;
 
     handlers::verify_guest_booking(State(pool), Json(input)).await
 }

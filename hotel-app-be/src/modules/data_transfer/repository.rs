@@ -650,6 +650,9 @@ impl DataTransferRepository {
             "triggers_off"
         };
         for table in tables {
+            if table.table.schema == "public" && table.table.name == "audit_logs" {
+                continue;
+            }
             let query = format!(
                 "SELECT public.transfer_import_ddl({}, {}, {}, NULL)",
                 crate::param!(1),

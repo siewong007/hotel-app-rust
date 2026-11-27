@@ -12,10 +12,12 @@ use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Row};
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex, OnceLock};
+use std::time::Instant;
 use totp_rs::{Algorithm, Builder as TotpBuilder, Secret};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String, // user_id
     pub username: String,
@@ -53,6 +55,16 @@ const STEP_UP_AUDIENCE: &str = "data-transfer-step-up";
 /// Step-up lifetime: long enough to cover the confirm dialog + file picker,
 /// short enough that "re-authenticated recently" stays meaningful.
 const STEP_UP_TTL_SECS: i64 = 120;
+const SESSION_CACHE_MAX_ENTRIES: usize = 10_000;
+static SESSION_CACHE_TTL: LazyLock<std::time::Duration> = LazyLock::new(|| {
+    let secs = std::env::var("SESSION_CACHE_TTL_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(5);
+    std::time::Duration::from_secs(secs)
+});
+static ACTIVE_SESSION_CACHE: LazyLock<Mutex<HashMap<(i64, String), Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static JWT_SECRET: OnceLock<String> = OnceLock::new();
 
 fn jwt_secret() -> &'static str {
@@ -487,7 +499,7 @@ impl AuthService {
         let expires_at = Utc::now() + Duration::days(expires_in_days);
         let query = r#"
                 UPDATE refresh_tokens
-                SET token_hash = $1, expires_at = $2, last_used_at = CURRENT_TIMESTAMP
+                SET previous_token_hash = token_hash, token_hash = $1, expires_at = $2, last_used_at = CURRENT_TIMESTAMP
                 WHERE id = $3::uuid AND token_hash = $4 AND revoked_at IS NULL AND is_revoked = false
             "#;
         Ok(sqlx::query(query)
@@ -499,6 +511,35 @@ impl AuthService {
             .await?
             .rows_affected()
             == 1)
+    }
+
+    /// Detects reuse of an already-rotated refresh token (`previous_token_hash`).
+    /// When matched on an active session, revokes the session immediately and
+    /// clears its validation cache so any stolen sibling tokens stop working.
+    pub async fn revoke_session_if_reused_refresh_token(
+        pool: &DbPool,
+        token: &str,
+    ) -> Result<Option<(i64, String)>, sqlx::Error> {
+        let token_hash = Self::hash_refresh_token(token);
+        let row = sqlx::query(
+            r#"
+            UPDATE refresh_tokens
+            SET is_revoked = true, revoked_at = CURRENT_TIMESTAMP
+            WHERE previous_token_hash = $1 AND revoked_at IS NULL AND is_revoked = false
+            RETURNING user_id, id::text AS session_id
+            "#,
+        )
+        .bind(token_hash)
+        .fetch_optional(pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let user_id: i64 = row.try_get("user_id")?;
+        let session_id: String = row.try_get("session_id")?;
+        Self::invalidate_session_cache_for_session(pool, &session_id).await;
+        Ok(Some((user_id, session_id)))
     }
 
     /// Revokes a refresh token. Returns `(user_id, session_id)` when this call
@@ -523,12 +564,18 @@ impl AuthService {
         .fetch_optional(pool)
         .await?;
 
-        Ok(row.map(|row| {
+        let revoked = row.map(|row| {
             (
                 sqlx::Row::try_get::<i64, _>(&row, "user_id").unwrap_or_default(),
                 sqlx::Row::try_get::<String, _>(&row, "session_id").unwrap_or_default(),
             )
-        }))
+        });
+        if let Some((_, ref session_id)) = revoked
+            && !session_id.is_empty()
+        {
+            Self::invalidate_session_cache_for_session(pool, session_id).await;
+        }
+        Ok(revoked)
     }
 
     /// Revokes all refresh tokens for a user
@@ -543,6 +590,54 @@ impl AuthService {
         .bind(user_id)
         .execute(pool)
         .await?;
+
+        Self::invalidate_session_cache_for_user(pool, user_id).await;
+
+        sqlx::query(
+            r#"
+            DELETE FROM guest_portal_sessions
+            WHERE guest_id = (SELECT guest_id FROM users WHERE id = $1)
+            "#,
+        )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Revokes all active refresh tokens for a user except the caller's current
+    /// refresh session (`current_session_id`), preserving the session currently
+    /// changing sensitive account settings (e.g. email update). Falls back to
+    /// revoking all sessions when `current_session_id` is absent or invalid.
+    pub async fn revoke_other_user_tokens(
+        pool: &DbPool,
+        user_id: i64,
+        current_session_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let Some(current_uuid) = current_session_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        else {
+            return Self::revoke_all_user_tokens(pool, user_id).await;
+        };
+
+        sqlx::query(
+            r#"
+            UPDATE refresh_tokens
+            SET is_revoked = true, revoked_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1
+              AND revoked_at IS NULL
+              AND id <> $2
+            "#,
+        )
+        .bind(user_id)
+        .bind(current_uuid)
+        .execute(pool)
+        .await?;
+
+        Self::invalidate_session_cache_for_user(pool, user_id).await;
 
         sqlx::query(
             r#"
@@ -582,13 +677,50 @@ impl AuthService {
                 SET is_revoked = true, revoked_at = CURRENT_TIMESTAMP, revoked_by = $1
                 WHERE id = $2::uuid AND user_id = $1 AND revoked_at IS NULL AND is_revoked = false
             "#;
-        Ok(sqlx::query(query)
+        let revoked = sqlx::query(query)
             .bind(user_id)
             .bind(session_id)
             .execute(pool)
             .await?
             .rows_affected()
-            == 1)
+            == 1;
+        if revoked {
+            Self::invalidate_session_cache_for_session(pool, session_id).await;
+        }
+        Ok(revoked)
+    }
+
+    pub fn clear_session_cache() {
+        ACTIVE_SESSION_CACHE.lock().unwrap().clear();
+    }
+
+    pub fn clear_session_cache_for_user(user_id: i64) {
+        ACTIVE_SESSION_CACHE
+            .lock()
+            .unwrap()
+            .retain(|(uid, _), _| *uid != user_id);
+    }
+
+    pub fn clear_session_cache_for_session(session_id: &str) {
+        ACTIVE_SESSION_CACHE
+            .lock()
+            .unwrap()
+            .retain(|(_, sid), _| sid != session_id);
+    }
+
+    pub async fn invalidate_all_session_caches(pool: &DbPool) {
+        Self::clear_session_cache();
+        crate::core::cache_bus::publish(pool, "sessions:*").await;
+    }
+
+    pub async fn invalidate_session_cache_for_user(pool: &DbPool, user_id: i64) {
+        Self::clear_session_cache_for_user(user_id);
+        crate::core::cache_bus::publish(pool, &format!("sessions:u:{user_id}")).await;
+    }
+
+    pub async fn invalidate_session_cache_for_session(pool: &DbPool, session_id: &str) {
+        Self::clear_session_cache_for_session(session_id);
+        crate::core::cache_bus::publish(pool, &format!("sessions:s:{session_id}")).await;
     }
 
     pub async fn is_session_active(
@@ -596,24 +728,58 @@ impl AuthService {
         user_id: i64,
         session_id: &str,
     ) -> Result<bool, sqlx::Error> {
+        let ttl = *SESSION_CACHE_TTL;
+        if !ttl.is_zero() {
+            let now = Instant::now();
+            let cache = ACTIVE_SESSION_CACHE.lock().unwrap();
+            if let Some(&valid_until) = cache.get(&(user_id, session_id.to_string()))
+                && now < valid_until
+            {
+                return Ok(true);
+            }
+        }
+
         let query = r#"
-                SELECT EXISTS(
-                    SELECT 1
-                    FROM refresh_tokens AS session
-                    INNER JOIN users AS account ON account.id = session.user_id
-                    WHERE session.id = $1::uuid AND session.user_id = $2
-                      AND session.expires_at > CURRENT_TIMESTAMP
-                      AND session.revoked_at IS NULL AND session.is_revoked = false
-                      AND account.is_active = true
-                      AND account.is_locked = false
-                      AND account.deleted_at IS NULL
-                )
+                SELECT session.expires_at
+                FROM refresh_tokens AS session
+                INNER JOIN users AS account ON account.id = session.user_id
+                WHERE session.id = $1::uuid AND session.user_id = $2
+                  AND session.expires_at > CURRENT_TIMESTAMP
+                  AND session.revoked_at IS NULL AND session.is_revoked = false
+                  AND account.is_active = true
+                  AND account.is_locked = false
+                  AND account.deleted_at IS NULL
+                LIMIT 1
             "#;
-        sqlx::query_scalar(query)
+        let expires_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(query)
             .bind(session_id)
             .bind(user_id)
-            .fetch_one(pool)
-            .await
+            .fetch_optional(pool)
+            .await?;
+
+        let Some(expires_at) = expires_at else {
+            return Ok(false);
+        };
+
+        if !ttl.is_zero() {
+            let remaining = (expires_at - Utc::now())
+                .to_std()
+                .unwrap_or(std::time::Duration::ZERO);
+            let effective_ttl = ttl.min(remaining);
+            if !effective_ttl.is_zero() {
+                let valid_until = Instant::now() + effective_ttl;
+                let mut cache = ACTIVE_SESSION_CACHE.lock().unwrap();
+                if cache.len() >= SESSION_CACHE_MAX_ENTRIES {
+                    let now = Instant::now();
+                    cache.retain(|_, until| now < *until);
+                    if cache.len() >= SESSION_CACHE_MAX_ENTRIES {
+                        cache.clear();
+                    }
+                }
+                cache.insert((user_id, session_id.to_string()), valid_until);
+            }
+        }
+        Ok(true)
     }
 
     pub async fn get_user_permissions(
@@ -637,14 +803,20 @@ impl AuthService {
         Ok(permissions)
     }
 
-    pub async fn get_user_roles(pool: &DbPool, user_id: i64) -> Result<Vec<String>, sqlx::Error> {
+    pub async fn get_user_roles<'e, E>(
+        executor: E,
+        user_id: i64,
+    ) -> Result<Vec<String>, sqlx::Error>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         let roles = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
             "{}{}",
             crate::core::rbac_cache::EFFECTIVE_ROLES_CTE,
             crate::core::rbac_cache::EFFECTIVE_ROLE_NAMES_SQL
         )))
         .bind(user_id)
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await?;
 
         Ok(roles)
@@ -705,6 +877,41 @@ impl AuthService {
         .await?;
 
         Ok(token)
+    }
+
+    /// Mint and store a new verification token only if any previous unexpired
+    /// token is at least `cooldown_secs` old (24h lifetime minus cooldown).
+    pub async fn create_email_verification_token_if_cooldown_elapsed(
+        pool: &DbPool,
+        user_id: i64,
+        cooldown_secs: i64,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let token = Self::generate_email_verification_token();
+        let expires_at = Utc::now() + Duration::hours(24);
+        let max_remaining_secs = (24 * 3600 - cooldown_secs).max(0) as f64;
+
+        let updated = sqlx::query_scalar::<_, i64>(
+            r#"
+            UPDATE users
+            SET email_verification_token = $1,
+                email_token_expires_at = $2,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $3
+              AND (
+                  email_token_expires_at IS NULL
+                  OR email_token_expires_at <= CURRENT_TIMESTAMP + make_interval(secs => $4)
+              )
+            RETURNING id
+            "#,
+        )
+        .bind(Self::hash_email_verification_token(&token))
+        .bind(expires_at)
+        .bind(user_id)
+        .bind(max_remaining_secs)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(updated.map(|_| token))
     }
 
     pub(crate) fn hash_email_verification_token(token: &str) -> String {
@@ -819,7 +1026,74 @@ impl AuthService {
             .collect()
     }
 
-    /// Verify a TOTP code against the secret
+    /// Verify a TOTP code against the secret and return the matched time step.
+    pub fn verify_totp_step(secret: &str, code: &str) -> Result<Option<u64>, String> {
+        let secret = Secret::try_from_base32(secret).map_err(|error| error.to_string())?;
+        let totp = TotpBuilder::new()
+            .with_algorithm(Algorithm::SHA1)
+            .with_digits(6)
+            .with_skew(1)
+            .with_step_duration(30)
+            .with_secret(secret)
+            .build()
+            .map_err(|error| error.to_string())?;
+
+        // `with_skew(1)` already checks the previous, current, and next
+        // 30-second windows (3 windows total = 90s tolerance).
+        Ok(totp.check_current(code))
+    }
+
+    /// Consume a matched TOTP step in `rate_limit_buckets` so the same 6-digit
+    /// code cannot be replayed across its 90-second skew window or concurrent
+    /// requests. Returns `true` when this call claimed the step.
+    pub async fn consume_totp_step(
+        pool: &DbPool,
+        user_id: i64,
+        step: u64,
+    ) -> Result<bool, sqlx::Error> {
+        let step_secs = if step < 1_000_000_000 {
+            step.saturating_mul(30)
+        } else {
+            step
+        };
+        let window_start =
+            chrono::DateTime::from_timestamp(step_secs.min(i64::MAX as u64) as i64, 0)
+                .unwrap_or_else(Utc::now);
+        let bucket = format!("totp_used:{user_id}:{step}");
+
+        let inserted: Option<i32> = sqlx::query_scalar(
+            r#"
+            INSERT INTO rate_limit_buckets (bucket, window_start, count)
+            VALUES ($1, $2, 1)
+            ON CONFLICT (bucket, window_start) DO NOTHING
+            RETURNING count
+            "#,
+        )
+        .bind(&bucket)
+        .bind(window_start)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(inserted.is_some())
+    }
+
+    /// Verify a TOTP code and atomically consume the matched step for `user_id`
+    /// so codes remain strictly single-use across login and step-up flows.
+    pub async fn verify_and_consume_totp_code(
+        pool: &DbPool,
+        user_id: i64,
+        secret: &str,
+        code: &str,
+    ) -> Result<bool, String> {
+        let Some(step) = Self::verify_totp_step(secret, code)? else {
+            return Ok(false);
+        };
+        Self::consume_totp_step(pool, user_id, step)
+            .await
+            .map_err(|error| format!("Failed to record TOTP usage: {error}"))
+    }
+
+    /// Verify a TOTP code against the secret (stateless check).
     pub fn verify_totp_code(secret: &str, code: &str) -> Result<bool, Box<dyn std::error::Error>> {
         let secret = Secret::try_from_base32(secret)?;
         let totp = TotpBuilder::new()

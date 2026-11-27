@@ -22,6 +22,8 @@ import { ConsentBlock, REGISTRATION_CONSENTS, useConsent, useLegalLocale } from 
 import { setPortalToken } from '../../../guest-portal/api/portalTokenStore';
 import { useTranslation } from '../../../../i18n';
 import { useAutoFocusError } from '../../../../hooks/useAutoFocusError';
+import { useTurnstile } from '../../../auth/turnstile/useTurnstile';
+import { turnstileErrorMessage } from '../../../auth/turnstile/turnstileError';
 
 export interface ClaimAccountStepProps {
   token: string;
@@ -41,8 +43,11 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
   onBack,
 }) => {
   const { t } = useTranslation('guestPortal');
+  const { t: tAuth } = useTranslation('auth');
   const { locale: legalLocale } = useLegalLocale();
   const consent = useConsent(REGISTRATION_CONSENTS);
+  const turnstile = useTurnstile('claim_account');
+  const awaitingTurnstile = turnstile.enabled && !turnstile.token && !turnstile.error;
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState(guest?.email ?? '');
@@ -78,11 +83,19 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
       setError(t('checkin.account.errors.consentRequired'));
       return;
     }
+    if (turnstile.enabled && !turnstile.token) {
+      setError(
+        turnstile.error
+          ? turnstileErrorMessage(new Error(turnstile.error), tAuth)
+          : tAuth('turnstile.incomplete'),
+      );
+      return;
+    }
 
     setSubmitting(true);
     try {
       const consentPayload = consent.buildPayload(legalLocale);
-      const response = await GuestPortalService.claimAccount(token, {
+      const claimPayload = {
         booking_number: booking?.booking_number ?? '',
         guest_name: guest?.nick_name ?? '',
         username: username.trim(),
@@ -90,7 +103,10 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
         email: email.trim() || undefined,
         consents: consentPayload.consents,
         marketing_opt_in: consentPayload.marketing_opt_in,
-      });
+      };
+      const response = turnstile.token
+        ? await GuestPortalService.claimAccount(token, claimPayload, turnstile.token)
+        : await GuestPortalService.claimAccount(token, claimPayload);
 
       setPortalToken(response.session.token, response.session.expires_at);
       onClaimed({
@@ -113,6 +129,7 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
           : guestErrorMessage(err, t('checkin.account.errors.claimFailed')),
       );
     } finally {
+      turnstile.reset();
       setSubmitting(false);
     }
   };
@@ -197,6 +214,13 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
 
       <ConsentBlock prompts={REGISTRATION_CONSENTS} state={consent} />
 
+      {turnstile.enabled && (
+        <Box
+          ref={turnstile.setContainer}
+          sx={{ display: 'flex', justifyContent: 'center', mt: 2, minHeight: 65 }}
+        />
+      )}
+
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 3 }}>
         {onBack && (
           <Button variant="text" onClick={onBack} disabled={submitting}>
@@ -207,7 +231,7 @@ export const ClaimAccountStep: React.FC<ClaimAccountStepProps> = ({
         <Button variant="outlined" onClick={onSkip} disabled={submitting} data-testid="claim-account-skip">
           {t('checkin.skipForNow')}
         </Button>
-        <Button type="submit" variant="contained" disabled={submitting}>
+        <Button type="submit" variant="contained" disabled={submitting || awaitingTurnstile}>
           {submitting ? t('checkin.account.creating') : t('checkin.account.submit')}
         </Button>
       </Stack>

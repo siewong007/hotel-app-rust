@@ -1414,9 +1414,7 @@ pub async fn create_room_event_handler(
         None
     };
 
-    let today = crate::core::db::hotel_today(&pool)
-        .await
-        .unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    let today = crate::core::db::hotel_today(&pool).await?;
     let is_immediate = scheduled_date.is_none_or(|d| d <= today);
     let current_status = rq::room_status(&pool, room_id)
         .await?

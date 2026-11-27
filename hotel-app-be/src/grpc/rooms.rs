@@ -794,6 +794,9 @@ impl RoomService for RoomGrpc {
         check_any_permission(&self.pool, auth.user_id, ROOM_OPERATIONS_READ)
             .await
             .map_err(to_status)?;
+        crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
+            .await
+            .map_err(to_status)?;
         let req = request.into_inner();
         let room_id = c::require_name(&req.name, "rooms")?;
         // Same read path as the service fn: a missing room_history relation
@@ -1015,6 +1018,9 @@ impl RoomService for RoomGrpc {
     ) -> Result<Response<pb::ListRoomChangeHistoryResponse>, Status> {
         let auth = authenticate(&self.pool, request.metadata()).await?;
         check_permission(&self.pool, auth.user_id, "bookings:read")
+            .await
+            .map_err(to_status)?;
+        crate::core::middleware::reject_guest_only(&self.pool, auth.user_id)
             .await
             .map_err(to_status)?;
         let req = request.into_inner();

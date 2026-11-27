@@ -728,3 +728,63 @@ async fn receptionist_reads_urgent_bank_transfer_claims() {
         assert_eq!(item["payment_method"], "bank_transfer");
     }
 }
+
+/// F-07 regression: previewing an uninvoiced booking stays read-only across
+/// repeated calls — returning `id = 0` and an empty `invoice_number` without
+/// inserting an `invoices` row.
+#[tokio::test]
+async fn invoice_preview_is_read_only_and_does_not_materialize_invoice_row() {
+    let Some(fixture) = HttpFixture::new().await else {
+        return;
+    };
+    fixture.seed_legacy_booking().await;
+    sqlx::query("DELETE FROM invoices WHERE booking_id = $1")
+        .bind(LEGACY_BOOKING_ID)
+        .execute(&fixture.pool)
+        .await
+        .expect("clearing any prior invoice fixture must succeed");
+
+    let count_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM invoices WHERE booking_id = $1")
+            .bind(LEGACY_BOOKING_ID)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert_eq!(count_before, 0);
+
+    let uri = format!("/api/invoices/preview/{LEGACY_BOOKING_ID}");
+    for _ in 0..2 {
+        let request = Request::builder()
+            .method("GET")
+            .uri(&uri)
+            .header(header::AUTHORIZATION, fixture.authorization.clone())
+            .body(Body::empty())
+            .expect("HTTP request must build");
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router response");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_text = String::from_utf8_lossy(&body).to_string();
+        assert_eq!(status, StatusCode::OK, "{body_text}");
+        let parsed: Value = serde_json::from_str(&body_text).expect("JSON body");
+        assert_eq!(parsed["invoice"]["id"], 0);
+        assert_eq!(parsed["invoice"]["invoice_number"], "");
+        assert_eq!(parsed["invoice"]["booking_id"], LEGACY_BOOKING_ID);
+    }
+
+    let count_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM invoices WHERE booking_id = $1")
+            .bind(LEGACY_BOOKING_ID)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    fixture.cleanup().await;
+    assert_eq!(
+        count_after, 0,
+        "GET /api/invoices/preview must not insert a row into invoices"
+    );
+}

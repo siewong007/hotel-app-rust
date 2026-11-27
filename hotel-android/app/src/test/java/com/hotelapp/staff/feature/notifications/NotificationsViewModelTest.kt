@@ -113,4 +113,52 @@ class NotificationsViewModelTest {
         advanceUntilIdle()
         assertEquals(1, repo.markAllReadCalls)
     }
+
+    @Test
+    fun `markRead failure rolls back optimistic unread counts on refresh`() = runTest {
+        val repo = FakeNotificationsRepository()
+        val initial = StaffNotificationsResponseDto(
+            unread = 1,
+            urgentUnread = 1,
+            actionPendingCount = 1,
+            items = listOf(sampleItem(id = 7L)),
+        )
+        repo.listResult = Result.success(initial)
+        repo.markReadResult = Result.failure(IllegalStateException("Network failed"))
+
+        val vm = NotificationsViewModel(repo, TestFixtures.idleSocketClient())
+        advanceUntilIdle()
+
+        vm.markRead(7L)
+        advanceUntilIdle()
+
+        assertEquals(1L, vm.uiState.value.unreadCount)
+        assertEquals(1L, vm.uiState.value.urgentUnreadCount)
+        assertTrue(vm.uiState.value.items.single().readAt == null)
+        assertEquals("Network failed", vm.uiState.value.error)
+    }
+
+    @Test
+    fun `markAllRead failure rolls back items and counts and surfaces error`() = runTest {
+        val repo = FakeNotificationsRepository()
+        val initial = StaffNotificationsResponseDto(
+            unread = 2,
+            urgentUnread = 1,
+            actionPendingCount = 2,
+            items = listOf(sampleItem(id = 8L), sampleItem(id = 9L, priority = "normal")),
+        )
+        repo.listResult = Result.success(initial)
+        repo.markAllReadResult = Result.failure(IllegalStateException("Server error"))
+
+        val vm = NotificationsViewModel(repo, TestFixtures.idleSocketClient())
+        advanceUntilIdle()
+
+        vm.markAllRead()
+        advanceUntilIdle()
+
+        assertEquals(2L, vm.uiState.value.unreadCount)
+        assertEquals(1L, vm.uiState.value.urgentUnreadCount)
+        assertTrue(vm.uiState.value.items.all { it.readAt == null })
+        assertEquals("Server error", vm.uiState.value.error)
+    }
 }

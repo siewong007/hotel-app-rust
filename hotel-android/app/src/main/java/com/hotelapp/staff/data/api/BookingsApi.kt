@@ -9,6 +9,7 @@ import com.hotelapp.staff.data.dto.BookingWithDetailsDto
 import com.hotelapp.staff.data.dto.CheckInAdvisoryDto
 import com.hotelapp.staff.data.dto.CheckInRequestDto
 import com.hotelapp.staff.data.dto.CreateBookingRequestDto
+import com.hotelapp.staff.data.dto.GroupPayRequestDto
 import com.hotelapp.staff.data.dto.NewReservationsResponseDto
 import com.hotelapp.staff.data.dto.PaginatedResponseDto
 import com.hotelapp.staff.data.dto.ReleaseBookingRequestDto
@@ -67,5 +68,20 @@ interface BookingsApi {
     suspend fun releaseBooking(
         @Path("id") id: Long,
         @Body body: ReleaseBookingRequestDto,
+    ): JsonElement
+
+    @GET("/api/bookings/{id}/group")
+    suspend fun bookingGroup(@Path("id") id: Long): JsonElement
+
+    @POST("/api/bookings/{id}/reactivate")
+    suspend fun reactivate(@Path("id") id: Long): BookingDto
+
+    @POST("/api/bookings/{id}/group/reactivate")
+    suspend fun groupReactivate(@Path("id") id: Long): JsonElement
+
+    @POST("/api/bookings/{id}/group/pay")
+    suspend fun groupPay(
+        @Path("id") id: Long,
+        @Body body: GroupPayRequestDto,
     ): JsonElement
 }

@@ -176,28 +176,60 @@ async fn transfer_history(
 
 async fn stage_backup_upload(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, ApiError> {
-    require_permission_helper(&pool, &headers, "data_transfer:import").await?;
-    handlers::stage_backup_upload_handler(body).await
+    let ip = crate::routes::extract_client_ip(&headers, peer_addr);
+    let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!("Too many requests. Please try again in {retry_after} seconds."),
+            retry_after,
+        ));
+    }
+    let user_id = require_permission_helper(&pool, &headers, "data_transfer:import").await?;
+    handlers::stage_backup_upload_handler(user_id, body).await
 }
 
 async fn preview_import(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
     headers: HeaderMap,
     Json(request): Json<models::ImportPreviewRequest>,
 ) -> Result<Json<models::ImportPreview>, ApiError> {
     let user_id = require_permission_helper(&pool, &headers, "data_transfer:import").await?;
+    let (allowed, retry_after) = limiters
+        .admin_write
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!("Too many requests. Please try again in {retry_after} seconds."),
+            retry_after,
+        ));
+    }
     handlers::preview_import_handler(State(pool), user_id, Json(request)).await
 }
 
 async fn execute_import(
     State(pool): State<DbPool>,
+    Extension(limiters): Extension<RateLimiters>,
     headers: HeaderMap,
     Json(request): Json<models::ImportExecuteRequest>,
 ) -> Result<Response, ApiError> {
     let user_id = require_permission_helper(&pool, &headers, "data_transfer:import").await?;
+    let (allowed, retry_after) = limiters
+        .admin_write
+        .check_with_retry(user_id.to_string())
+        .await;
+    if !allowed {
+        return Err(ApiError::TooManyRequestsRetryAfter(
+            format!("Too many requests. Please try again in {retry_after} seconds."),
+            retry_after,
+        ));
+    }
     handlers::execute_import_handler(State(pool), user_id, headers, Json(request)).await
 }
 
@@ -206,8 +238,8 @@ async fn import_job_status(
     headers: HeaderMap,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<models::ImportJobStatus>, ApiError> {
-    require_permission_helper(&pool, &headers, "data_transfer:import").await?;
-    handlers::import_job_status_handler(Path(job_id)).await
+    let user_id = require_permission_helper(&pool, &headers, "data_transfer:import").await?;
+    handlers::import_job_status_handler(State(pool), user_id, Path(job_id)).await
 }
 
 async fn discard_staged_upload(
@@ -215,6 +247,6 @@ async fn discard_staged_upload(
     headers: HeaderMap,
     Path(upload_id): Path<Uuid>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    require_permission_helper(&pool, &headers, "data_transfer:import").await?;
-    handlers::delete_staged_upload_handler(Path(upload_id)).await
+    let user_id = require_permission_helper(&pool, &headers, "data_transfer:import").await?;
+    handlers::delete_staged_upload_handler(State(pool), user_id, Path(upload_id)).await
 }

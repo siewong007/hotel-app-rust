@@ -1,5 +1,7 @@
 package com.hotelapp.staff.core.design
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -20,6 +22,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+tailrec fun Context.findActivity(): ComponentActivity? = when (this) {
+    is ComponentActivity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 enum class ThemePreference {
     SYSTEM,
@@ -189,7 +197,7 @@ fun HotelTheme(
     val view = LocalView.current
     if (!view.isInEditMode) {
         DisposableEffect(view, useDark) {
-            val activity = view.context as? ComponentActivity
+            val activity = view.context.findActivity()
             if (activity != null) {
                 val barStyle = if (useDark) {
                     SystemBarStyle.dark(AndroidColor.TRANSPARENT)

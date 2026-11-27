@@ -3,6 +3,7 @@ package com.hotelapp.staff.feature.ekyc
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hotelapp.staff.core.auth.StaffSession
+import com.hotelapp.staff.core.network.ApiException
 import com.hotelapp.staff.core.network.RealtimeSocketClient
 import com.hotelapp.staff.data.dto.EkycApplicationDetailDto
 import com.hotelapp.staff.data.dto.EkycApplicationSummaryDto
@@ -31,25 +32,38 @@ data class EkycUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
+    val hasMore: Boolean = true,
+    val hasLoadedOnce: Boolean = false,
     val isLoadingDetail: Boolean = false,
     val isMutating: Boolean = false,
+    val isLoadingReasonCodes: Boolean = false,
+    val reasonCodesError: String? = null,
     val metrics: EkycDashboardMetricsDto = EkycDashboardMetricsDto(),
     val items: List<EkycApplicationSummaryDto> = emptyList(),
     val page: Long = 1,
     val total: Long = 0,
     val selectedDetail: EkycApplicationDetailDto? = null,
     val reasonCodes: List<EkycReasonCodeDto> = emptyList(),
+    val activeDocumentKind: String? = null,
+    val activeDocumentBytes: ByteArray? = null,
+    val isLoadingDocument: Boolean = false,
+    val documentError: String? = null,
+    val revealedFields: Map<String, String?> = emptyMap(),
+    val isRevealing: Boolean = false,
+    val revealError: String? = null,
     val error: String? = null,
     val sheetError: String? = null,
 )
 
 class EkycViewModel(
-    session: StaffSession,
+    private val session: StaffSession,
     private val repository: EkycRepository,
     realtimeSocketClient: RealtimeSocketClient? = null,
+    private val sessionProvider: () -> StaffSession = { session },
 ) : ViewModel() {
 
-    private val canReview = session.hasPermission("ekyc:review")
+    private fun canReviewNow(): Boolean =
+        sessionProvider().hasAnyPermission("ekyc:review", "ekyc:manage")
 
     private val _uiState = MutableStateFlow(EkycUiState())
     val uiState: StateFlow<EkycUiState> = _uiState.asStateFlow()
@@ -58,17 +72,32 @@ class EkycViewModel(
     val effects = _effects.receiveAsFlow()
 
     private var debounceJob: Job? = null
+    private var wsDebounceJob: Job? = null
+    private var listJob: Job? = null
+    private var loadMoreJob: Job? = null
+    private var detailJob: Job? = null
+    private var reasonCodesJob: Job? = null
+    private var docJob: Job? = null
+    private var revealJob: Job? = null
 
     init {
         refresh()
-        if (canReview) {
+        if (canReviewNow()) {
             loadReasonCodes()
         }
         if (realtimeSocketClient != null) {
             viewModelScope.launch {
                 realtimeSocketClient.domainEvents.collect { domain ->
                     if (domain == "ekyc") {
-                        refresh(silent = true)
+                        wsDebounceJob?.cancel()
+                        wsDebounceJob = viewModelScope.launch {
+                            delay(250)
+                            refresh(silent = true)
+                            val openId = _uiState.value.selectedDetail?.summary?.id
+                            if (openId != null && !_uiState.value.isMutating) {
+                                refreshDetailSilently(openId)
+                            }
+                        }
                     }
                 }
             }
@@ -77,6 +106,8 @@ class EkycViewModel(
 
     fun setStatusFilter(status: String) {
         if (_uiState.value.statusFilter == status) return
+        debounceJob?.cancel()
+        loadMoreJob?.cancel()
         _uiState.update { it.copy(statusFilter = status) }
         refresh()
     }
@@ -91,18 +122,38 @@ class EkycViewModel(
     }
 
     fun refresh(silent: Boolean = false) {
+        if (!silent) {
+            debounceJob?.cancel()
+        }
+        loadMoreJob?.cancel()
+        if (canReviewNow() && _uiState.value.reasonCodes.isEmpty() && !_uiState.value.isLoadingReasonCodes) {
+            loadReasonCodes()
+        }
         load(page = 1, replace = true, silent = silent)
     }
 
     fun loadMore() {
         val s = _uiState.value
-        if (s.isLoadingMore || s.items.size >= s.total) return
+        if (!s.hasMore || s.isLoadingMore || s.items.size >= s.total) return
         load(page = s.page + 1, replace = false, silent = false)
     }
 
+    fun retryLoadReasonCodes() {
+        if (!canReviewNow()) return
+        loadReasonCodes()
+    }
+
     private fun load(page: Long, replace: Boolean, silent: Boolean) {
-        viewModelScope.launch {
+        if (replace) {
+            listJob?.cancel()
+            loadMoreJob?.cancel()
+        } else {
+            loadMoreJob?.cancel()
+        }
+        val launched = viewModelScope.launch {
             val s = _uiState.value
+            val statusAtDispatch = s.statusFilter
+            val searchAtDispatch = s.searchQuery
             _uiState.update {
                 if (silent) it else it.copy(
                     isLoading = replace && it.items.isEmpty(),
@@ -112,17 +163,30 @@ class EkycViewModel(
                 )
             }
             repository.applications(
-                status = s.statusFilter,
-                search = s.searchQuery,
+                status = statusAtDispatch,
+                search = searchAtDispatch,
                 page = page,
             ).onSuccess { res ->
                 _uiState.update { cur ->
+                    if (cur.statusFilter != statusAtDispatch || cur.searchQuery != searchAtDispatch) {
+                        return@update cur.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            isLoadingMore = false,
+                        )
+                    }
+                    val merged = if (replace) res.data else (cur.items + res.data).distinctBy { it.id }
+                    val moreAvailable = res.data.isNotEmpty() &&
+                        merged.size < res.total &&
+                        (replace || merged.size > cur.items.size)
                     cur.copy(
                         isLoading = false,
                         isRefreshing = false,
                         isLoadingMore = false,
+                        hasMore = moreAvailable,
+                        hasLoadedOnce = true,
                         metrics = res.metrics,
-                        items = if (replace) res.data else (cur.items + res.data).distinctBy { it.id },
+                        items = merged,
                         page = res.page,
                         total = res.total,
                         error = null,
@@ -130,20 +194,48 @@ class EkycViewModel(
                 }
             }.onFailure { err ->
                 _uiState.update { cur ->
+                    if (cur.statusFilter != statusAtDispatch || cur.searchQuery != searchAtDispatch) {
+                        return@update cur.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            isLoadingMore = false,
+                        )
+                    }
                     cur.copy(
                         isLoading = false,
                         isRefreshing = false,
                         isLoadingMore = false,
-                        error = if (silent && cur.items.isNotEmpty()) cur.error else err.message,
+                        error = if (silent && cur.hasLoadedOnce) cur.error else err.message,
                     )
                 }
             }
         }
+        if (replace) {
+            listJob = launched
+        } else {
+            loadMoreJob = launched
+        }
     }
 
     fun openDetail(id: Long) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingDetail = true, selectedDetail = null, sheetError = null) }
+        detailJob?.cancel()
+        docJob?.cancel()
+        revealJob?.cancel()
+        detailJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoadingDetail = true,
+                    selectedDetail = null,
+                    sheetError = null,
+                    activeDocumentKind = null,
+                    activeDocumentBytes = null,
+                    isLoadingDocument = false,
+                    documentError = null,
+                    revealedFields = emptyMap(),
+                    isRevealing = false,
+                    revealError = null,
+                )
+            }
             repository.applicationDetail(id)
                 .onSuccess { detail ->
                     _uiState.update { it.copy(isLoadingDetail = false, selectedDetail = detail) }
@@ -154,8 +246,124 @@ class EkycViewModel(
         }
     }
 
+    fun refreshSelectedDetail() {
+        val openId = _uiState.value.selectedDetail?.summary?.id ?: return
+        if (_uiState.value.isMutating) return
+        detailJob?.cancel()
+        detailJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingDetail = true, sheetError = null) }
+            repository.applicationDetail(openId)
+                .onSuccess { detail ->
+                    _uiState.update { it.copy(isLoadingDetail = false, selectedDetail = detail, sheetError = null) }
+                }
+                .onFailure { err ->
+                    _uiState.update { it.copy(isLoadingDetail = false, sheetError = err.message ?: "Refresh failed.") }
+                }
+        }
+    }
+
+    private suspend fun refreshDetailSilently(id: Long) {
+        repository.applicationDetail(id).onSuccess { fresh ->
+            _uiState.update { cur ->
+                if (cur.selectedDetail?.summary?.id == id) cur.copy(selectedDetail = fresh) else cur
+            }
+        }
+    }
+
     fun dismissDetail() {
-        _uiState.update { it.copy(selectedDetail = null, isLoadingDetail = false, sheetError = null) }
+        detailJob?.cancel()
+        docJob?.cancel()
+        revealJob?.cancel()
+        _uiState.update {
+            it.copy(
+                selectedDetail = null,
+                isLoadingDetail = false,
+                sheetError = null,
+                activeDocumentKind = null,
+                activeDocumentBytes = null,
+                isLoadingDocument = false,
+                documentError = null,
+                revealedFields = emptyMap(),
+                isRevealing = false,
+                revealError = null,
+            )
+        }
+    }
+
+    fun openDocument(kind: String) {
+        val id = _uiState.value.selectedDetail?.summary?.id ?: return
+        docJob?.cancel()
+        _uiState.update {
+            it.copy(
+                activeDocumentKind = kind,
+                activeDocumentBytes = null,
+                isLoadingDocument = true,
+                documentError = null,
+            )
+        }
+        docJob = viewModelScope.launch {
+            repository.fetchDocumentBytes(id, kind)
+                .onSuccess { bytes ->
+                    _uiState.update { cur ->
+                        if (cur.selectedDetail?.summary?.id == id && cur.activeDocumentKind == kind) {
+                            cur.copy(isLoadingDocument = false, activeDocumentBytes = bytes, documentError = null)
+                        } else cur
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update { cur ->
+                        if (cur.selectedDetail?.summary?.id == id && cur.activeDocumentKind == kind) {
+                            cur.copy(isLoadingDocument = false, documentError = err.message ?: "Unable to load document.")
+                        } else cur
+                    }
+                }
+        }
+    }
+
+    fun dismissDocument() {
+        docJob?.cancel()
+        _uiState.update {
+            it.copy(
+                activeDocumentKind = null,
+                activeDocumentBytes = null,
+                isLoadingDocument = false,
+                documentError = null,
+            )
+        }
+    }
+
+    fun clearRevealError() {
+        _uiState.update { it.copy(revealError = null) }
+    }
+
+    fun revealSensitiveField(field: String, reason: String, onSuccess: () -> Unit = {}) {
+        val id = _uiState.value.selectedDetail?.summary?.id ?: return
+        if (_uiState.value.isRevealing) return
+        val trimmedReason = reason.trim()
+        if (trimmedReason.length < 5) {
+            _uiState.update { it.copy(revealError = "Enter at least 5 characters explaining why PII reveal is needed.") }
+            return
+        }
+        revealJob?.cancel()
+        _uiState.update { it.copy(isRevealing = true, revealError = null) }
+        revealJob = viewModelScope.launch {
+            repository.revealSensitive(id, field, trimmedReason)
+                .onSuccess { resp ->
+                    _uiState.update { cur ->
+                        if (cur.selectedDetail?.summary?.id == id) {
+                            cur.copy(
+                                isRevealing = false,
+                                revealError = null,
+                                revealedFields = cur.revealedFields + (resp.field to resp.value),
+                            )
+                        } else cur.copy(isRevealing = false)
+                    }
+                    onSuccess()
+                }
+                .onFailure { err ->
+                    _uiState.update { it.copy(isRevealing = false, revealError = err.message ?: "Reveal failed.") }
+                }
+        }
     }
 
     fun applyAction(
@@ -166,9 +374,12 @@ class EkycViewModel(
         reason: String? = null,
         customerMessage: String? = null,
         selfCheckinEnabled: Boolean? = null,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+        onSuccess: () -> Unit = {},
     ) {
+        if (_uiState.value.isMutating) return
+        _uiState.update { it.copy(isMutating = true, sheetError = null) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isMutating = true, sheetError = null) }
             repository.applyAction(
                 id = id,
                 request = EkycReviewActionRequestDto(
@@ -178,23 +389,58 @@ class EkycViewModel(
                     reason = reason?.trim()?.takeIf { it.isNotEmpty() },
                     customerMessage = customerMessage?.trim()?.takeIf { it.isNotEmpty() },
                     selfCheckinEnabled = selfCheckinEnabled,
-                    idempotencyKey = UUID.randomUUID().toString(),
+                    idempotencyKey = idempotencyKey,
                 ),
             ).onSuccess { updated ->
-                _uiState.update { it.copy(isMutating = false, selectedDetail = updated) }
+                _uiState.update { it.copy(isMutating = false, selectedDetail = updated, sheetError = null) }
                 _effects.trySend(EkycEffect.ShowMessage("Application updated (${updated.summary.status})."))
+                onSuccess()
                 refresh(silent = true)
             }.onFailure { err ->
-                _uiState.update { it.copy(isMutating = false, sheetError = err.message) }
+                val isConflict = (err as? ApiException)?.statusCode == 409
+                if (isConflict) {
+                    val fresh = repository.applicationDetail(id).getOrNull()
+                    _uiState.update { cur ->
+                        cur.copy(
+                            isMutating = false,
+                            selectedDetail = fresh ?: cur.selectedDetail,
+                            sheetError = if (fresh != null) {
+                                "Record was modified by another reviewer (v${fresh.summary.version}) and refreshed. Please review and try again."
+                            } else {
+                                err.message
+                            },
+                        )
+                    }
+                    refresh(silent = true)
+                } else {
+                    _uiState.update { it.copy(isMutating = false, sheetError = err.message) }
+                }
             }
         }
     }
 
     private fun loadReasonCodes() {
-        viewModelScope.launch {
-            repository.reasonCodes().onSuccess { list ->
-                _uiState.update { it.copy(reasonCodes = list.filter { c -> c.isActive }) }
-            }
+        reasonCodesJob?.cancel()
+        _uiState.update { it.copy(isLoadingReasonCodes = true, reasonCodesError = null) }
+        reasonCodesJob = viewModelScope.launch {
+            repository.reasonCodes()
+                .onSuccess { list ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingReasonCodes = false,
+                            reasonCodesError = null,
+                            reasonCodes = list.filter { c -> c.isActive },
+                        )
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingReasonCodes = false,
+                            reasonCodesError = err.message ?: "Unable to load reason codes.",
+                        )
+                    }
+                }
         }
     }
 }

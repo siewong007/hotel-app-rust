@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -25,8 +27,10 @@ class StaffNotificationManager(
     private val sessionProvider: () -> StaffSession? = { null },
 ) {
     private val appContext = context.applicationContext
-    private val lastPostedByChannel = mutableMapOf<String, Long>()
+    private val lastPostedByKey = mutableMapOf<String, Long>()
     private var lastSpecificDomainPostedAt: Long = 0L
+    private val mainHandler: Handler? = Looper.getMainLooper()?.let { Handler(it) }
+    private var pendingGenericRunnable: Runnable? = null
     private val idCounter = AtomicLong(2000L)
 
     fun ensureChannels() {
@@ -131,27 +135,76 @@ class StaffNotificationManager(
                     "hotelstaff://dashboard",
                 )
             }
-            "notifications" -> Quad(
-                CHANNEL_URGENT,
-                "New staff notification",
-                "Tap to open your hotel workspace.",
-                "hotelstaff://dashboard",
-            )
+            "notifications" -> {
+                if (!session.hasAnyPermission(
+                        "bookings:read",
+                        "payments:read",
+                        "housekeeping:read",
+                        "maintenance:read",
+                        "ekyc:read",
+                        "support:read",
+                    )
+                ) return
+                Quad(
+                    CHANNEL_URGENT,
+                    "New staff notification",
+                    "Tap to open your hotel workspace.",
+                    "hotelstaff://dashboard",
+                )
+            }
             else -> return
         }
 
-        // Throttle per channel (15s) to prevent flooding during burst syncs, and
-        // skip the generic "notifications" toast when a specific domain already fired.
+        // Throttle per domain key (15s) so generic alerts on CHANNEL_URGENT cannot
+        // starve specific maintenance/eKYC/support alerts, and debounce generic
+        // "notifications" slightly because servers often emit it just before the domain event.
+        val domainKey = domain.lowercase()
         val now = System.currentTimeMillis()
-        val isGeneric = domain.equals("notifications", ignoreCase = true)
-        synchronized(lastPostedByChannel) {
-            if (isGeneric && now - lastSpecificDomainPostedAt < 3_000L) return
-            val prev = lastPostedByChannel[channel] ?: 0L
-            if (now - prev < 15_000L) return
-            lastPostedByChannel[channel] = now
-            if (!isGeneric) {
-                lastSpecificDomainPostedAt = now
+        val isGeneric = domainKey == "notifications"
+        if (isGeneric) {
+            synchronized(lastPostedByKey) {
+                if (now - lastSpecificDomainPostedAt < 3_000L) return
+                val prev = lastPostedByKey[domainKey] ?: 0L
+                if (now - prev < 15_000L) return
+                pendingGenericRunnable?.let { runnable -> mainHandler?.removeCallbacks(runnable) }
+                val runnable = Runnable {
+                    val sessionActive = sessionProvider() != null && serverConfigStore.config.value.osNotificationsEnabled
+                    if (!sessionActive) {
+                        synchronized(lastPostedByKey) { pendingGenericRunnable = null }
+                        return@Runnable
+                    }
+                    val fireAt = System.currentTimeMillis()
+                    synchronized(lastPostedByKey) {
+                        if (fireAt - lastSpecificDomainPostedAt < 3_000L) return@Runnable
+                        lastPostedByKey[domainKey] = fireAt
+                        pendingGenericRunnable = null
+                    }
+                    postNotification(
+                        channelId = channel,
+                        title = title,
+                        body = body,
+                        deepLinkUri = deepLink,
+                    )
+                }
+                if (mainHandler != null) {
+                    pendingGenericRunnable = runnable
+                    mainHandler.postDelayed(runnable, 600L)
+                } else {
+                    runnable.run()
+                }
             }
+            return
+        }
+
+        synchronized(lastPostedByKey) {
+            pendingGenericRunnable?.let { runnable ->
+                mainHandler?.removeCallbacks(runnable)
+                pendingGenericRunnable = null
+            }
+            lastSpecificDomainPostedAt = now
+            val prev = lastPostedByKey[domainKey] ?: 0L
+            if (now - prev < 15_000L) return
+            lastPostedByKey[domainKey] = now
         }
 
         postNotification(
@@ -183,10 +236,11 @@ class StaffNotificationManager(
         )
 
         val notification = NotificationCompat.Builder(appContext, channelId)
-            .setSmallIcon(R.drawable.ic_hotel_logo)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
             .setContentText(body)
             .setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(pendingIntent)
             .setPriority(
                 if (channelId == CHANNEL_URGENT || channelId == CHANNEL_PAYMENTS) {
@@ -200,6 +254,20 @@ class StaffNotificationManager(
         runCatching {
             NotificationManagerCompat.from(appContext)
                 .notify(idCounter.incrementAndGet().toInt(), notification)
+        }
+    }
+
+    fun clearPostedAndPending() {
+        synchronized(lastPostedByKey) {
+            pendingGenericRunnable?.let { runnable ->
+                mainHandler?.removeCallbacks(runnable)
+            }
+            pendingGenericRunnable = null
+            lastSpecificDomainPostedAt = 0L
+            lastPostedByKey.clear()
+        }
+        runCatching {
+            NotificationManagerCompat.from(appContext).cancelAll()
         }
     }
 

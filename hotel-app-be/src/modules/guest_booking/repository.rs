@@ -683,6 +683,7 @@ impl GuestBookingRepository {
                        b.discount_amount::text AS discount_amount,
                        b.tax_amount::text AS tax_amount, b.total_amount::text AS total_amount,
                        COALESCE(b.tourism_tax_amount, 0)::text AS tourism_tax_amount,
+                       COALESCE(b.extra_bed_charge, 0)::text AS extra_bed_charge,
                        b.created_at, b.smoking_preference
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
@@ -974,6 +975,7 @@ impl GuestBookingRepository {
                        b.discount_amount::text AS discount_amount,
                        b.tax_amount::text AS tax_amount, b.total_amount::text AS total_amount,
                        COALESCE(b.tourism_tax_amount, 0)::text AS tourism_tax_amount,
+                       COALESCE(b.extra_bed_charge, 0)::text AS extra_bed_charge,
                        b.created_at, b.smoking_preference
                 FROM bookings b JOIN rooms r ON r.id = b.room_id
                 JOIN room_types rt ON rt.id = r.room_type_id WHERE b.id = $1
@@ -1020,12 +1022,17 @@ impl GuestBookingRepository {
                        b.discount_amount::text AS discount_amount,
                        b.tax_amount::text AS tax_amount, b.total_amount::text AS total_amount,
                        COALESCE(b.tourism_tax_amount, 0)::text AS tourism_tax_amount,
+                       COALESCE(b.extra_bed_charge, 0)::text AS extra_bed_charge,
                        b.created_at, b.pre_checkin_token_expires_at, b.smoking_preference
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
                 JOIN room_types rt ON rt.id = r.room_type_id
                 JOIN guests g ON g.id = b.guest_id
                 WHERE b.portal_request_id = $1
+                  AND b.created_by IS NULL
+                  AND b.status IN ('pending', 'pending_payment')
+                  AND COALESCE(b.payment_status::text, 'unpaid') IN ('unpaid', 'unpaid_deposit')
+                  AND (b.pre_checkin_token_expires_at IS NULL OR b.pre_checkin_token_expires_at > CURRENT_TIMESTAMP)
                   AND LOWER(TRIM(g.email)) = LOWER(TRIM($2))
                   AND g.deleted_at IS NULL
             "#,

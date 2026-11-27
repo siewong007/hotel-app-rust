@@ -30,16 +30,16 @@ class SearchViewModel(
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
-    private var debounceJob: Job? = null
+    private var searchJob: Job? = null
 
     fun setQuery(value: String) {
         _uiState.update { it.copy(query = value, error = null) }
-        debounceJob?.cancel()
+        searchJob?.cancel()
         if (value.trim().length < 2) {
             _uiState.update { it.copy(isLoading = false, groups = emptyList(), hasSearched = false) }
             return
         }
-        debounceJob = viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             delay(280)
             executeSearch(saveHistory = false)
         }
@@ -48,22 +48,22 @@ class SearchViewModel(
     fun setType(type: String) {
         if (_uiState.value.selectedType == type) return
         _uiState.update { it.copy(selectedType = type) }
+        searchJob?.cancel()
         if (_uiState.value.query.trim().length >= 2) {
-            debounceJob?.cancel()
-            viewModelScope.launch { executeSearch(saveHistory = false) }
+            searchJob = viewModelScope.launch { executeSearch(saveHistory = false) }
         }
     }
 
     fun submitSearch() {
-        debounceJob?.cancel()
+        searchJob?.cancel()
         if (_uiState.value.query.trim().length < 2) return
-        viewModelScope.launch { executeSearch(saveHistory = true) }
+        searchJob = viewModelScope.launch { executeSearch(saveHistory = true) }
     }
 
     fun applyRecentQuery(query: String) {
         _uiState.update { it.copy(query = query, error = null) }
-        debounceJob?.cancel()
-        viewModelScope.launch { executeSearch(saveHistory = false) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch { executeSearch(saveHistory = false) }
     }
 
     fun saveCurrentSearchToHistory() {
@@ -83,13 +83,18 @@ class SearchViewModel(
     private suspend fun executeSearch(saveHistory: Boolean) {
         val snapshot = _uiState.value
         val trimmed = snapshot.query.trim()
+        val requestedType = snapshot.selectedType
         if (trimmed.length < 2) return
         _uiState.update { it.copy(isLoading = true, error = null) }
         searchRepository.search(
             query = trimmed,
-            types = snapshot.selectedType.takeIf { it != "all" },
+            types = requestedType.takeIf { it != "all" },
             limit = 20,
         ).onSuccess { resp ->
+            val current = _uiState.value
+            if (current.query.trim() != trimmed || current.selectedType != requestedType) {
+                return@onSuccess
+            }
             if (saveHistory) {
                 runCatching { serverConfigStore?.addRecentSearch(trimmed) }
             }
@@ -102,6 +107,10 @@ class SearchViewModel(
                 )
             }
         }.onFailure { err ->
+            val current = _uiState.value
+            if (current.query.trim() != trimmed || current.selectedType != requestedType) {
+                return@onFailure
+            }
             _uiState.update {
                 it.copy(
                     isLoading = false,

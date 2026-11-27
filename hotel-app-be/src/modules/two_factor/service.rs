@@ -93,15 +93,14 @@ pub async fn enable_2fa(
     let two_factor_secret =
         AuthService::decrypt_stored_totp_secret(&stored).map_err(ApiError::Internal)?;
 
-    let valid = AuthService::verify_totp_code(&two_factor_secret, &req.code)
-        .map_err(|error| ApiError::BadRequest(format!("Invalid TOTP code: {}", error)))?;
-
-    if !valid {
-        return Err(ApiError::BadRequest("Invalid 2FA code".to_string()));
-    }
+    let step = AuthService::verify_totp_step(&two_factor_secret, &req.code)
+        .map_err(|error| ApiError::BadRequest(format!("Invalid TOTP code: {}", error)))?
+        .ok_or_else(|| ApiError::BadRequest("Invalid 2FA code".to_string()))?;
 
     // Consume the setup challenge only after the TOTP code checked out, so a
-    // typo in the code leaves the (single-use) challenge intact for a retry.
+    // typo in the code leaves the (single-use) challenge intact for a retry,
+    // while consuming the single-use TOTP step only after the challenge matches
+    // so a stale/expired challenge never burns a valid code.
     let challenge_ok =
         AuthService::consume_2fa_challenge(pool, user_id, "setup", &req.challenge_code)
             .await
@@ -124,6 +123,13 @@ pub async fn enable_2fa(
         return Err(ApiError::BadRequest(
             "2FA setup challenge is invalid or has expired. Restart 2FA setup.".to_string(),
         ));
+    }
+
+    let consumed = AuthService::consume_totp_step(pool, user_id, step)
+        .await
+        .map_err(|error| ApiError::Database(error.to_string()))?;
+    if !consumed {
+        return Err(ApiError::BadRequest("Invalid 2FA code".to_string()));
     }
 
     let backup_codes = AuthService::generate_backup_codes();
@@ -165,6 +171,35 @@ pub async fn disable_2fa(
         ));
     }
 
+    // Verify account password BEFORE verifying/consuming TOTP or recovery codes
+    // so a wrong password never spends a single-use second-factor code.
+    if let Some(hash) = AuthRepository::password_hash(pool, user_id).await? {
+        let supplied = req
+            .password
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ApiError::Forbidden(
+                    "Confirm your current account password to disable 2FA.".to_string(),
+                )
+            })?;
+        let valid_password = AuthService::verify_password(supplied, &hash)
+            .await
+            .map_err(|error| {
+                log::error!(
+                    "2FA disable password verification failed for user {}: {}",
+                    user_id,
+                    error
+                );
+                ApiError::Internal("Password verification failed".to_string())
+            })?;
+        if !valid_password {
+            return Err(ApiError::Forbidden(
+                "Current password is incorrect.".to_string(),
+            ));
+        }
+    }
+
     let stored = user
         .two_factor_secret
         .ok_or_else(|| ApiError::Internal("2FA secret missing".to_string()))?;
@@ -173,7 +208,10 @@ pub async fn disable_2fa(
     let recovery_codes = user.two_factor_recovery_codes.unwrap_or_default();
 
     let mut code_valid = false;
-    if AuthService::verify_totp_code(&totp_secret, &req.code).unwrap_or(false) {
+    if AuthService::verify_and_consume_totp_code(pool, user_id, &totp_secret, &req.code)
+        .await
+        .unwrap_or(false)
+    {
         code_valid = true;
     } else if let Some(index) = AuthService::check_recovery_code(&req.code, &recovery_codes)
         && AuthService::consume_recovery_code(pool, user_id, &recovery_codes[index])
@@ -259,7 +297,8 @@ pub async fn verify_2fa_code(
         .two_factor_secret
         .ok_or_else(|| ApiError::Internal("2FA secret missing".to_string()))?;
     let secret = AuthService::decrypt_stored_totp_secret(&stored).map_err(ApiError::Internal)?;
-    let valid = AuthService::verify_totp_code(&secret, &req.code)
+    let valid = AuthService::verify_and_consume_totp_code(pool, user_id, &secret, &req.code)
+        .await
         .map_err(|_| ApiError::Unauthorized("Invalid 2FA code".to_string()))?;
 
     if !valid {
@@ -289,7 +328,8 @@ pub async fn regenerate_backup_codes(
         .ok_or_else(|| ApiError::Internal("2FA secret missing".to_string()))?;
     let totp_secret =
         AuthService::decrypt_stored_totp_secret(&stored_secret).map_err(ApiError::Internal)?;
-    let valid = AuthService::verify_totp_code(&totp_secret, &req.code)
+    let valid = AuthService::verify_and_consume_totp_code(pool, user_id, &totp_secret, &req.code)
+        .await
         .map_err(|error| ApiError::BadRequest(format!("Invalid TOTP code: {}", error)))?;
 
     if !valid {

@@ -10,11 +10,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -62,6 +62,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hotelapp.staff.BuildConfig
 import com.hotelapp.staff.core.config.ServerConfigStore
+import com.hotelapp.staff.core.config.ServerUrlNormalizer
+import com.hotelapp.staff.core.design.ConfirmActionDialog
 import com.hotelapp.staff.core.design.HotelCard
 import com.hotelapp.staff.core.design.HotelOutlinedButton
 import com.hotelapp.staff.core.design.HotelPrimaryButton
@@ -72,6 +74,7 @@ import com.hotelapp.staff.core.design.hotelTextFieldColors
 import com.hotelapp.staff.core.design.rememberPlatformHaptics
 import com.hotelapp.staff.data.repository.ServerProbeResult
 import com.hotelapp.staff.data.repository.ServerRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +84,8 @@ fun ServerConfigScreen(
     serverRepository: ServerRepository,
     onBack: () -> Unit,
     onSaved: () -> Unit,
+    isAuthenticated: Boolean = false,
+    pendingSyncCount: Int = 0,
 ) {
     val colors = HotelTheme.colors
     val haptics = rememberPlatformHaptics()
@@ -97,8 +102,10 @@ fun ServerConfigScreen(
     }
     var isTesting by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
+    var showSwitchConfirm by remember { mutableStateOf(false) }
     var probeSuccess by remember { mutableStateOf<ServerProbeResult?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var activeJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
 
     val presets = buildList {
@@ -108,48 +115,81 @@ fun ServerConfigScreen(
         }
         add("Production" to "https://saliminn.my")
         config.recentUrls.forEach { recent ->
-            if (none { it.second == recent }) {
+            if (ServerUrlNormalizer.normalize(recent).isSuccess &&
+                none { it.second.equals(recent, ignoreCase = true) }
+            ) {
                 add(recent.removePrefix("https://").removePrefix("http://") to recent)
             }
         }
     }
 
     fun runTest() {
+        if (isTesting || isSaving || urlInput.isBlank()) return
         keyboard?.hide()
-        scope.launch {
+        activeJob?.cancel()
+        val submittedInput = urlInput
+        activeJob = scope.launch {
             isTesting = true
             errorMessage = null
             probeSuccess = null
-            serverRepository.probeAndOptionallySave(urlInput, saveOnSuccess = false)
-                .onSuccess { probe ->
-                    haptics.confirm()
-                    probeSuccess = probe
-                    urlInput = probe.normalizedUrl
-                }
-                .onFailure { err ->
-                    haptics.reject()
-                    errorMessage = err.message ?: "Unable to connect to server."
-                }
-            isTesting = false
+            try {
+                serverRepository.probeAndOptionallySave(submittedInput, saveOnSuccess = false)
+                    .onSuccess { probe ->
+                        if (urlInput == submittedInput) {
+                            haptics.confirm()
+                            probeSuccess = probe
+                            urlInput = probe.normalizedUrl
+                        }
+                    }
+                    .onFailure { err ->
+                        if (urlInput == submittedInput) {
+                            haptics.reject()
+                            errorMessage = err.message ?: "Unable to connect to server."
+                        }
+                    }
+            } finally {
+                isTesting = false
+                activeJob = null
+            }
+        }
+    }
+
+    fun performSave(expectServerChange: Boolean) {
+        keyboard?.hide()
+        activeJob?.cancel()
+        activeJob = scope.launch {
+            isSaving = true
+            errorMessage = null
+            probeSuccess = null
+            try {
+                serverRepository.probeAndOptionallySave(urlInput, saveOnSuccess = true)
+                    .onSuccess {
+                        haptics.confirm()
+                        if (!isAuthenticated || !expectServerChange) {
+                            onSaved()
+                        }
+                    }
+                    .onFailure { err ->
+                        haptics.reject()
+                        errorMessage = err.message ?: "Unable to save server URL."
+                    }
+            } finally {
+                isSaving = false
+                activeJob = null
+            }
         }
     }
 
     fun saveAndApply() {
-        keyboard?.hide()
-        scope.launch {
-            isSaving = true
-            errorMessage = null
-            serverRepository.probeAndOptionallySave(urlInput, saveOnSuccess = true)
-                .onSuccess {
-                    haptics.confirm()
-                    onSaved()
-                }
-                .onFailure { err ->
-                    haptics.reject()
-                    errorMessage = err.message ?: "Unable to save server URL."
-                }
-            isSaving = false
+        if (isTesting || isSaving || urlInput.isBlank()) return
+        val normalizedTarget = ServerUrlNormalizer.normalize(urlInput).getOrNull()
+        val currentNormalized = ServerUrlNormalizer.normalize(config.serverUrl).getOrDefault(config.serverUrl)
+        val serverChanged = normalizedTarget != null && !normalizedTarget.equals(currentNormalized, ignoreCase = true)
+        if (isAuthenticated && serverChanged) {
+            showSwitchConfirm = true
+            return
         }
+        performSave(expectServerChange = serverChanged)
     }
 
     Scaffold(
@@ -182,7 +222,7 @@ fun ServerConfigScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .navigationBarsPadding()
+                .consumeWindowInsets(padding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
@@ -225,7 +265,11 @@ fun ServerConfigScreen(
                 Spacer(modifier = Modifier.height(14.dp))
                 OutlinedTextField(
                     value = urlInput,
+                    enabled = !isTesting && !isSaving,
                     onValueChange = {
+                        activeJob?.cancel()
+                        activeJob = null
+                        isTesting = false
                         userEdited = true
                         urlInput = it
                         probeSuccess = null
@@ -234,9 +278,12 @@ fun ServerConfigScreen(
                     label = { Text("Server URL") },
                     placeholder = { Text(BuildConfig.DEFAULT_SERVER_URL) },
                     trailingIcon = {
-                        if (urlInput.isNotEmpty()) {
+                        if (urlInput.isNotEmpty() && !isTesting && !isSaving) {
                             IconButton(
                                 onClick = {
+                                    activeJob?.cancel()
+                                    activeJob = null
+                                    isTesting = false
                                     userEdited = true
                                     urlInput = ""
                                     probeSuccess = null
@@ -254,7 +301,13 @@ fun ServerConfigScreen(
                         keyboardType = KeyboardType.Uri,
                         imeAction = ImeAction.Done,
                     ),
-                    keyboardActions = KeyboardActions(onDone = { runTest() }),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (!isTesting && !isSaving) {
+                                runTest()
+                            }
+                        },
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -266,8 +319,10 @@ fun ServerConfigScreen(
                     color = colors.textPrimary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
+                val normalizedCurrentInput = ServerUrlNormalizer.normalize(urlInput).getOrNull()
                 presets.forEachIndexed { index, (label, url) ->
-                    val isSelected = urlInput.trim().trimEnd('/') == url
+                    val isSelected = normalizedCurrentInput?.equals(url, ignoreCase = true) == true ||
+                        urlInput.trim().trimEnd('/').equals(url, ignoreCase = true)
                     if (index > 0) {
                         HorizontalDivider(
                             color = colors.borderSubtle,
@@ -275,8 +330,11 @@ fun ServerConfigScreen(
                         )
                     }
                     ListItem(
-                        modifier = Modifier.clickable {
+                        modifier = Modifier.clickable(enabled = !isTesting && !isSaving) {
                             haptics.tick()
+                            activeJob?.cancel()
+                            activeJob = null
+                            isTesting = false
                             userEdited = true
                             urlInput = url
                             probeSuccess = null
@@ -373,5 +431,24 @@ fun ServerConfigScreen(
                 )
             }
         }
+    }
+
+    if (showSwitchConfirm) {
+        val pendingNotice = if (pendingSyncCount > 0) {
+            " You also have $pendingSyncCount unsynced offline action${if (pendingSyncCount == 1) "" else "s"} that will be discarded."
+        } else {
+            ""
+        }
+        ConfirmActionDialog(
+            title = "Switch Property Server?",
+            message = "Switching to a different backend server will sign out your current session and clear local cached data.$pendingNotice",
+            confirmLabel = "Switch & Sign Out",
+            isDestructive = true,
+            onConfirm = {
+                showSwitchConfirm = false
+                performSave(expectServerChange = true)
+            },
+            onDismiss = { showSwitchConfirm = false },
+        )
     }
 }

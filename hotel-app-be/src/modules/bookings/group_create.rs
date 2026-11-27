@@ -81,10 +81,18 @@ pub async fn create_group_booking_handler(
     let mut order: Vec<usize> = (0..input.bookings.len()).collect();
     order.sort_by_key(|&i| input.bookings[i].room_id);
 
+    let tourism_tax_rate = crate::core::settings_cache::get_positive_decimal(
+        pool,
+        "tourism_tax_rate",
+        rust_decimal::Decimal::from(10),
+    )
+    .await;
+
     let mut tx = pool.begin().await.map_err(ApiError::from)?;
     let mut created: Vec<(usize, Booking)> = Vec::with_capacity(order.len());
     for &i in &order {
-        let booking = create_booking_tx(pool, &mut tx, user_id, &input.bookings[i]).await?;
+        let booking =
+            create_booking_tx(&mut tx, user_id, &input.bookings[i], tourism_tax_rate).await?;
         created.push((i, booking));
     }
     created.sort_by_key(|(i, _)| *i);

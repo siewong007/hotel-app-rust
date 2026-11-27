@@ -364,14 +364,13 @@ impl Fixture {
             .0
     }
 
-    /// `POST /data-transfer/import/uploads` as the admin — the file is staged
-    /// exactly like a browser upload (raw body, no multipart).
-    async fn stage_upload(&self, document: Vec<u8>) -> String {
+    /// `POST /data-transfer/import/uploads` as `user_id`.
+    async fn stage_upload_as(&self, user_id: i64, document: Vec<u8>) -> String {
         let (status, body) = self
             .request(
                 "POST",
                 "/api/data-transfer/import/uploads",
-                Some(self.auth(ADMIN_ID)),
+                Some(self.auth(user_id)),
                 &document,
                 &[],
                 IP_EXECUTE,
@@ -456,6 +455,13 @@ impl Fixture {
             .execute(pool)
             .await
             .expect("actor cleanup must run");
+        sqlx::query(
+            "DELETE FROM rate_limit_buckets \
+             WHERE bucket LIKE '%:10.240.0.%' OR bucket LIKE '%:920960%'",
+        )
+        .execute(pool)
+        .await
+        .expect("rate limit bucket cleanup must run");
         hotel_app_be::core::rbac_cache::clear_all();
     }
 }
@@ -958,11 +964,14 @@ async fn execute_enforces_file_and_mode_permissions() {
     // Non-sensitive v1: base `import` permission is enough — the job runs and
     // the zero-row file trivially succeeds.
     let plain_upload = fixture
-        .stage_upload(v1_document(&[V1Entity {
-            name: "public.amenities",
-            primary_key: &["id"],
-            rows: vec![],
-        }]))
+        .stage_upload_as(
+            WORKER_ID,
+            v1_document(&[V1Entity {
+                name: "public.amenities",
+                primary_key: &["id"],
+                rows: vec![],
+            }]),
+        )
         .await;
     let (status, job) = fixture
         .execute(WORKER_ID, &plain_upload, "merge", Some("skip"), None)
@@ -975,11 +984,14 @@ async fn execute_enforces_file_and_mode_permissions() {
 
     // Sensitive v1 (the `guests` entity marks it): `import` alone -> 403.
     let sensitive_upload = fixture
-        .stage_upload(v1_document(&[V1Entity {
-            name: "public.guests",
-            primary_key: &["id"],
-            rows: vec![],
-        }]))
+        .stage_upload_as(
+            WORKER_ID,
+            v1_document(&[V1Entity {
+                name: "public.guests",
+                primary_key: &["id"],
+                rows: vec![],
+            }]),
+        )
         .await;
     let (status, _) = fixture
         .execute(WORKER_ID, &sensitive_upload, "merge", Some("skip"), None)
@@ -992,7 +1004,7 @@ async fn execute_enforces_file_and_mode_permissions() {
 
     // Retired-format files always carried guest data — they fail closed as
     // sensitive by format, whatever they will eventually be rejected as.
-    let legacy_upload = fixture.stage_upload(legacy_document()).await;
+    let legacy_upload = fixture.stage_upload_as(WORKER_ID, legacy_document()).await;
     let (status, _) = fixture
         .execute(WORKER_ID, &legacy_upload, "merge", Some("skip"), None)
         .await;
@@ -1005,11 +1017,14 @@ async fn execute_enforces_file_and_mode_permissions() {
     // `onConflict: "update"` on a NON-sensitive file isolates the override
     // requirement.
     let update_upload = fixture
-        .stage_upload(v1_document(&[V1Entity {
-            name: "public.amenities",
-            primary_key: &["id"],
-            rows: vec![],
-        }]))
+        .stage_upload_as(
+            WORKER_ID,
+            v1_document(&[V1Entity {
+                name: "public.amenities",
+                primary_key: &["id"],
+                rows: vec![],
+            }]),
+        )
         .await;
     let (status, _) = fixture
         .execute(WORKER_ID, &update_upload, "merge", Some("update"), None)
@@ -1022,11 +1037,14 @@ async fn execute_enforces_file_and_mode_permissions() {
 
     // `mode: "restore"` -> `restore` permission, checked before step-up.
     let restore_upload = fixture
-        .stage_upload(v1_document(&[V1Entity {
-            name: "public.amenities",
-            primary_key: &["id"],
-            rows: vec![],
-        }]))
+        .stage_upload_as(
+            WORKER_ID,
+            v1_document(&[V1Entity {
+                name: "public.amenities",
+                primary_key: &["id"],
+                rows: vec![],
+            }]),
+        )
         .await;
     let (status, _) = fixture
         .execute(WORKER_ID, &restore_upload, "restore", None, None)
@@ -1163,12 +1181,12 @@ async fn execute_enforces_file_and_mode_permissions() {
         "past every gate, the missing upload answers 404"
     );
 
-    // The denied restore left its staged file behind — the admin discards it.
+    // The denied restore left its staged file behind — the uploader discards it.
     let status = fixture
         .status(
             "DELETE",
             &format!("/api/data-transfer/import/uploads/{restore_upload}"),
-            Some(ADMIN_ID),
+            Some(WORKER_ID),
             &[],
             &[],
             IP_EXECUTE,
@@ -1217,11 +1235,14 @@ async fn manage_permission_implies_every_action() {
 
     // Import a sensitive file — manage covers import + import_sensitive.
     let sensitive_upload = fixture
-        .stage_upload(v1_document(&[V1Entity {
-            name: "public.guests",
-            primary_key: &["id"],
-            rows: vec![],
-        }]))
+        .stage_upload_as(
+            WORKER_ID,
+            v1_document(&[V1Entity {
+                name: "public.guests",
+                primary_key: &["id"],
+                rows: vec![],
+            }]),
+        )
         .await;
     let (status, job) = fixture
         .execute(WORKER_ID, &sensitive_upload, "merge", Some("skip"), None)
@@ -1348,10 +1369,12 @@ async fn history_lists_the_just_run_transfer_events() {
     fixture
         .grant(WORKER_ID, "data_transfer:import_sensitive")
         .await;
-    let staged =
-        hotel_app_be::modules::data_transfer::jobs::stage_backup_upload(Body::from(team_role_doc))
-            .await
-            .expect("team_roles payload must stage");
+    let staged = hotel_app_be::modules::data_transfer::jobs::stage_backup_upload_for_user(
+        WORKER_ID,
+        Body::from(team_role_doc),
+    )
+    .await
+    .expect("team_roles payload must stage");
     let status = fixture
         .status(
             "POST",

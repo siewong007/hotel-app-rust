@@ -6,7 +6,12 @@ import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
+import okhttp3.Response
 import java.io.File
+import java.security.ProviderException
+import java.util.concurrent.atomic.AtomicLong
 
 interface CookieStorage {
     fun read(): ByteArray?
@@ -29,7 +34,16 @@ class FileCookieStorage(private val file: File) : CookieStorage {
 
     override fun clear() {
         if (file.exists()) file.delete()
+        val tmp = File(file.parentFile, "${file.name}.tmp")
+        if (tmp.exists()) tmp.delete()
     }
+}
+
+class CookieEpochInterceptor(
+    private val cookieJar: EncryptedCookieJar,
+) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response =
+        cookieJar.withCallEpoch { chain.proceed(chain.request()) }
 }
 
 @Serializable
@@ -81,16 +95,34 @@ class EncryptedCookieJar(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val lock = Any()
+    private val clearEpoch = AtomicLong(0L)
+    private val activeCallEpoch = ThreadLocal<Long?>()
     private var cache: MutableList<StoredCookie> = mutableListOf()
+    private var deferredTransientLoad: Boolean = false
 
     init {
         loadFromDisk()
+    }
+
+    fun <T> withCallEpoch(block: () -> T): T {
+        val previous = activeCallEpoch.get()
+        activeCallEpoch.set(clearEpoch.get())
+        return try {
+            block()
+        } finally {
+            if (previous == null) activeCallEpoch.remove() else activeCallEpoch.set(previous)
+        }
     }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         if (cookies.isEmpty()) return
         val now = clockMillis()
         synchronized(lock) {
+            val expectedEpoch = activeCallEpoch.get()
+            if (expectedEpoch != null && expectedEpoch != clearEpoch.get()) {
+                return
+            }
+            retryDeferredLoadLocked()
             val incoming = cookies.map { StoredCookie.fromOkHttp(it) }
             val incomingKeys = incoming.mapTo(HashSet()) { it.key() }
             cache.removeAll { it.key() in incomingKeys || it.expiresAt <= now }
@@ -102,6 +134,7 @@ class EncryptedCookieJar(
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val now = clockMillis()
         synchronized(lock) {
+            retryDeferredLoadLocked()
             val expiredRemoved = cache.removeAll { it.expiresAt <= now }
             if (expiredRemoved) {
                 persistLocked()
@@ -116,6 +149,8 @@ class EncryptedCookieJar(
 
     fun clearForHost(host: String) {
         synchronized(lock) {
+            clearEpoch.incrementAndGet()
+            retryDeferredLoadLocked()
             val normalized = host.lowercase()
             val changed = cache.removeAll {
                 it.domain.lowercase() == normalized ||
@@ -125,31 +160,79 @@ class EncryptedCookieJar(
         }
     }
 
+    fun hasStoredCookies(): Boolean {
+        val now = clockMillis()
+        synchronized(lock) {
+            retryDeferredLoadLocked()
+            return cache.any { it.expiresAt > now && it.value.isNotEmpty() }
+        }
+    }
+
+    fun hasRefreshCookieFor(baseUrl: String): Boolean {
+        val parsed = baseUrl.trim().toHttpUrlOrNull() ?: return false
+        val refreshUrl = parsed.newBuilder()
+            .encodedPath("${parsed.encodedPath.trimEnd('/')}/api/auth/refresh")
+            .build()
+        val now = clockMillis()
+        synchronized(lock) {
+            retryDeferredLoadLocked()
+            return cache.any {
+                it.name == "refresh_token" &&
+                    it.expiresAt > now &&
+                    it.value.isNotEmpty() &&
+                    it.toOkHttp().matches(refreshUrl)
+            }
+        }
+    }
+
     fun clearAll() {
         synchronized(lock) {
+            clearEpoch.incrementAndGet()
+            deferredTransientLoad = false
             cache.clear()
             storage.clear()
         }
     }
 
+    private fun retryDeferredLoadLocked() {
+        if (deferredTransientLoad) {
+            loadFromDiskLocked()
+        }
+    }
+
     private fun loadFromDisk() {
         synchronized(lock) {
-            val raw = storage.read() ?: return
-            val decrypted = runCatching { cipher.decrypt(raw) }.getOrNull()
-            if (decrypted == null) {
-                storage.clear()
-                return
-            }
-            val decoded = runCatching {
-                json.decodeFromString<List<StoredCookie>>(decrypted.decodeToString())
-            }.getOrNull()
-            if (decoded == null) {
-                storage.clear()
-                return
-            }
-            val now = clockMillis()
-            cache = decoded.filter { it.expiresAt > now }.toMutableList()
+            loadFromDiskLocked()
         }
+    }
+
+    private fun loadFromDiskLocked() {
+        val raw = storage.read() ?: run {
+            deferredTransientLoad = false
+            return
+        }
+        val decrypted = try {
+            cipher.decrypt(raw)
+        } catch (_: ProviderException) {
+            // Transient TEE/Keystore availability issue: preserve file on disk to retry later.
+            deferredTransientLoad = true
+            return
+        } catch (_: Throwable) {
+            deferredTransientLoad = false
+            storage.clear()
+            return
+        }
+        val decoded = runCatching {
+            json.decodeFromString<List<StoredCookie>>(decrypted.decodeToString())
+        }.getOrNull()
+        if (decoded == null) {
+            deferredTransientLoad = false
+            storage.clear()
+            return
+        }
+        deferredTransientLoad = false
+        val now = clockMillis()
+        cache = decoded.filter { it.expiresAt > now }.toMutableList()
     }
 
     private fun persistLocked() {
@@ -159,6 +242,10 @@ class EncryptedCookieJar(
             return
         }
         val encoded = json.encodeToString(persistentCookies).encodeToByteArray()
-        storage.write(cipher.encrypt(encoded))
+        runCatching {
+            storage.write(cipher.encrypt(encoded))
+        }.onFailure {
+            storage.clear()
+        }
     }
 }

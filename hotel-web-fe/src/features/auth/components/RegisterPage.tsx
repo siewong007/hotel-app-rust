@@ -61,7 +61,7 @@ const RegisterPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { locale: legalLocale } = useLegalLocale();
   const { t } = useTranslation('auth');
-  const { setContainer: setTurnstileContainer, ...turnstile } = useTurnstile();
+  const { setContainer: setTurnstileContainer, ...turnstile } = useTurnstile('register');
   // See LoginPage: hold the button while the inline widget is still verifying.
   const awaitingTurnstile = turnstile.enabled && !turnstile.token && !turnstile.error;
   const errorRef = useAutoFocusError(error);

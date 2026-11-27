@@ -433,7 +433,8 @@ async fn book_with_credits(
             ));
         }
     }
-    // Only requires authentication - user can book for their linked guests
+    let user_id = require_permission_helper(&pool, &headers, "bookings:create").await?;
+    crate::core::middleware::reject_guest_only(&pool, user_id).await?;
     handlers::book_with_credits_handler(State(pool), headers, Json(input)).await
 }
 

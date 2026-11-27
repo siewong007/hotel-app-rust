@@ -2,17 +2,42 @@ use super::auth::{AuthService, Claims};
 use super::db::DbPool;
 use super::error::ApiError;
 use axum::http::header::HeaderMap;
+use std::future::Future;
 
-// Extract JWT token from Authorization header
-pub async fn extract_claims(headers: &HeaderMap) -> Result<Claims, ApiError> {
+tokio::task_local! {
+    static VERIFIED_TOKEN_CLAIMS: (String, Claims);
+}
+
+/// Bind pre-verified `(raw_bearer_token, claims)` across the downstream handler
+/// future so `extract_claims` / `require_auth` / `require_permission_helper`
+/// reuse the middleware's JWT verification without re-verifying the signature.
+pub async fn scope_verified_claims<F, T>(token: String, claims: Claims, fut: F) -> T
+where
+    F: Future<Output = T>,
+{
+    VERIFIED_TOKEN_CLAIMS.scope((token, claims), fut).await
+}
+
+/// Extract raw bearer token from `Authorization` header.
+pub fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
     let auth_header = headers
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .ok_or_else(|| ApiError::Unauthorized("Missing authorization header".to_string()))?;
 
-    let token = auth_header
+    auth_header
         .strip_prefix("Bearer ")
-        .ok_or_else(|| ApiError::Unauthorized("Invalid authorization header format".to_string()))?;
+        .ok_or_else(|| ApiError::Unauthorized("Invalid authorization header format".to_string()))
+}
+
+// Extract JWT token from Authorization header
+pub async fn extract_claims(headers: &HeaderMap) -> Result<Claims, ApiError> {
+    let token = extract_bearer_token(headers)?;
+    if let Ok(Some(claims)) = VERIFIED_TOKEN_CLAIMS
+        .try_with(|(cached_token, claims)| (cached_token == token).then(|| claims.clone()))
+    {
+        return Ok(claims);
+    }
     AuthService::verify_jwt(token).map_err(|_| {
         // Counts tokens that were PRESENTED and failed verification (forged,
         // tampered, or expired). A missing header is deliberately not counted:
@@ -153,29 +178,28 @@ pub async fn require_any_permission_helper(
 /// Callers already hold the actor id from `require_permission_helper`, so a
 /// separate headers-taking wrapper would only re-parse the token.
 pub async fn is_guest_only_user(pool: &DbPool, user_id: i64) -> Result<bool, ApiError> {
-    if is_super_admin_account(pool, user_id).await? {
-        return Ok(false);
-    }
-    let has_guest_role = AuthService::check_role(pool, user_id, "guest")
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
-    let is_guest_user_type = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL AND user_type::text = 'guest')",
+    let account_flags: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT is_super_admin, (user_type::text = 'guest') \
+         FROM users WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(user_id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
+    let Some((is_super_admin, is_guest_user_type)) = account_flags else {
+        return Ok(false);
+    };
+    if is_super_admin {
+        return Ok(false);
+    }
+    let roles = super::rbac_cache::effective_roles(pool, user_id)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+    let has_guest_role = roles.contains("guest");
     if !has_guest_role && !is_guest_user_type {
         return Ok(false);
     }
-    let has_non_guest_role = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 AND r.name <> 'guest')",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?;
+    let has_non_guest_role = roles.iter().any(|role| role != "guest");
     Ok(!has_non_guest_role)
 }
 
@@ -187,38 +211,101 @@ pub async fn reject_guest_only(pool: &DbPool, user_id: i64) -> Result<(), ApiErr
     Ok(())
 }
 
-/// Validates a browser `Origin` header (when present) against `ALLOWED_ORIGINS`
-/// for cookie-authenticated endpoints and WebSocket upgrades. Requests without
-/// an `Origin` header (native mobile apps, CLI clients, in-process tests) pass.
+/// Restrict guest self-service routes to accounts whose `user_type` is
+/// `'guest'` and actively linked to a guest profile.
+pub async fn require_guest_user(pool: &DbPool, user_id: i64) -> Result<(), ApiError> {
+    let is_guest: Option<bool> = sqlx::query_scalar(
+        "SELECT (user_type::text = 'guest' AND is_active = true) \
+         FROM users WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    if is_guest != Some(true) {
+        crate::core::metrics::incr(&crate::core::metrics::PERMISSION_DENIED);
+        return Err(ApiError::Forbidden("Guest account required".to_string()));
+    }
+    Ok(())
+}
+
+/// Validates a browser `Origin` (or fallback `Referer` and `Sec-Fetch-Site`)
+/// against `ALLOWED_ORIGINS` for cookie-authenticated endpoints and WebSocket
+/// upgrades. Requests carrying neither browser origin header nor a cross-site
+/// fetch signal pass (native mobile apps, CLI clients, in-process tests).
 pub fn validate_request_origin(headers: &HeaderMap) -> Result<(), ApiError> {
-    let Some(origin_header) = headers.get(axum::http::header::ORIGIN) else {
-        return Ok(());
-    };
     let Some(cfg) = crate::core::config::try_get() else {
         return Ok(());
     };
-    match &cfg.allowed_origins {
-        crate::core::config::AllowedOrigins::Any => Ok(()),
-        crate::core::config::AllowedOrigins::List(origins) => {
-            let Ok(origin) = origin_header.to_str() else {
-                return Err(ApiError::Forbidden(
-                    "Cross-origin request denied".to_string(),
-                ));
-            };
-            let trimmed = origin.trim();
-            if origins.iter().any(|allowed| {
-                allowed
-                    .to_str()
-                    .is_ok_and(|a| a.eq_ignore_ascii_case(trimmed))
-            }) {
-                Ok(())
-            } else {
-                Err(ApiError::Forbidden(
-                    "Cross-origin request denied".to_string(),
-                ))
-            }
+    let crate::core::config::AllowedOrigins::List(origins) = &cfg.allowed_origins else {
+        return Ok(());
+    };
+
+    if let Some(sec_fetch_site) = headers.get("sec-fetch-site") {
+        let Ok(site) = sec_fetch_site.to_str() else {
+            return Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ));
+        };
+        if site.trim().eq_ignore_ascii_case("cross-site") {
+            return Err(ApiError::Forbidden(
+                "Cross-site request rejected".to_string(),
+            ));
         }
     }
+
+    if let Some(origin_header) = headers.get(axum::http::header::ORIGIN) {
+        let Ok(origin) = origin_header.to_str() else {
+            return Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ));
+        };
+        let trimmed = origin.trim();
+        return if origins.iter().any(|allowed| {
+            allowed
+                .to_str()
+                .is_ok_and(|a| a.eq_ignore_ascii_case(trimmed))
+        }) {
+            Ok(())
+        } else {
+            Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ))
+        };
+    }
+
+    if let Some(referer_header) = headers.get(axum::http::header::REFERER) {
+        let Ok(referer) = referer_header.to_str() else {
+            return Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ));
+        };
+        let Ok(parsed) = reqwest::Url::parse(referer.trim()) else {
+            return Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ));
+        };
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ));
+        }
+        let referer_origin = parsed.origin().ascii_serialization();
+        return if origins.iter().any(|allowed| {
+            allowed
+                .to_str()
+                .is_ok_and(|a| a.eq_ignore_ascii_case(&referer_origin))
+        }) {
+            Ok(())
+        } else {
+            Err(ApiError::Forbidden(
+                "Cross-origin request denied".to_string(),
+            ))
+        };
+    }
+
+    Ok(())
 }
 
 pub async fn ensure_super_admin(pool: &DbPool, user_id: i64) -> Result<(), ApiError> {
@@ -228,5 +315,35 @@ pub async fn ensure_super_admin(pool: &DbPool, user_id: i64) -> Result<(), ApiEr
         Err(ApiError::Forbidden(
             "Only super administrators can perform this operation".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::validate_request_origin;
+    use crate::core::error::ApiError;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn allows_requests_without_origin_or_referer_when_not_cross_site() {
+        let headers = HeaderMap::new();
+        assert!(validate_request_origin(&headers).is_ok());
+    }
+
+    #[test]
+    fn rejects_cross_site_sec_fetch_site_if_config_initialized() {
+        let mut headers = HeaderMap::new();
+        headers.insert("sec-fetch-site", "cross-site".parse().unwrap());
+        if let Some(cfg) = crate::core::config::try_get()
+            && !matches!(
+                cfg.allowed_origins,
+                crate::core::config::AllowedOrigins::Any
+            )
+        {
+            assert!(matches!(
+                validate_request_origin(&headers),
+                Err(ApiError::Forbidden(_))
+            ));
+        }
     }
 }

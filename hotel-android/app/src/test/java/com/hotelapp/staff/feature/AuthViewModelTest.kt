@@ -1,7 +1,9 @@
 package com.hotelapp.staff.feature
 
 import com.hotelapp.staff.core.network.GenericApiException
+import com.hotelapp.staff.core.network.TwoFactorExpiredException
 import com.hotelapp.staff.core.network.TwoFactorRequiredException
+import com.hotelapp.staff.data.dto.PasskeySecondFactorFinishRequestDto
 import com.hotelapp.staff.feature.auth.AuthViewModel
 import com.hotelapp.staff.testutil.FakeAuthRepository
 import com.hotelapp.staff.testutil.MainDispatcherRule
@@ -98,5 +100,63 @@ class AuthViewModelTest {
         val vm = AuthViewModel(FakeAuthRepository())
         vm.reportError("No saved staff credentials found on this device.")
         assertEquals("No saved staff credentials found on this device.", vm.uiState.value.errorMessage)
+    }
+
+    @Test
+    fun `passkey second factor finish handles TwoFactorExpiredException and resets 2FA sheet`() = runTest {
+        val repo = FakeAuthRepository()
+        repo.nextLoginResult = Result.failure(
+            TwoFactorRequiredException("Enter 2FA", "mfa-exp", listOf("totp", "passkey", "backup_code")),
+        )
+        repo.nextPasskey2faFinishResult = Result.failure(
+            TwoFactorExpiredException("Your sign-in took too long. Enter your password again."),
+        )
+        val vm = AuthViewModel(repo)
+        vm.updateUsername("admin")
+        vm.updatePassword("secret123")
+        vm.submitLogin()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.requiresTwoFactor)
+
+        vm.verifySecondFactorWithPasskey("saliminn.my") { token, _, _, _ ->
+            Result.success(
+                PasskeySecondFactorFinishRequestDto(
+                    mfaToken = token,
+                    credentialId = "c1",
+                    authenticatorData = "a1",
+                    clientDataJson = "cj",
+                    signature = "sig",
+                    challenge = "chal",
+                ),
+            )
+        }
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.requiresTwoFactor)
+        assertNull(vm.uiState.value.mfaToken)
+        assertEquals("Your sign-in took too long. Enter your password again.", vm.uiState.value.errorMessage)
+    }
+
+    @Test
+    fun `submitLogin enforces 6 digits for TOTP while permitting alphanumeric backup code`() = runTest {
+        val repo = FakeAuthRepository()
+        repo.nextLoginResult = Result.failure(
+            TwoFactorRequiredException("Enter 2FA", "mfa-2", listOf("totp", "backup_code")),
+        )
+        val vm = AuthViewModel(repo)
+        vm.updateUsername("admin")
+        vm.updatePassword("secret123")
+        vm.submitLogin()
+        advanceUntilIdle()
+
+        vm.updateTotpCode("123")
+        vm.submitLogin(isBackupCode = false)
+        assertEquals("Enter all 6 digits from your authenticator app.", vm.uiState.value.twoFactorError)
+
+        repo.nextLoginResult = Result.success(com.hotelapp.staff.testutil.TestFixtures.adminSession())
+        vm.updateTotpCode("ABCD-1234")
+        vm.submitLogin(isBackupCode = true)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.requiresTwoFactor)
     }
 }

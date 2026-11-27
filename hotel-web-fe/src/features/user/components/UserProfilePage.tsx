@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { LogoLoader } from '../../../components';
 import { useAuth } from '../../../auth/AuthContext';
-import type { UserSessionInfo } from '../../../types';
+import type { UserProfileUpdate, UserSessionInfo } from '../../../types';
 import { ApiNotificationSeverity, emitApiNotification } from '../../../utils/apiNotifications';
 import TwoFactorSetup from '../../auth/components/TwoFactorSetup';
 import { useTwoFactorStatus } from '../../auth/hooks/useTwoFactorQueries';
@@ -63,7 +63,12 @@ const UserProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
-  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const [stepUpAction, setStepUpAction] = useState<
+    | { kind: 'addPasskey' }
+    | { kind: 'deletePasskey'; id: string }
+    | { kind: 'updateEmail'; data: UserProfileUpdate }
+    | null
+  >(null);
   const [stepUpPassword, setStepUpPassword] = useState('');
   const [stepUpCode, setStepUpCode] = useState('');
   const [stepUpError, setStepUpError] = useState<string | null>(null);
@@ -115,7 +120,20 @@ const UserProfilePage: React.FC = () => {
 
   const profile = profileQuery.data;
 
-  const handleSaveProfile = async (data: Parameters<typeof updateProfile.mutateAsync>[0]) => {
+  const handleSaveProfile = async (data: UserProfileUpdate) => {
+    const isStaffEmailChange =
+      profile?.user_type !== 'guest' &&
+      Boolean(data.email) &&
+      Boolean(profile?.email) &&
+      data.email!.trim().toLowerCase() !== profile!.email.trim().toLowerCase();
+    if (isStaffEmailChange) {
+      setStepUpError(null);
+      setStepUpPassword('');
+      setStepUpCode('');
+      setStepUpAction({ kind: 'updateEmail', data });
+      return;
+    }
+
     const isAddingGuestEmail =
       profile?.user_type === 'guest' && !profile.email_configured && Boolean(data.email);
     try {
@@ -158,7 +176,7 @@ const UserProfilePage: React.FC = () => {
   };
 
   const closeStepUp = () => {
-    setStepUpOpen(false);
+    setStepUpAction(null);
     setStepUpPassword('');
     setStepUpCode('');
     setStepUpError(null);
@@ -172,24 +190,55 @@ const UserProfilePage: React.FC = () => {
     }
     if (!profile) return;
     setStepUpError(null);
-    setStepUpOpen(true);
+    setStepUpPassword('');
+    setStepUpCode('');
+    setStepUpAction({ kind: 'addPasskey' });
   };
 
+  const stepUpPending = addPasskey.isPending || deletePasskey.isPending || updateProfile.isPending;
+
   const submitStepUp = async () => {
-    if (!profile) return;
+    if (!profile || !stepUpAction) return;
     setStepUpError(null);
     try {
-      await addPasskey.mutateAsync({
-        username: profile.username,
-        stepUp: {
-          password: stepUpPassword || undefined,
-          totpCode: stepUpCode || undefined,
-        },
-      });
-      closeStepUp();
-      notify(t('passkeys.registered'), 'success');
+      if (stepUpAction.kind === 'addPasskey') {
+        await addPasskey.mutateAsync({
+          username: profile.username,
+          stepUp: {
+            password: stepUpPassword || undefined,
+            totpCode: stepUpCode || undefined,
+          },
+        });
+        closeStepUp();
+        notify(t('passkeys.registered'), 'success');
+      } else if (stepUpAction.kind === 'deletePasskey') {
+        await deletePasskey.mutateAsync({
+          id: stepUpAction.id,
+          stepUp: {
+            password: stepUpPassword || undefined,
+            totpCode: stepUpCode || undefined,
+          },
+        });
+        closeStepUp();
+        notify(t('passkeys.deleted'), 'success');
+      } else {
+        await updateProfile.mutateAsync({
+          ...stepUpAction.data,
+          current_password: stepUpPassword || undefined,
+          totp_code: stepUpCode || undefined,
+        });
+        closeStepUp();
+        setEditing(false);
+        notify(t('profile.updated'), 'success');
+      }
     } catch (error) {
-      setStepUpError(errorMessage(error, t('passkeys.registerFailed')));
+      const fallback =
+        stepUpAction.kind === 'addPasskey'
+          ? t('passkeys.registerFailed')
+          : stepUpAction.kind === 'deletePasskey'
+            ? t('passkeys.deleteFailed')
+            : t('profile.updateFailed');
+      setStepUpError(errorMessage(error, fallback));
     }
   };
 
@@ -201,12 +250,10 @@ const UserProfilePage: React.FC = () => {
       severity: 'error',
     });
     if (!accepted) return;
-    try {
-      await deletePasskey.mutateAsync(id);
-      notify(t('passkeys.deleted'), 'success');
-    } catch (error) {
-      notify(errorMessage(error, t('passkeys.deleteFailed')), 'error');
-    }
+    setStepUpError(null);
+    setStepUpPassword('');
+    setStepUpCode('');
+    setStepUpAction({ kind: 'deletePasskey', id });
   };
 
   const handleRenamePasskey = async (id: string, deviceName: string) => {
@@ -358,7 +405,7 @@ const UserProfilePage: React.FC = () => {
         </Box>
       </Box>
 
-      <Dialog open={stepUpOpen} onClose={closeStepUp} maxWidth="xs" fullWidth>
+      <Dialog open={stepUpAction !== null} onClose={closeStepUp} maxWidth="xs" fullWidth>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -367,7 +414,13 @@ const UserProfilePage: React.FC = () => {
         >
           <DialogTitle>{t('passkeys.stepUpTitle')}</DialogTitle>
           <DialogContent>
-            <Typography sx={{ mb: 2 }}>{t('passkeys.stepUpBody')}</Typography>
+            <Typography sx={{ mb: 2 }}>
+              {stepUpAction?.kind === 'deletePasskey'
+                ? t('passkeys.deleteMessage')
+                : stepUpAction?.kind === 'updateEmail'
+                  ? t('security.currentPasswordHint')
+                  : t('passkeys.stepUpBody')}
+            </Typography>
             {stepUpError ? (
               <Alert severity="error" role="alert" ref={stepUpErrorRef} tabIndex={-1} sx={{ mb: 2 }}>
                 {stepUpError}
@@ -404,9 +457,12 @@ const UserProfilePage: React.FC = () => {
             <Button
               type="submit"
               variant="contained"
-              disabled={(!stepUpPassword && !stepUpCode) || addPasskey.isPending}
+              disabled={
+                (twoFactorEnabled ? stepUpCode.length !== TOTP_CODE_LENGTH : !stepUpPassword) ||
+                stepUpPending
+              }
             >
-              {addPasskey.isPending ? t('passkeys.waiting') : t('passkeys.continue')}
+              {stepUpPending ? t('passkeys.waiting') : t('passkeys.continue')}
             </Button>
           </DialogActions>
         </form>

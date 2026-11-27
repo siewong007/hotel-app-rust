@@ -128,20 +128,95 @@ fn sanitize_optional_text(
     Ok(Some(value))
 }
 
-/// Body HTML is authored by staff holding communications:compose; it is
-/// intentionally NOT stripped, only bounded. Variable VALUES substituted into
-/// it are always HTML-escaped by [`render_template`].
+/// Standard email template variables allowed on persisted templates.
+pub const ALLOWED_TEMPLATE_VARIABLES: &[&str] = &[
+    "first_name",
+    "full_name",
+    "email",
+    "guest_name",
+    "hotel_name",
+    "booking_number",
+    "check_in_date",
+    "check_out_date",
+    "room_number",
+    "unsubscribe_url",
+];
+
+/// Sanitize email body HTML using an explicit email-safe allowlist of tags,
+/// attributes, and URL schemes (no `<script>`, `<iframe>`, `on*` handlers,
+/// `javascript:`, or `data:` URLs).
+pub fn sanitize_email_html(html: &str) -> String {
+    ammonia::Builder::default()
+        .tags(std::collections::HashSet::from([
+            "a",
+            "b",
+            "blockquote",
+            "br",
+            "caption",
+            "code",
+            "div",
+            "em",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "hr",
+            "i",
+            "img",
+            "li",
+            "ol",
+            "p",
+            "pre",
+            "small",
+            "span",
+            "strong",
+            "table",
+            "tbody",
+            "td",
+            "tfoot",
+            "th",
+            "thead",
+            "tr",
+            "u",
+            "ul",
+        ]))
+        .generic_attributes(std::collections::HashSet::from([
+            "align", "bgcolor", "title", "width", "height",
+        ]))
+        .tag_attributes(std::collections::HashMap::from([
+            ("a", std::collections::HashSet::from(["href", "target"])),
+            ("img", std::collections::HashSet::from(["src", "alt"])),
+            (
+                "table",
+                std::collections::HashSet::from(["border", "cellpadding", "cellspacing"]),
+            ),
+            (
+                "td",
+                std::collections::HashSet::from(["colspan", "rowspan", "valign"]),
+            ),
+            (
+                "th",
+                std::collections::HashSet::from(["colspan", "rowspan", "valign"]),
+            ),
+        ]))
+        .url_schemes(std::collections::HashSet::from(["http", "https", "mailto"]))
+        .clean(html)
+        .to_string()
+}
+
 fn validate_body(value: &str, field: &str) -> Result<String, ApiError> {
-    let value = value.trim().to_string();
-    if value.is_empty() {
+    let sanitized = sanitize_email_html(value).trim().to_string();
+    if sanitized.is_empty() {
         return Err(ApiError::BadRequest(format!("{field} is required")));
     }
-    if value.chars().count() > MAX_BODY_CHARS {
+    if sanitized.chars().count() > MAX_BODY_CHARS {
         return Err(ApiError::BadRequest(format!(
             "{field} cannot exceed {MAX_BODY_CHARS} characters"
         )));
     }
-    Ok(value)
+    Ok(sanitized)
 }
 
 fn is_identifier(value: &str) -> bool {
@@ -244,9 +319,12 @@ pub fn validate_template_input(input: TemplateInput) -> Result<TemplateDraft, Ap
     }
     let variables = input.variables.unwrap_or_default();
     for variable in &variables {
-        if !is_identifier(variable) || variable.chars().count() > 50 {
+        if !is_identifier(variable)
+            || variable.chars().count() > 50
+            || !ALLOWED_TEMPLATE_VARIABLES.contains(&variable.as_str())
+        {
             return Err(ApiError::BadRequest(format!(
-                "Invalid template variable name: {variable}"
+                "Invalid or unsupported template variable name: {variable}"
             )));
         }
     }

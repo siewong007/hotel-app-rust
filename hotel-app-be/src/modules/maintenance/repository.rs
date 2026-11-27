@@ -265,6 +265,80 @@ RETURNING id
         .map_err(|e| ApiError::Database(e.to_string()))
 }
 
+pub async fn find_ticket_for_update_tx(
+    tx: &mut DbTransaction<'_>,
+    ticket_id: i64,
+) -> Result<Option<MaintenanceTicket>, ApiError> {
+    let locked: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM maintenance_tickets WHERE id = $1 FOR UPDATE")
+            .bind(ticket_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Database(e.to_string()))?;
+    if locked.is_none() {
+        return Ok(None);
+    }
+    find_ticket_with_executor(&mut **tx, ticket_id).await
+}
+
+pub async fn patch_ticket_tx(
+    tx: &mut DbTransaction<'_>,
+    ticket_id: i64,
+    patch: &MaintenanceTicketPatch,
+) -> Result<MaintenanceTicket, ApiError> {
+    let query = r#"
+UPDATE maintenance_tickets
+SET title = COALESCE($2, title),
+    description = COALESCE($3, description),
+    category = COALESCE($4, category),
+    priority = COALESCE($5, priority),
+    status = COALESCE($6, status),
+    assigned_to = CASE WHEN $15::bool THEN NULL ELSE COALESCE($7, assigned_to) END,
+    estimated_cost = COALESCE($8, estimated_cost),
+    actual_cost = COALESCE($9, actual_cost),
+    estimated_hours = COALESCE($10, estimated_hours),
+    actual_hours = COALESCE($11, actual_hours),
+    scheduled_date = COALESCE($12, scheduled_date),
+    resolution_notes = COALESCE($13, resolution_notes),
+    images = COALESCE($14, images),
+    started_at = CASE WHEN $6 = 'in_progress' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
+    resolved_at = CASE WHEN $6 IN ('resolved', 'closed') AND resolved_at IS NULL THEN CURRENT_TIMESTAMP ELSE resolved_at END,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+"#;
+
+    let images_bind = patch.images.clone();
+    let estimated_cost = crate::core::db::opt_decimal_to_db(patch.estimated_cost);
+    let actual_cost = crate::core::db::opt_decimal_to_db(patch.actual_cost);
+    let estimated_hours = crate::core::db::opt_decimal_to_db(patch.estimated_hours);
+    let actual_hours = crate::core::db::opt_decimal_to_db(patch.actual_hours);
+
+    sqlx::query(query)
+        .bind(ticket_id)
+        .bind(patch.title.as_deref())
+        .bind(patch.description.as_deref())
+        .bind(patch.category.as_deref())
+        .bind(patch.priority.as_deref())
+        .bind(patch.status.as_deref())
+        .bind(patch.assigned_to)
+        .bind(estimated_cost)
+        .bind(actual_cost)
+        .bind(estimated_hours)
+        .bind(actual_hours)
+        .bind(patch.scheduled_date)
+        .bind(patch.resolution_notes.as_deref())
+        .bind(images_bind)
+        .bind(patch.clear_assignee)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    find_ticket_with_executor(&mut **tx, ticket_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Maintenance ticket not found".to_string()))
+}
+
+#[allow(dead_code)]
 pub async fn patch_ticket(
     pool: &DbPool,
     ticket_id: i64,

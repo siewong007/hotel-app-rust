@@ -4,27 +4,33 @@
 //!
 //! Dependency edges that matter:
 //!   bookings_history  → bookings_ops + bookings_matrix (FK to bookings)
-//!   finance           → bookings_ops + bookings_matrix + anonymous
+//!   booking_groups    → channels + bookings_ops + bookings_matrix (room windows & channels)
+//!   finance           → bookings_ops + bookings_matrix + anonymous + booking_groups
 //!                       (payments/invoices/ledgers FK to bookings; 804125/126
 //!                       settle anonymous bookings 802202/802203)
 //!   night_audit       → bookings_matrix (posted_nights/details ref 802001-45)
 //!   marketing         → bookings_ops + bookings_matrix (voucher redemptions)
 //!   loyalty           → finance (points ledger refs payment ids)
 //!   webhook_fixtures  → bookings_matrix + anonymous (pending PayPal payments)
+//!   support           → bookings_ops + bookings_matrix (conversations ref bookings)
 //!   audit             → everything its resource_ids point at for coherence
 //!   guest_access      → core (portal sessions FK to guests)
 //!   auth_extra        → core (extends users)
+//!   ekyc              → core (opt-in synthetic eKYC fixtures; excluded from full)
+//!   scale             → core + channels + rooms_state (opt-in 850k-899k benchmark rows; excluded from full)
 
 /// Canonical module execution order. `resolve` always emits modules in this
 /// order regardless of the order scenarios were requested.
 pub const MODULE_ORDER: &[&str] = &[
     "core",
+    "channels",
     "rooms_state",
     "bookings_ops",
     "bookings_matrix",
     "bookings_history",
     "anonymous",
     "availability",
+    "booking_groups",
     "operations",
     "night_audit",
     "finance",
@@ -32,6 +38,34 @@ pub const MODULE_ORDER: &[&str] = &[
     "loyalty",
     "guest_access",
     "auth_extra",
+    "support",
+    "notifications",
+    "webhook_fixtures",
+    "audit",
+    "ekyc",
+    "scale",
+];
+
+/// Modules included in `full` / `--all` / bare `seed`. Opt-in sections
+/// (`ekyc`, `scale`) must be requested explicitly by `--scenario`.
+pub const DEFAULT_MODULES: &[&str] = &[
+    "core",
+    "channels",
+    "rooms_state",
+    "bookings_ops",
+    "bookings_matrix",
+    "bookings_history",
+    "anonymous",
+    "availability",
+    "booking_groups",
+    "operations",
+    "night_audit",
+    "finance",
+    "marketing",
+    "loyalty",
+    "guest_access",
+    "auth_extra",
+    "support",
     "notifications",
     "webhook_fixtures",
     "audit",
@@ -50,6 +84,11 @@ pub const SCENARIOS: &[Scenario] = &[
         modules: &["core", "rooms_state", "bookings_ops"],
     },
     Scenario {
+        name: "channels",
+        description: "Custom booking channels alongside dynamic pricing and commission rules",
+        modules: &["core", "channels"],
+    },
+    Scenario {
         name: "availability",
         description: "Inventory grid: allocations, room status spread, sold-out and one-left dates",
         modules: &["core", "rooms_state", "availability"],
@@ -64,6 +103,18 @@ pub const SCENARIOS: &[Scenario] = &[
             "bookings_matrix",
             "bookings_history",
             "anonymous",
+        ],
+    },
+    Scenario {
+        name: "booking-groups",
+        description: "Multi-room booking groups in active/paid, active/unpaid-hold, and voided states",
+        modules: &[
+            "core",
+            "channels",
+            "rooms_state",
+            "bookings_ops",
+            "bookings_matrix",
+            "booking_groups",
         ],
     },
     Scenario {
@@ -101,6 +152,18 @@ pub const SCENARIOS: &[Scenario] = &[
         modules: &["core", "auth_extra", "guest_access"],
     },
     Scenario {
+        name: "support",
+        description: "Guest support inbox across all statuses with guest/staff/system messages and events",
+        modules: &[
+            "core",
+            "channels",
+            "rooms_state",
+            "bookings_ops",
+            "bookings_matrix",
+            "support",
+        ],
+    },
+    Scenario {
         name: "audit",
         description: "Booking history, room status history, audit markers, night-audit runs, job history",
         modules: &[
@@ -119,7 +182,7 @@ pub const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         name: "notifications",
-        description: "Staff notifications with read markers, email delivery states, suppression list",
+        description: "Staff notifications with read markers, email delivery states, the suppression list",
         modules: &[
             "core",
             "rooms_state",
@@ -185,9 +248,19 @@ pub const SCENARIOS: &[Scenario] = &[
         modules: &["core", "rooms_state", "anonymous", "guest_access"],
     },
     Scenario {
+        name: "ekyc",
+        description: "Synthetic eKYC applications, notes, and decision history across review states (opt-in)",
+        modules: &["core", "ekyc"],
+    },
+    Scenario {
+        name: "scale",
+        description: "High-volume 850k-899k benchmark dataset (1k guests, 2.5k bookings/payments, 2k audits) (opt-in)",
+        modules: &["core", "channels", "rooms_state", "scale"],
+    },
+    Scenario {
         name: "full",
-        description: "Complete development hotel — every module (same as --all)",
-        modules: MODULE_ORDER,
+        description: "Complete default development hotel — every standard module (excludes opt-in ekyc and scale)",
+        modules: DEFAULT_MODULES,
     },
 ];
 
@@ -210,9 +283,9 @@ pub fn resolve(names: &[String]) -> Result<Vec<&'static str>, String> {
     ))
 }
 
-/// Every module in canonical order (`--all`, bare `seed`, and `full` converge).
+/// Every default module in canonical order (`--all`, bare `seed`, and `full` converge).
 pub fn resolve_all() -> Vec<&'static str> {
-    MODULE_ORDER.to_vec()
+    DEFAULT_MODULES.to_vec()
 }
 
 /// Stable-order dedupe against MODULE_ORDER.
@@ -270,5 +343,33 @@ mod tests {
         assert!(pos("bookings_history") > pos("bookings_ops"));
         assert!(pos("finance") > pos("anonymous"));
         assert!(pos("webhook_fixtures") > pos("anonymous"));
+        assert!(pos("booking_groups") > pos("bookings_matrix"));
+        assert!(pos("support") > pos("bookings_ops"));
+    }
+
+    #[test]
+    fn resolve_all_excludes_opt_in_modules() {
+        let defaults = resolve_all();
+        assert!(!defaults.contains(&"ekyc"));
+        assert!(!defaults.contains(&"scale"));
+        assert!(defaults.contains(&"channels"));
+        assert!(defaults.contains(&"booking_groups"));
+        assert!(defaults.contains(&"support"));
+        assert_eq!(defaults, resolve(&["full".to_string()]).unwrap());
+    }
+
+    #[test]
+    fn opt_in_scenarios_compose_with_full() {
+        let combined =
+            resolve(&["full".to_string(), "ekyc".to_string(), "scale".to_string()]).unwrap();
+        assert_eq!(combined.as_slice(), MODULE_ORDER);
+    }
+
+    #[test]
+    fn every_new_scenario_resolves() {
+        for name in ["channels", "booking-groups", "support", "ekyc", "scale"] {
+            let modules = resolve(&[name.to_string()]).unwrap();
+            assert!(!modules.is_empty(), "{name} must resolve modules");
+        }
     }
 }

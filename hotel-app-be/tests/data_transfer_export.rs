@@ -35,9 +35,18 @@ async fn setup_pg_pool() -> Option<PgPool> {
 /// The raw text of one streamed export — key order checks need the bytes, not
 /// a parsed `Value` (a deserialized map cannot prove field order).
 async fn streamed_export_text(pool: &PgPool) -> String {
-    let body = export_booking_data_body(pool, 0, hotel_app_be::models::ExportScope::Full, None)
+    let actor_id: i64 = sqlx::query_scalar("SELECT id FROM users ORDER BY id LIMIT 1")
+        .fetch_one(pool)
         .await
-        .expect("streamed export must build");
+        .expect("the dev database has at least one user");
+    let body = export_booking_data_body(
+        pool,
+        actor_id,
+        hotel_app_be::models::ExportScope::Full,
+        None,
+    )
+    .await
+    .expect("streamed export must build");
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .expect("streamed export body must collect");
@@ -287,7 +296,7 @@ async fn export_emits_the_v1_document() {
         .expect("manifest.exclusions must be an array");
     assert_eq!(
         exclusions.len(),
-        34,
+        35,
         "every excluded schema table must be declared"
     );
     for exclusion in exclusions {

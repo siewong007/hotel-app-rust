@@ -1,6 +1,7 @@
 package com.hotelapp.staff.feature.maintenance
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,13 +9,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -27,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,10 +53,12 @@ import com.hotelapp.staff.core.design.ErrorStateView
 import com.hotelapp.staff.core.design.FilterChipRow
 import com.hotelapp.staff.core.design.FilterOption
 import com.hotelapp.staff.core.design.HotelCard
+import com.hotelapp.staff.core.design.HotelOutlinedButton
 import com.hotelapp.staff.core.design.HotelPullToRefreshBox
 import com.hotelapp.staff.core.design.HotelSearchBar
 import com.hotelapp.staff.core.design.HotelSnackbarHost
 import com.hotelapp.staff.core.design.HotelTheme
+import com.hotelapp.staff.core.design.InlineAlertBanner
 import com.hotelapp.staff.core.design.ListCardSkeleton
 import com.hotelapp.staff.core.design.OnResumeRefreshEffect
 import com.hotelapp.staff.core.design.StatusPill
@@ -75,6 +86,12 @@ fun MaintenanceScreen(
 
     var showCreateSheet by remember { mutableStateOf(false) }
     var showAssignDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.selectedTicket?.id) {
+        if (state.selectedTicket == null) {
+            showAssignDialog = false
+        }
+    }
 
     CollectEffects(viewModel.effects) { effect ->
         when (effect) {
@@ -145,7 +162,10 @@ fun MaintenanceScreen(
         floatingActionButton = {
             if (canWrite) {
                 FloatingActionButton(
-                    onClick = { showCreateSheet = true },
+                    onClick = {
+                        viewModel.clearSheetError()
+                        showCreateSheet = true
+                    },
                     containerColor = colors.primaryMain,
                     contentColor = colors.primaryContrastText,
                 ) {
@@ -158,6 +178,7 @@ fun MaintenanceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -182,7 +203,7 @@ fun MaintenanceScreen(
 
             when {
                 state.isLoading -> ListCardSkeleton()
-                state.error != null -> ErrorStateView(
+                state.error != null && state.tickets.isEmpty() -> ErrorStateView(
                     message = state.error!!,
                     onRetry = { viewModel.refresh() },
                 )
@@ -192,16 +213,50 @@ fun MaintenanceScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     if (filteredTickets.isEmpty()) {
-                        EmptyStateView(
-                            title = "No maintenance tickets",
-                            subtitle = "Adjust filters or create a new repair ticket.",
-                            icon = Icons.Outlined.Build,
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = 88.dp),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            if (state.error != null) {
+                                InlineAlertBanner(message = state.error!!, tone = colors.danger)
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            EmptyStateView(
+                                title = "No maintenance tickets",
+                                subtitle = "Adjust filters or create a new repair ticket.",
+                                icon = Icons.Outlined.Build,
+                            )
+                            if (!state.endReached && state.tickets.size < state.total) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                if (state.isLoadingMore) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                                    }
+                                } else {
+                                    HotelOutlinedButton(
+                                        text = "Load More (${state.tickets.size}/${state.total})",
+                                        onClick = viewModel::loadMore,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                        }
                     } else {
                         LazyColumn(
                             contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
+                            if (state.error != null) {
+                                item(key = "maint_inline_error") {
+                                    InlineAlertBanner(message = state.error!!, tone = colors.danger)
+                                }
+                            }
                             items(filteredTickets, key = { it.id }) { ticket ->
                                 val priorityTone = StatusFormatter.priorityTone(ticket.priority, colors)
                                 HotelCard(
@@ -215,6 +270,7 @@ fun MaintenanceScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Row(
+                                            modifier = Modifier.weight(1f),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
@@ -222,13 +278,18 @@ fun MaintenanceScreen(
                                                 text = ticket.ticketNumber,
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = colors.primaryOnSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                             Text(
                                                 text = DateFormatter.formatRelativeTimestamp(ticket.createdAt),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = colors.textMuted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         StatusPill(
                                             label = StatusFormatter.humanize(ticket.priority),
                                             tone = priorityTone,
@@ -259,10 +320,33 @@ fun MaintenanceScreen(
                                             label = StatusFormatter.humanize(ticket.status),
                                             tone = StatusFormatter.taskTone(ticket.status, colors),
                                         )
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Text(
                                             text = ticket.assignedToName ?: "Unassigned",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = if (ticket.assignedToName != null) colors.textSecondary else colors.textMuted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.End,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                            if (!state.endReached && state.tickets.size < state.total) {
+                                item(key = "maint_load_more") {
+                                    if (state.isLoadingMore) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                                        }
+                                    } else {
+                                        HotelOutlinedButton(
+                                            text = "Load More (${state.tickets.size}/${state.total})",
+                                            onClick = viewModel::loadMore,
+                                            modifier = Modifier.fillMaxWidth(),
                                         )
                                     }
                                 }
@@ -291,6 +375,9 @@ fun MaintenanceScreen(
                 title = "Assign ${ticket.ticketNumber}",
                 staff = state.staff,
                 currentAssigneeId = ticket.assignedTo,
+                staffPickerError = state.pickerError,
+                isLoadingStaff = state.isLoadingPickers,
+                onRetryStaff = viewModel::retryPickers,
                 onAssign = { staffId ->
                     showAssignDialog = false
                     viewModel.assignTicket(ticket.id, staffId)
@@ -305,9 +392,15 @@ fun MaintenanceScreen(
             rooms = state.rooms,
             isSubmitting = state.isMutating,
             error = state.sheetError,
-            onDismiss = { showCreateSheet = false },
-            onCreate = { roomId, title, category, priority, desc ->
-                viewModel.createTicket(roomId, title, category, priority, desc) {
+            pickerError = state.pickerError,
+            isLoadingPickers = state.isLoadingPickers,
+            onRetryPickers = viewModel::retryPickers,
+            onDismiss = {
+                viewModel.clearSheetError()
+                showCreateSheet = false
+            },
+            onCreate = { roomId, title, category, priority, desc, idempotencyKey ->
+                viewModel.createTicket(roomId, title, category, priority, desc, idempotencyKey = idempotencyKey) {
                     showCreateSheet = false
                 }
             },

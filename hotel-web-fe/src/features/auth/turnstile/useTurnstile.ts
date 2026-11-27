@@ -26,6 +26,7 @@ import { shouldUseDesktopRuntime } from '../../../desktop/runtimeApi';
 
 interface TurnstileRenderOptions {
   sitekey: string;
+  action?: string;
   callback?: (token: string) => void;
   'error-callback'?: (code?: string) => void;
   'expired-callback'?: () => void;
@@ -79,7 +80,7 @@ export interface UseTurnstileResult {
   reset: () => void;
 }
 
-export const useTurnstile = (): UseTurnstileResult => {
+export const useTurnstile = (action?: string): UseTurnstileResult => {
   const widgetIdRef = useRef<string | null>(null);
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const [token, setToken] = useState<string | undefined>(undefined);
@@ -99,6 +100,7 @@ export const useTurnstile = (): UseTurnstileResult => {
       }
       const id = window.turnstile.render(node, {
         sitekey: siteKey,
+        ...(action ? { action } : {}),
         'refresh-expired': 'auto',
         callback: (value: string) => {
           setToken(value);
@@ -121,7 +123,7 @@ export const useTurnstile = (): UseTurnstileResult => {
         widgetIdRef.current = id;
       }
     },
-    [siteKey],
+    [action, siteKey],
   );
 
   const teardown = useCallback(() => {
