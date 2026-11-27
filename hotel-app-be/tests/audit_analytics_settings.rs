@@ -1748,4 +1748,364 @@ mod postgres_tests {
 
         cleanup(&pool, name).await;
     }
+
+    // City-ledger receipts (bank transfer / cash) must journal under the
+    // tender account, with a same-day City Ledger AR credit, and must show
+    // up in shift collections + live payment-status (not stale "unpaid").
+    #[tokio::test]
+    async fn ledger_receipts_journal_under_tender_and_feed_live_reports() {
+        let Some(pool) = setup_pg_pool().await else {
+            return;
+        };
+        let actor_id = 990_012;
+        let booking_id = 990_112;
+        let guest_id = 990_212;
+        let room_id = 990_312;
+        let room_type_id = 990_412;
+        let ledger_id = 990_520;
+        let payment_id = 990_521;
+        let company_name = "Aud990 Tender Co";
+        let invoice_number = "INV-AUD990-TENDER";
+        let payment_ref = "MYIT-AUD990-1";
+        let check_in = NaiveDate::from_ymd_opt(2031, 6, 10).unwrap();
+        let check_out = NaiveDate::from_ymd_opt(2031, 6, 11).unwrap();
+        let payment_day = NaiveDate::from_ymd_opt(2031, 6, 15).unwrap();
+        let amount = Decimal::new(209_000, 2); // 2,090.00
+
+        async fn cleanup(
+            pool: &PgPool,
+            actor_id: i64,
+            booking_id: i64,
+            guest_id: i64,
+            room_id: i64,
+            room_type_id: i64,
+            ledger_id: i64,
+        ) {
+            sqlx::query("DELETE FROM customer_ledger_payments WHERE ledger_id = $1")
+                .bind(ledger_id)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM customer_ledgers WHERE id = $1")
+                .bind(ledger_id)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM invoices WHERE booking_id = $1 OR invoice_number = 'INV-AUD990-TENDER'")
+                .bind(booking_id)
+                .execute(pool)
+                .await
+                .unwrap();
+            cleanup_booking_fixture(pool, booking_id, guest_id, room_id, room_type_id).await;
+            sqlx::query("DELETE FROM users WHERE id = $1")
+                .bind(actor_id)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+
+        cleanup(
+            &pool,
+            actor_id,
+            booking_id,
+            guest_id,
+            room_id,
+            room_type_id,
+            ledger_id,
+        )
+        .await;
+        upsert_actor(&pool, actor_id, "aud990_tender").await;
+
+        sqlx::query(
+            "INSERT INTO room_types (id, code, name, base_price, max_occupancy) \
+             OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, 2) \
+             ON CONFLICT (id) DO UPDATE SET code = EXCLUDED.code, name = EXCLUDED.name, base_price = EXCLUDED.base_price",
+        )
+        .bind(room_type_id)
+        .bind("AUD990T")
+        .bind("Aud990 Tender Type")
+        .bind(amount)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO rooms (id, room_number, room_type_id, status) \
+             OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, 'available') \
+             ON CONFLICT (id) DO UPDATE SET room_number = EXCLUDED.room_number, room_type_id = EXCLUDED.room_type_id, status = 'available'",
+        )
+        .bind(room_id)
+        .bind("AUD990T")
+        .bind(room_type_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO guests (id, nick_name, first_name, last_name) \
+             OVERRIDING SYSTEM VALUE VALUES ($1, $2, 'Aud990', 'Tender Guest') \
+             ON CONFLICT (id) DO UPDATE SET nick_name = EXCLUDED.nick_name",
+        )
+        .bind(guest_id)
+        .bind("Aud990 Tender Guest")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO bookings ( \
+                id, booking_number, guest_id, guest_name, room_id, \
+                check_in_date, check_out_date, adults, children, \
+                room_rate, subtotal, total_amount, status, payment_status, payment_method, company_name \
+             ) \
+             OVERRIDING SYSTEM VALUE VALUES \
+             ($1, $2, $3, $4, $5, $6, $7, 1, 0, $8, $8, $8, 'checked_out', 'unpaid', 'Cash', $9) \
+             ON CONFLICT (id) DO UPDATE SET \
+                check_in_date = EXCLUDED.check_in_date, \
+                check_out_date = EXCLUDED.check_out_date, \
+                status = EXCLUDED.status, \
+                payment_status = 'unpaid', \
+                payment_method = 'Cash', \
+                total_amount = EXCLUDED.total_amount, \
+                company_name = EXCLUDED.company_name",
+        )
+        .bind(booking_id)
+        .bind(format!("BK-AUD990-TENDER-{booking_id}"))
+        .bind(guest_id)
+        .bind("Aud990 Tender Guest")
+        .bind(room_id)
+        .bind(check_in)
+        .bind(check_out)
+        .bind(amount)
+        .bind(company_name)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO customer_ledgers \
+                (id, company_name, description, expense_type, amount, status, paid_amount, \
+                 invoice_number, booking_id, post_type, folio_type, payment_method, room_number) \
+             OVERRIDING SYSTEM VALUE \
+             VALUES ($1, $2, $3, $4, $5, 'paid', $5, $6, $7, 'room_charge', 'city_ledger', 'bank_transfer', 'AUD990T') \
+             ON CONFLICT (id) DO UPDATE SET \
+                company_name = EXCLUDED.company_name, \
+                amount = EXCLUDED.amount, \
+                status = 'paid', \
+                paid_amount = EXCLUDED.paid_amount, \
+                invoice_number = EXCLUDED.invoice_number, \
+                booking_id = EXCLUDED.booking_id, \
+                post_type = 'room_charge', \
+                folio_type = 'city_ledger', \
+                payment_method = 'bank_transfer', \
+                void_at = NULL",
+        )
+        .bind(ledger_id)
+        .bind(company_name)
+        .bind("aud990 tender journal fixture")
+        .bind("aud990_expense")
+        .bind(amount)
+        .bind(invoice_number)
+        .bind(booking_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO customer_ledger_payments \
+                (id, ledger_id, payment_amount, payment_method, payment_reference, payment_date) \
+             OVERRIDING SYSTEM VALUE \
+             VALUES ( \
+                $1, $2, $3, 'bank_transfer', $4, \
+                ($5::date + time '12:00') AT TIME ZONE COALESCE( \
+                    (SELECT NULLIF(BTRIM(value), '') FROM system_settings WHERE key = 'timezone'), \
+                    'UTC' \
+                ) \
+             ) \
+             ON CONFLICT (id) DO UPDATE SET \
+                ledger_id = EXCLUDED.ledger_id, \
+                payment_amount = EXCLUDED.payment_amount, \
+                payment_method = EXCLUDED.payment_method, \
+                payment_reference = EXCLUDED.payment_reference, \
+                payment_date = EXCLUDED.payment_date",
+        )
+        .bind(payment_id)
+        .bind(ledger_id)
+        .bind(amount)
+        .bind(payment_ref)
+        .bind(payment_day)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let journal = night_audit_repo::generate_journal_sections(&pool, payment_day, false).await;
+        let bank = journal
+            .iter()
+            .find(|section| section.display_name == "Bank Transfer")
+            .unwrap_or_else(|| panic!("expected a Bank Transfer section, got {journal:?}"));
+        assert_eq!(bank.total_debit, amount);
+        assert_eq!(bank.total_credit, Decimal::ZERO);
+        let bank_entry = bank
+            .entries
+            .iter()
+            .find(|entry| entry.booking_number == company_name)
+            .expect("bank transfer line must name the company");
+        let memo = bank_entry.description.as_deref().unwrap_or("");
+        assert!(memo.contains(company_name), "memo {memo:?}");
+        assert!(memo.contains(invoice_number), "memo {memo:?}");
+        assert!(memo.contains(payment_ref), "memo {memo:?}");
+
+        let city = journal
+            .iter()
+            .find(|section| section.entry_type == "city_ledger")
+            .unwrap_or_else(|| panic!("expected a City Ledger AR credit section, got {journal:?}"));
+        assert_eq!(city.total_credit, amount);
+        assert_eq!(city.total_debit, Decimal::ZERO);
+        assert!(
+            city.entries
+                .iter()
+                .all(|entry| entry.debit == Decimal::ZERO),
+            "ledger receipts must not debit the City Ledger collection bucket"
+        );
+
+        let payment_day_s = payment_day.to_string();
+        let check_in_s = check_in.to_string();
+
+        let shift_pay = analytics_repo::generate_report(
+            &pool,
+            ReportQuery {
+                report_type: "shift_report".to_string(),
+                start_date: payment_day_s.clone(),
+                end_date: payment_day_s.clone(),
+                shift: None,
+                drawer: None,
+                company_name: None,
+                booking_channel_id: None,
+                booking_channel: None,
+                platform_name: None,
+                booking_status: None,
+                posted_status: None,
+                room_type: None,
+            },
+        )
+        .await
+        .expect("shift report on the payment date must succeed");
+        let collections = shift_pay["collections"]
+            .as_array()
+            .or_else(|| shift_pay["by_payment_method"].as_array())
+            .expect("shift report must include collections");
+        let bank_collection = collections.iter().find(|row| {
+            row["method"].as_str() == Some("Bank Transfer")
+                && json_decimal(&row["amount"]) == amount
+        });
+        assert!(
+            bank_collection.is_some(),
+            "26-Nov-style bank receipt must appear in payment-day collections, got {collections:?}"
+        );
+
+        let shift_stay = analytics_repo::generate_report(
+            &pool,
+            ReportQuery {
+                report_type: "shift_report".to_string(),
+                start_date: check_in_s.clone(),
+                end_date: check_in_s.clone(),
+                shift: None,
+                drawer: None,
+                company_name: None,
+                booking_channel_id: None,
+                booking_channel: None,
+                platform_name: None,
+                booking_status: None,
+                posted_status: None,
+                room_type: None,
+            },
+        )
+        .await
+        .expect("shift report on the stay date must succeed");
+        let stays = shift_stay["payments"].as_array().expect("stay list");
+        let stay = stays
+            .iter()
+            .find(|row| {
+                row["booking_number"].as_str() == Some(&format!("BK-AUD990-TENDER-{booking_id}"))
+            })
+            .expect("company stay must still list on the check-in date");
+        assert_eq!(stay["payment_status"].as_str(), Some("paid"));
+        let method = stay["payment_method"].as_str().unwrap_or_default();
+        assert!(
+            method.eq_ignore_ascii_case("bank_transfer"),
+            "stay list must show the ledger tender, got {method:?}"
+        );
+
+        let status_report = analytics_repo::generate_report(
+            &pool,
+            ReportQuery {
+                report_type: "payment_status".to_string(),
+                start_date: check_in_s.clone(),
+                end_date: check_in_s,
+                shift: None,
+                drawer: None,
+                company_name: None,
+                booking_channel_id: None,
+                booking_channel: None,
+                platform_name: None,
+                booking_status: None,
+                posted_status: None,
+                room_type: None,
+            },
+        )
+        .await
+        .expect("payment status report must succeed");
+        let by_status = status_report["by_status"].as_array().expect("by_status");
+        let unpaid = by_status.iter().find(|row| {
+            row["payment_status"].as_str() == Some("unpaid")
+                && row["count"].as_i64().unwrap_or(0) > 0
+        });
+        // This fixture must be counted as paid, not leftover unpaid.
+        let paid_row = by_status
+            .iter()
+            .find(|row| row["payment_status"].as_str() == Some("paid"))
+            .expect("paid bucket must exist for the settled ledger stay");
+        assert!(paid_row["count"].as_i64().unwrap_or(0) >= 1);
+        let _ = unpaid;
+
+        let journal_report = analytics_repo::generate_report(
+            &pool,
+            ReportQuery {
+                report_type: "general_journal".to_string(),
+                start_date: payment_day_s.clone(),
+                end_date: payment_day_s,
+                shift: None,
+                drawer: None,
+                company_name: None,
+                booking_channel_id: None,
+                booking_channel: None,
+                platform_name: None,
+                booking_status: None,
+                posted_status: None,
+                room_type: None,
+            },
+        )
+        .await
+        .expect("general journal must succeed");
+        let sections = journal_report["sections"]
+            .as_array()
+            .expect("general journal sections");
+        let city_section = sections
+            .iter()
+            .find(|section| section["name"].as_str() == Some("City Ledger"))
+            .expect("City Ledger section");
+        assert_eq!(json_decimal(&city_section["total_debit"]), amount);
+        assert_eq!(json_decimal(&city_section["total_credit"]), amount);
+
+        cleanup(
+            &pool,
+            actor_id,
+            booking_id,
+            guest_id,
+            room_id,
+            room_type_id,
+            ledger_id,
+        )
+        .await;
+    }
 }

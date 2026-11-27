@@ -8,7 +8,7 @@ use crate::core::settings_cache;
 use crate::models::ReportQuery;
 use crate::models::row_mappers;
 use crate::utils::date::parse_date_flexible;
-use crate::utils::report_labels::payment_account_label;
+use crate::utils::report_labels::{payment_account_label, payment_journal_account_label};
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::Row;
@@ -761,6 +761,73 @@ async fn generate_journal_by_type(
     }))
 }
 
+async fn hotel_timezone(pool: &DbPool) -> String {
+    sqlx::query_scalar::<_, String>("SELECT value FROM system_settings WHERE key = 'timezone'")
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "UTC".to_string())
+}
+
+/// Live payment status from the room-charge ledger (falling back to desk
+/// payments), matching `GET_BOOKINGS_BASE_QUERY`. Stored
+/// `bookings.payment_status` is often still `unpaid` after a Company Ledger
+/// settlement.
+const LIVE_PAYMENT_STATUS_EXPR: &str = r#"
+        CASE
+            WHEN b.status = 'voided' THEN 'voided'
+            WHEN b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) <= 0 THEN 'paid'
+            WHEN COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0))
+                 >= COALESCE(bk_charge.amount, b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0))
+                 THEN 'paid'
+            WHEN COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0)) > 0 THEN 'partial'
+            ELSE 'unpaid'
+        END
+"#;
+
+const LIVE_BALANCE_EXPR: &str = r#"
+        CASE WHEN COALESCE(bk_charge.amount, b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0))
+                  - COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0)) > 0
+             THEN COALESCE(bk_charge.amount, b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0))
+                  - COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0))
+             ELSE 0
+        END
+"#;
+
+const LIVE_PAYMENT_LATERAL_JOINS: &str = r#"
+        LEFT JOIN LATERAL (
+            SELECT cl.amount, cl.paid_amount, cl.payment_method
+            FROM customer_ledgers cl
+            WHERE cl.booking_id = b.id
+              AND cl.post_type = 'room_charge'
+              AND cl.status <> 'void'
+              AND cl.void_at IS NULL
+              AND COALESCE(cl.is_reversal, FALSE) = FALSE
+            ORDER BY cl.created_at DESC
+            LIMIT 1
+        ) bk_charge ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                GREATEST(
+                    COALESCE(SUM(p.amount) FILTER (
+                        WHERE p.status = 'completed'
+                          AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                    ), 0)
+                    - COALESCE(SUM(p.amount) FILTER (
+                        WHERE p.status <> 'void'
+                          AND COALESCE(p.payment_type, 'booking') = 'refund'
+                          AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+                    ), 0),
+                    0
+                ) AS completed_paid
+            FROM payments p
+            WHERE p.booking_id = b.id
+        ) bk_pay ON TRUE
+"#;
+
 // Shift Report
 async fn generate_shift_report(
     pool: &DbPool,
@@ -769,8 +836,10 @@ async fn generate_shift_report(
     _shift: Option<&str>,
     _drawer: Option<&str>,
 ) -> Result<serde_json::Value, ApiError> {
-    // Get detailed payment records from bookings
-    let rows = sqlx::query(
+    let timezone = hotel_timezone(pool).await;
+    let status_sql = LIVE_PAYMENT_STATUS_EXPR.trim();
+    let joins = LIVE_PAYMENT_LATERAL_JOINS.trim();
+    let stay_sql = format!(
         r#"SELECT
             b.booking_number,
             b.check_in_date,
@@ -779,8 +848,12 @@ async fn generate_shift_report(
             r.room_number,
             rt.name as room_type,
             b.total_amount,
-            b.payment_method,
-            b.payment_status,
+            CASE
+                WHEN COALESCE(bk_charge.paid_amount, 0) > 0
+                THEN COALESCE(NULLIF(BTRIM(bk_charge.payment_method), ''), b.payment_method)
+                ELSE b.payment_method
+            END AS payment_method,
+            {status_sql} AS payment_status,
             b.deposit_amount,
             b.deposit_paid,
             b.status as booking_status,
@@ -790,15 +863,19 @@ async fn generate_shift_report(
         JOIN guests g ON b.guest_id = g.id
         JOIN rooms r ON b.room_id = r.id
         LEFT JOIN room_types rt ON r.room_type_id = rt.id
+        {joins}
         WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
         AND b.status IN ('confirmed', 'partial_complimentary', 'fully_complimentary', 'checked_in', 'auto_checked_in', 'late_checkout', 'checked_out', 'completed')
-        ORDER BY b.check_in_date ASC, b.created_at ASC"#,
-    )
-    .bind(start_date)
-    .bind(end_date)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?;
+        ORDER BY b.check_in_date ASC, b.created_at ASC"#
+    );
+
+    // Get detailed payment records from bookings (live ledger status/tender)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(&*stay_sql))
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let mut payments: Vec<serde_json::Value> = Vec::new();
     let mut total_revenue = Decimal::ZERO;
@@ -827,7 +904,10 @@ async fn generate_shift_report(
             total_deposits += dep;
         }
 
-        let method = payment_method.clone().unwrap_or_else(|| "cash".to_string());
+        let method = payment_method
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "unspecified".to_string());
         *payment_by_method
             .entry(method.clone())
             .or_insert(Decimal::ZERO) += total_amount;
@@ -839,7 +919,7 @@ async fn generate_shift_report(
             "room_number": room_number,
             "room_type": room_type.unwrap_or_default(),
             "amount": total_amount,
-            "payment_method": payment_method.unwrap_or_else(|| "cash".to_string()),
+            "payment_method": method,
             "payment_status": payment_status.unwrap_or_else(|| "unpaid".to_string()),
             "deposit_amount": deposit_amount.unwrap_or(Decimal::ZERO),
             "deposit_paid": deposit_paid.unwrap_or(false),
@@ -848,17 +928,62 @@ async fn generate_shift_report(
         }));
     }
 
-    // Build payment method summary
-    let payment_summary: Vec<serde_json::Value> = payment_by_method
-        .iter()
-        .map(|(method, amount)| {
-            serde_json::json!({
-                "method": method,
-                "amount": amount,
-                "count": payments.iter().filter(|p| p["payment_method"] == *method).count()
-            })
-        })
-        .collect();
+    // Collections in the report window: desk payments plus city-ledger
+    // receipts, dated in the hotel timezone. This is what the shift summary
+    // should show (a 26 Nov cash receipt appears on 26 Nov, not only on
+    // the check-in date).
+    let collection_rows = sqlx::query(
+        r#"
+        SELECT method, SUM(amount) AS amount, COUNT(*)::bigint AS count
+        FROM (
+            SELECT COALESCE(NULLIF(BTRIM(p.payment_method), ''), 'unspecified') AS method,
+                   p.amount
+            FROM payments p
+            JOIN bookings b ON p.booking_id = b.id
+            WHERE p.status = 'completed'
+              AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+              AND b.status <> 'voided'
+              AND p.created_at >= ($1::date::timestamp AT TIME ZONE $3)
+              AND p.created_at < (($2::date + 1)::timestamp AT TIME ZONE $3)
+            UNION ALL
+            SELECT COALESCE(NULLIF(BTRIM(clp.payment_method), ''), 'unspecified') AS method,
+                   clp.payment_amount
+            FROM customer_ledger_payments clp
+            JOIN customer_ledgers cl ON clp.ledger_id = cl.id
+            WHERE cl.void_at IS NULL
+              AND clp.payment_date >= ($1::date::timestamp AT TIME ZONE $3)
+              AND clp.payment_date < (($2::date + 1)::timestamp AT TIME ZONE $3)
+        ) receipts
+        GROUP BY method
+        ORDER BY method
+        "#,
+    )
+    .bind(start_date)
+    .bind(end_date)
+    .bind(&timezone)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    let mut collections: Vec<serde_json::Value> = Vec::new();
+    let mut collections_total = Decimal::ZERO;
+    for row in &collection_rows {
+        let raw_method: String = row.get("method");
+        let method = payment_journal_account_label(Some("booking"), Some(&raw_method));
+        let amount = row_mappers::get_decimal(row, "amount");
+        let count = row.try_get::<i64, _>("count").unwrap_or(0);
+        collections_total += amount;
+        collections.push(serde_json::json!({
+            "method": method,
+            "amount": amount,
+            "count": count
+        }));
+    }
+
+    // Stay-day method totals (kept for the booking list). Collections, not
+    // stay revenue, are what `by_payment_method` reports so Cash / Bank
+    // Transfer include company-ledger receipts on the payment date.
+    let _stay_method_totals = payment_by_method;
 
     Ok(serde_json::json!({
         "period": {
@@ -870,8 +995,10 @@ async fn generate_shift_report(
             "total_bookings": payments.len(),
             "total_revenue": total_revenue,
             "total_deposits": total_deposits,
+            "total_collections": collections_total,
         },
-        "by_payment_method": payment_summary,
+        "by_payment_method": collections,
+        "collections": collections,
     }))
 }
 
@@ -1221,13 +1348,86 @@ async fn generate_general_journal(
         "net_amount": guest_net
     }));
 
-    // City Ledger section (empty for now - would come from customer_ledgers)
+    // City Ledger receipts in the window: debit the tender and credit AR.
+    let timezone = hotel_timezone(pool).await;
+    let clp_rows = sqlx::query(
+        r#"
+        SELECT
+            (clp.payment_date AT TIME ZONE $3)::date AS date,
+            clp.payment_amount,
+            COALESCE(clp.payment_method, '') AS payment_method,
+            COALESCE(cl.room_number, '') AS room_number,
+            cl.company_name,
+            COALESCE(cl.invoice_number, '') AS invoice_number,
+            COALESCE(clp.payment_reference, '') AS payment_reference
+        FROM customer_ledger_payments clp
+        JOIN customer_ledgers cl ON clp.ledger_id = cl.id
+        WHERE cl.void_at IS NULL
+          AND clp.payment_date >= ($1::date::timestamp AT TIME ZONE $3)
+          AND clp.payment_date < (($2::date + 1)::timestamp AT TIME ZONE $3)
+        ORDER BY clp.payment_date, cl.company_name, clp.id
+        "#,
+    )
+    .bind(start_date)
+    .bind(end_date)
+    .bind(&timezone)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    let mut city_ledger_entries: Vec<serde_json::Value> = Vec::new();
+    let mut city_ledger_debit = Decimal::ZERO;
+    let mut city_ledger_credit = Decimal::ZERO;
+    for row in clp_rows {
+        let date: NaiveDate = row.get("date");
+        let date_str = date.format("%d/%m/%Y").to_string();
+        let amount = row_mappers::get_decimal(&row, "payment_amount");
+        let payment_method: String = row.get("payment_method");
+        let room_number: String = row.get("room_number");
+        let company_name: String = row.get("company_name");
+        let invoice_number: String = row.get("invoice_number");
+        let payment_reference: String = row.get("payment_reference");
+        let tender = payment_journal_account_label(Some("booking"), Some(&payment_method));
+        let mut memo_parts = vec![company_name];
+        if !invoice_number.trim().is_empty() {
+            memo_parts.push(invoice_number.trim().to_string());
+        }
+        if !payment_reference.trim().is_empty() {
+            memo_parts.push(format!("Ref {}", payment_reference.trim()));
+        }
+        let memo = memo_parts.join(", ");
+
+        city_ledger_entries.push(serde_json::json!({
+            "date": date_str,
+            "account": tender,
+            "debit": amount,
+            "credit": 0,
+            "contra_account": "City Ledger",
+            "contra_amount": amount,
+            "room_number": room_number,
+            "description": memo,
+        }));
+        city_ledger_debit += amount;
+
+        city_ledger_entries.push(serde_json::json!({
+            "date": date_str,
+            "account": "City Ledger",
+            "debit": 0,
+            "credit": amount,
+            "contra_account": tender,
+            "contra_amount": amount,
+            "room_number": room_number,
+            "description": memo,
+        }));
+        city_ledger_credit += amount;
+    }
+
     sections.push(serde_json::json!({
         "name": "City Ledger",
-        "entries": [],
-        "total_debit": 0,
-        "total_credit": 0,
-        "net_amount": 0
+        "entries": city_ledger_entries,
+        "total_debit": city_ledger_debit,
+        "total_credit": city_ledger_credit,
+        "net_amount": city_ledger_debit - city_ledger_credit
     }));
 
     // Deposits Pending section
@@ -1747,57 +1947,71 @@ async fn generate_payment_status_report(
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> Result<serde_json::Value, ApiError> {
-    // Bookings by payment status
-    let by_status = sqlx::query(
-        r#"
-        SELECT payment_status, COUNT(*) AS bookings, SUM(total_amount) AS total_amount
-        FROM bookings
-        WHERE check_in_date >= $1 AND check_in_date <= $2
-        AND status NOT IN ('voided')
-        GROUP BY payment_status
-        ORDER BY COUNT(*) DESC
-        "#,
-    )
-    .bind(start_date)
-    .bind(end_date)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?;
+    let status_sql = LIVE_PAYMENT_STATUS_EXPR.trim();
+    let balance_sql = LIVE_BALANCE_EXPR.trim();
+    let joins = LIVE_PAYMENT_LATERAL_JOINS.trim();
 
-    // Calculate outstanding balance (unpaid bookings)
-    let outstanding_row = sqlx::query(
+    // Bookings by live payment status (ledger-aware)
+    let by_status_sql = format!(
         r#"
-        SELECT SUM(total_amount) AS outstanding_balance FROM bookings
-        WHERE check_in_date >= $1 AND check_in_date <= $2
-        AND status NOT IN ('voided')
-        AND payment_status IN ('unpaid', 'unpaid_deposit', 'partial')
-        "#,
-    )
-    .bind(start_date)
-    .bind(end_date)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?;
+        SELECT {status_sql} AS payment_status,
+               COUNT(*) AS bookings,
+               SUM(b.total_amount) AS total_amount
+        FROM bookings b
+        {joins}
+        WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
+        AND b.status NOT IN ('voided')
+        GROUP BY 1
+        ORDER BY COUNT(*) DESC
+        "#
+    );
+    let by_status = sqlx::query(sqlx::AssertSqlSafe(&*by_status_sql))
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    // Outstanding uses the live balance so a fully settled ledger stay is
+    // not still counted from the stale stored `unpaid` flag.
+    let outstanding_sql = format!(
+        r#"
+        SELECT SUM({balance_sql}) AS outstanding_balance
+        FROM bookings b
+        {joins}
+        WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
+        AND b.status NOT IN ('voided')
+        AND ({status_sql}) IN ('unpaid', 'unpaid_deposit', 'partial')
+        "#
+    );
+    let outstanding_row = sqlx::query(sqlx::AssertSqlSafe(&*outstanding_sql))
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
     let outstanding = row_mappers::get_opt_decimal(&outstanding_row, "outstanding_balance");
 
-    // Overdue payments (past check-out with unpaid status)
-    let overdue = sqlx::query(
+    // Overdue payments (past check-out with live unpaid/partial status)
+    let overdue_sql = format!(
         r#"
         SELECT b.id, b.booking_number, g.nick_name AS guest_name, r.room_number,
-               b.total_amount, b.check_out_date, b.payment_status
+               b.total_amount, b.check_out_date, {status_sql} AS payment_status
         FROM bookings b
         JOIN guests g ON b.guest_id = g.id
         JOIN rooms r ON b.room_id = r.id
+        {joins}
         WHERE b.check_out_date < CURRENT_DATE
         AND b.status NOT IN ('voided')
-        AND b.payment_status IN ('unpaid', 'unpaid_deposit', 'partial')
+        AND ({status_sql}) IN ('unpaid', 'unpaid_deposit', 'partial')
         ORDER BY b.check_out_date DESC
         LIMIT 50
-        "#,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ApiError::Database(e.to_string()))?;
+        "#
+    );
+    let overdue = sqlx::query(sqlx::AssertSqlSafe(&*overdue_sql))
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
 
     let by_status_json: Vec<serde_json::Value> = by_status
         .iter()

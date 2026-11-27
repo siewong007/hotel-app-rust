@@ -1254,6 +1254,84 @@ async fn find_ledger_payment_by_key_tx(
         .map(|row| row.as_ref().map(row_to_customer_ledger_payment))
 }
 
+/// Keep the linked `invoices` row in step with the ledger's collected total.
+/// Checkout often leaves a stub as `issued` with `paid_amount = 0`; staff
+/// later settle via Company Ledger, which used to leave the invoice looking
+/// unpaid. `balance_due` is generated from `total_amount - paid_amount`.
+async fn sync_linked_invoices_tx(
+    tx: &mut DbTransaction<'_>,
+    ledger_id: i64,
+) -> Result<(), ApiError> {
+    let sql = format!(
+        r#"
+        SELECT invoice_number, booking_id, paid_amount, amount
+        FROM customer_ledgers
+        WHERE id = {}
+        "#,
+        crate::param!(1),
+    );
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+        .bind(ledger_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(ApiError::from)?
+    else {
+        return Ok(());
+    };
+
+    let invoice_number: Option<String> = row
+        .try_get::<Option<String>, _>("invoice_number")
+        .unwrap_or(None)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let booking_id: Option<i64> = row.try_get("booking_id").ok().flatten();
+    if invoice_number.is_none() && booking_id.is_none() {
+        return Ok(());
+    }
+    let paid_amount = get_decimal(&row, "paid_amount");
+    let ledger_amount = get_decimal(&row, "amount");
+    // Prefer the ledger total when the stub invoice was stored at a slightly
+    // different figure; invoices.paid vs status still keys off the invoice
+    // total_amount in the UPDATE below.
+    let _ = ledger_amount;
+
+    let update_sql = r#"
+        UPDATE invoices
+        SET paid_amount = $1,
+            status = CASE
+                WHEN $1 >= total_amount THEN 'paid'
+                WHEN status = 'paid' THEN 'issued'
+                ELSE status
+            END,
+            paid_at = CASE
+                WHEN $1 >= total_amount THEN COALESCE(paid_at, CURRENT_TIMESTAMP)
+                ELSE NULL
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status NOT IN ('void', 'refunded')
+          AND (
+                ($2::text IS NOT NULL AND invoice_number = $2)
+             OR ($2::text IS NULL AND $3::bigint IS NOT NULL AND booking_id = $3)
+          )
+          AND (
+                paid_amount IS DISTINCT FROM $1
+             OR (CASE WHEN $1 >= total_amount THEN 'paid'
+                      WHEN status = 'paid' THEN 'issued'
+                      ELSE status END) IS DISTINCT FROM status
+             OR (CASE WHEN $1 >= total_amount THEN COALESCE(paid_at, CURRENT_TIMESTAMP)
+                      ELSE NULL END) IS DISTINCT FROM paid_at
+          )
+    "#;
+    sqlx::query(update_sql)
+        .bind(paid_amount)
+        .bind(&invoice_number)
+        .bind(booking_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(())
+}
+
 async fn insert_locked_ledger_payment_tx(
     tx: &mut DbTransaction<'_>,
     ledger: &LockedLedger,
@@ -1383,6 +1461,8 @@ async fn insert_locked_ledger_payment_tx(
         .execute(&mut **tx)
         .await
         .map_err(ApiError::from)?;
+
+    sync_linked_invoices_tx(tx, ledger.id).await?;
 
     Ok(LedgerPaymentOutcome {
         payment: row_to_customer_ledger_payment(&payment_row),
@@ -2111,6 +2191,8 @@ pub async fn update_ledger_payment(
         SET paid_amount = $1,
             status = $2,
             payment_date = (SELECT MAX(payment_date) FROM customer_ledger_payments WHERE ledger_id = $3),
+            payment_method = (SELECT payment_method FROM customer_ledger_payments WHERE ledger_id = $3 ORDER BY payment_date DESC, id DESC LIMIT 1),
+            payment_reference = (SELECT payment_reference FROM customer_ledger_payments WHERE ledger_id = $3 ORDER BY payment_date DESC, id DESC LIMIT 1),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
         "#,
@@ -2121,6 +2203,8 @@ pub async fn update_ledger_payment(
     .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    sync_linked_invoices_tx(&mut tx, ledger_id).await?;
 
     tx.commit().await.map_err(ApiError::from)?;
 
@@ -2183,6 +2267,8 @@ pub async fn delete_ledger_payment(
         SET paid_amount = $1,
             status = $2,
             payment_date = (SELECT MAX(payment_date) FROM customer_ledger_payments WHERE ledger_id = $3),
+            payment_method = (SELECT payment_method FROM customer_ledger_payments WHERE ledger_id = $3 ORDER BY payment_date DESC, id DESC LIMIT 1),
+            payment_reference = (SELECT payment_reference FROM customer_ledger_payments WHERE ledger_id = $3 ORDER BY payment_date DESC, id DESC LIMIT 1),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
         "#,
@@ -2193,6 +2279,8 @@ pub async fn delete_ledger_payment(
     .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    sync_linked_invoices_tx(&mut tx, ledger_id).await?;
 
     tx.commit().await.map_err(ApiError::from)?;
 

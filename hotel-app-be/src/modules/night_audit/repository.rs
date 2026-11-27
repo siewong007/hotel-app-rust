@@ -1407,19 +1407,24 @@ pub async fn generate_journal_sections(
         }
     }
 
-    // City ledger payments received on the audit date
+    // City ledger receipts received on the audit date: debit the tender
+    // (Cash / Bank Transfer / …) and credit City Ledger AR the same day.
+    // Do not insert a parallel bookings `payments` row — that would double-count
+    // collections. Memo carries company, invoice, and payment reference.
     let city_ledger_query = r#"
         SELECT
             cl.company_name,
             COALESCE(cl.room_number, '') as room_number,
             clp.payment_amount,
-            COALESCE(clp.payment_method, 'Unknown') as payment_method
+            COALESCE(clp.payment_method, '') as payment_method,
+            COALESCE(cl.invoice_number, '') as invoice_number,
+            COALESCE(clp.payment_reference, '') as payment_reference
         FROM customer_ledger_payments clp
         JOIN customer_ledgers cl ON clp.ledger_id = cl.id
         WHERE cl.void_at IS NULL
         AND clp.payment_date >= ($1::date::timestamp AT TIME ZONE $2)
         AND clp.payment_date < (($1::date + 1)::timestamp AT TIME ZONE $2)
-        ORDER BY cl.company_name
+        ORDER BY cl.company_name, clp.id
     "#;
 
     match sqlx::query(city_ledger_query)
@@ -1434,14 +1439,34 @@ pub async fn generate_journal_sections(
                 let room_number: String = row.get("room_number");
                 let payment_amount = row_mappers::get_decimal(row, "payment_amount");
                 let payment_method: String = row.get("payment_method");
+                let invoice_number: String = row.get("invoice_number");
+                let payment_reference: String = row.get("payment_reference");
+                let account_name =
+                    payment_journal_account_label(Some("booking"), Some(&payment_method));
+                let mut memo_parts = vec![company_name.clone()];
+                if !invoice_number.trim().is_empty() {
+                    memo_parts.push(invoice_number.trim().to_string());
+                }
+                if !payment_reference.trim().is_empty() {
+                    memo_parts.push(format!("Ref {}", payment_reference.trim()));
+                }
+                let description = memo_parts.join(", ");
 
+                entries.push(JournalEntry {
+                    booking_number: company_name.clone(),
+                    room_number: room_number.clone(),
+                    entry_type: format!("payment_{}", account_name),
+                    debit: payment_amount,
+                    credit: Decimal::ZERO,
+                    description: Some(description.clone()),
+                });
                 entries.push(JournalEntry {
                     booking_number: company_name,
                     room_number,
                     entry_type: "city_ledger".to_string(),
-                    debit: payment_amount,
-                    credit: Decimal::ZERO,
-                    description: Some(format!("City Ledger Payment ({})", payment_method)),
+                    debit: Decimal::ZERO,
+                    credit: payment_amount,
+                    description: Some(description),
                 });
             }
         }

@@ -122,6 +122,7 @@ required_payload=(
   database/patches/0034_db_perf_integrity_hardening.sql
   database/patches/0035_bughunter_security_fixes.sql
   database/patches/0036_wave2_security_hardening.sql
+  database/patches/0037_sync_invoice_paid_from_ledger.sql
   database/db-least-privilege.sql
 )
 for payload in "${required_payload[@]}"; do
@@ -439,6 +440,7 @@ install_release_files() {
   install -m 0644 "$RELEASE_DIR/database/patches/0034_db_perf_integrity_hardening.sql" "$APP_DIR/database/patches/0034_db_perf_integrity_hardening.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0035_bughunter_security_fixes.sql" "$APP_DIR/database/patches/0035_bughunter_security_fixes.sql"
   install -m 0644 "$RELEASE_DIR/database/patches/0036_wave2_security_hardening.sql" "$APP_DIR/database/patches/0036_wave2_security_hardening.sql"
+  install -m 0644 "$RELEASE_DIR/database/patches/0037_sync_invoice_paid_from_ledger.sql" "$APP_DIR/database/patches/0037_sync_invoice_paid_from_ledger.sql"
   install -m 0644 "$RELEASE_DIR/database/db-least-privilege.sql" "$APP_DIR/database/db-least-privilege.sql"
   # The backend image runs as uid/gid 1000. Bind-mounted application state must
   # stay writable by that non-root user across container replacements.

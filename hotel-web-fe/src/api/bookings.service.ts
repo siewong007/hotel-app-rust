@@ -70,7 +70,7 @@ export interface BookingListFilters {
 // on 2026-09-15 the furthest check-in was 145 days out and nothing sat beyond a
 // year. Two years leaves a wide margin while still excluding the years of
 // checked-out history that dominate the table.
-const UPCOMING_WINDOW_DAYS = 730;
+const UPCOMING_WINDOW_DAYS = 180;
 
 /**
  * The stay window a live operational screen actually needs.

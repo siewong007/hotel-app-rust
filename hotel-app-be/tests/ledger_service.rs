@@ -1254,4 +1254,155 @@ mod postgres_tests {
             .await
             .unwrap();
     }
+
+    // Ledger receipts must flip the checkout invoice stub from issued/unpaid
+    // to paid so reports and the invoice screen match Company Ledger.
+    #[tokio::test]
+    async fn postgres_ledger_payment_syncs_issued_invoice_to_paid() {
+        let Some((pool, _guard)) = setup_pg_pool().await else {
+            return;
+        };
+        let actor_id = 910_001;
+        let booking_id = 910_107;
+        let guest_id = 910_207;
+        let room_id = 910_307;
+        let room_type_id = 910_407;
+        let company_name = "Lgr910 Invoice Sync Co";
+        let invoice_number = "INV-LGR910-SYNC";
+
+        ensure_test_actor(&pool, actor_id).await;
+        sqlx::query("DELETE FROM invoices WHERE invoice_number = $1 OR booking_id = $2")
+            .bind(invoice_number)
+            .bind(booking_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        cleanup_booking_fixture(
+            &pool,
+            booking_id,
+            guest_id,
+            room_id,
+            room_type_id,
+            company_name,
+        )
+        .await;
+
+        let check_in = hotel_today(&pool).await.expect("hotel today");
+        let check_out = check_in + Duration::days(1);
+        seed_company_billed_booking(
+            &pool,
+            CompanyBilledBookingFixture {
+                actor_id,
+                booking_id,
+                guest_id,
+                room_id,
+                room_type_id,
+                company_name,
+                room_rate: Decimal::new(9_500, 2),
+                nights: 1,
+                check_in,
+                check_out,
+            },
+        )
+        .await;
+
+        let Json(_) = bookings::update_booking_handler(
+            State(pool.clone()),
+            Extension(actor_id),
+            Path(booking_id),
+            Json(BookingUpdateInput {
+                rate_plan_id: None,
+                commission_type_override: None,
+                commission_value_override: None,
+                commission_scope_override: None,
+                status: Some("checked_out".to_string()),
+                ..empty_booking_update()
+            }),
+        )
+        .await
+        .expect("checkout should succeed");
+
+        let ledger_id = fetch_room_charge_ledger_id(&pool, booking_id).await;
+        let ledger = ledgers::get_customer_ledger(&pool, ledger_id)
+            .await
+            .expect("ledger after checkout");
+        assert_eq!(ledger.status, "pending");
+        assert_eq!(ledger.amount, Decimal::new(9_500, 2));
+
+        sqlx::query(
+            "INSERT INTO invoices (                invoice_number, booking_id, bill_to_guest_id, billing_name, issue_date,                 subtotal, total_amount, paid_amount, currency, line_items, status             ) VALUES ($1, $2, $3, $4, $5, $6, $6, 0, 'MYR', '[]'::jsonb, 'issued')",
+        )
+        .bind(invoice_number)
+        .bind(booking_id)
+        .bind(guest_id)
+        .bind(company_name)
+        .bind(check_out)
+        .bind(ledger.amount)
+        .execute(&pool)
+        .await
+        .expect("issued invoice stub must insert");
+
+        // Point the ledger at the stub number when checkout assigned a different one.
+        sqlx::query("UPDATE customer_ledgers SET invoice_number = $1 WHERE id = $2")
+            .bind(invoice_number)
+            .bind(ledger_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        ledgers::create_ledger_payment(
+            &pool,
+            ledger_id,
+            actor_id,
+            CustomerLedgerPaymentRequest {
+                payment_amount: 95.0,
+                payment_method: "cash".to_string(),
+                payment_reference: Some("SHALLY-CASH".to_string()),
+                receipt_number: Some("LGR910-INV-RCT".to_string()),
+                receipt_file_url: None,
+                notes: None,
+                payment_date: Some(check_out.format("%Y-%m-%d").to_string()),
+                idempotency_key: "lgr910-invoice-sync-cash".to_string(),
+            },
+        )
+        .await
+        .expect("full cash settlement should succeed");
+
+        let (paid_amount, status, paid_at_is_set): (Decimal, String, bool) = sqlx::query_as(
+            "SELECT paid_amount, status, paid_at IS NOT NULL FROM invoices WHERE invoice_number = $1",
+        )
+        .bind(invoice_number)
+        .fetch_one(&pool)
+        .await
+        .expect("invoice must still exist");
+        assert_eq!(paid_amount, Decimal::new(9_500, 2));
+        assert_eq!(status, "paid");
+        assert!(paid_at_is_set, "paid invoices must stamp paid_at");
+
+        // Idempotent: a second pass through the sync (via a no-op replay) must
+        // leave the row paid rather than error.
+        let paid_again: String =
+            sqlx::query_scalar("SELECT status FROM invoices WHERE invoice_number = $1")
+                .bind(invoice_number)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(paid_again, "paid");
+
+        sqlx::query("DELETE FROM invoices WHERE invoice_number = $1 OR booking_id = $2")
+            .bind(invoice_number)
+            .bind(booking_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        cleanup_booking_fixture(
+            &pool,
+            booking_id,
+            guest_id,
+            room_id,
+            room_type_id,
+            company_name,
+        )
+        .await;
+    }
 }

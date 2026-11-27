@@ -63,7 +63,15 @@ macro_rules! bookings_base_sql {
             WHEN COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0)) >= COALESCE(bk_charge.amount, b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0)) THEN 'paid'
             WHEN COALESCE(bk_charge.paid_amount, COALESCE(bk_pay.completed_paid, 0)) > 0 THEN 'partial'
             ELSE 'unpaid'
-        END AS payment_status, b.payment_method, b.source, b.booking_channel_id,
+        END AS payment_status,
+        -- Once a city-ledger stay is settled, show the actual tender
+        -- (cash / bank_transfer) rather than the stale bookings.payment_method
+        -- captured at check-in (often Cash or blank).
+        CASE
+            WHEN COALESCE(bk_charge.paid_amount, 0) > 0
+            THEN COALESCE(NULLIF(BTRIM(bk_charge.payment_method), ''), b.payment_method)
+            ELSE b.payment_method
+        END AS payment_method, b.source, b.booking_channel_id,
         bc.name AS booking_channel_name, bc.channel_type AS booking_channel_type,
         bc.settlement_payment_methods AS booking_channel_settlement_methods,
         b.ota_reference, b.remarks, b.special_requests, b.is_complimentary, b.complimentary_reason,
@@ -102,7 +110,7 @@ macro_rules! bookings_base_sql {
     LEFT JOIN booking_groups bgrp ON bgrp.id = b.booking_group_id
     LEFT JOIN users creator ON creator.id = b.created_by AND creator.deleted_at IS NULL
     LEFT JOIN LATERAL (
-        SELECT cl.amount, cl.paid_amount
+        SELECT cl.amount, cl.paid_amount, cl.payment_method
         FROM customer_ledgers cl
         WHERE cl.booking_id = b.id
           AND cl.post_type = 'room_charge'
@@ -222,6 +230,20 @@ mod tests {
         for sql in [GET_BOOKINGS_BASE_QUERY, GET_BOOKING_BY_ID_QUERY] {
             assert!(sql.contains("AS channel_payout_recorded"));
             assert!(sql.contains("bc.settlement_payment_methods, '{}'::text[]"));
+        }
+    }
+
+    #[test]
+    fn booking_payloads_prefer_the_ledger_tender_once_paid() {
+        for sql in [GET_BOOKINGS_BASE_QUERY, GET_BOOKING_BY_ID_QUERY] {
+            assert!(
+                sql.contains("bk_charge.payment_method"),
+                "list and detail must surface the ledger tender"
+            );
+            assert!(
+                sql.contains("WHEN COALESCE(bk_charge.paid_amount, 0) > 0"),
+                "stale bookings.payment_method is only overridden after a ledger receipt"
+            );
         }
     }
 }
