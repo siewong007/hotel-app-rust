@@ -842,6 +842,9 @@
     "/api/ledgers/company-payments": {
       "POST": {}
     },
+    "/api/ledgers/payments": {
+      "GET": {}
+    },
     "/api/ledgers/summary": {
       "GET": {}
     },

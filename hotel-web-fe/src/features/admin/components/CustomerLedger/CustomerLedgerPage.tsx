@@ -476,13 +476,11 @@ const CustomerLedgerPage: React.FC = () => {
   });
 
   useEffect(() => {
-    loadData();
-    loadGuests();
-
+    // useLedgers() handles initial ledger fetch via TanStack Query; guests load lazily when Check-In opens.
     const handleSettingsChange = () => setHotelSettings(getHotelSettings());
     window.addEventListener('hotelSettingsChange', handleSettingsChange);
     return () => window.removeEventListener('hotelSettingsChange', handleSettingsChange);
-  }, [loadData, loadGuests]);
+  }, []);
 
   // Handle opening checkout dialog for a company booking
   const handleOpenCheckoutDialog = (booking: BookingWithDetails) => {
@@ -1391,26 +1389,21 @@ const CustomerLedgerPage: React.FC = () => {
         return;
       }
 
-      const companyLedgers = activeCompanyAllEntries;
-      if (companyLedgers.length === 0) {
+      const visibleLedgerIds = activeCompanyEntries.map((ledger) => ledger.id);
+      if (visibleLedgerIds.length === 0) {
         setActiveCompanyPayments({});
         return;
       }
 
       setLoadingActiveCompanyPayments(true);
       try {
-        const rows = await Promise.all(
-          companyLedgers.map(async (ledger) => {
-            try {
-              const payments = await LedgerService.getLedgerPayments(ledger.id);
-              return [ledger.id, payments] as const;
-            } catch {
-              return [ledger.id, []] as const;
-            }
-          }),
-        );
+        const batch = await LedgerService.getLedgerPaymentsBatch(visibleLedgerIds);
         if (!cancelled) {
-          setActiveCompanyPayments(Object.fromEntries(rows));
+          setActiveCompanyPayments(batch);
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveCompanyPayments({});
         }
       } finally {
         if (!cancelled) setLoadingActiveCompanyPayments(false);
@@ -1421,7 +1414,7 @@ const CustomerLedgerPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeCompany, activeCompanyAllEntries]);
+  }, [activeCompany, activeCompanyEntries]);
 
   const visibleInvoiceLedgerEntries = useMemo(() => {
     return invoiceLedgerEntries.filter((ledger) => {

@@ -5,10 +5,11 @@ import { queryKeys } from '../../../api/queryKeys';
 import type { PasskeyStepUp } from '../../../auth/AuthContext';
 import type { PasskeyInfo, UserProfile, UserProfileUpdate, UserSessionInfo } from '../../../types';
 
-export function useProfileQuery() {
+export function useProfileQuery(enabled = true) {
   return useQuery<UserProfile>({
     queryKey: queryKeys.profile.me(),
     queryFn: () => UsersService.getUserProfile(),
+    enabled,
   });
 }
 

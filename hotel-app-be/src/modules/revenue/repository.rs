@@ -264,13 +264,14 @@ impl RevenueRepository {
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
                 CROSS JOIN LATERAL generate_series(
-                    b.check_in_date,
-                    GREATEST(b.check_out_date - 1, b.check_in_date),
+                    GREATEST(b.check_in_date, $1::date),
+                    LEAST(GREATEST(b.check_out_date - 1, b.check_in_date), $2::date),
                     interval '1 day'
                 ) AS gs
                 WHERE b.status NOT IN ('voided', 'comp_void', 'no_show')
                   AND ($3::bigint IS NULL OR b.booking_channel_id = $3)
-                  AND gs::date BETWEEN $1 AND $2
+                  AND b.check_in_date <= $2::date
+                  AND (b.check_out_date > $1::date OR b.check_in_date >= $1::date)
             )
             SELECT rt.id AS room_type_id, rt.name,
                    (SELECT COUNT(*) FROM rooms pr

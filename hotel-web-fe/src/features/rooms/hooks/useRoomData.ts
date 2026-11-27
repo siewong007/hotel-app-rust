@@ -12,12 +12,12 @@ const ROOM_DATA_REFETCH_INTERVAL_MS = 30_000;
 // `guestsEnabled` gates the full guest list — only the booking modal's guest
 // picker needs it, so the page passes its modal-open flag and the whole-table
 // fetch stays off the initial-load path.
-export function useRoomData(guestsEnabled = true) {
+export function useRoomData(guestsEnabled = true, bookingsEnabled = true) {
   const { t } = useTranslation('rooms');
   // Query-level polling pauses while the tab is hidden, unlike a setInterval.
   const roomsQuery = useRooms(true, ROOM_DATA_REFETCH_INTERVAL_MS);
   const guestsQuery = useGuests(undefined, guestsEnabled);
-  const bookingsQuery = useActiveBookings(true, ROOM_DATA_REFETCH_INTERVAL_MS);
+  const bookingsQuery = useActiveBookings(bookingsEnabled, ROOM_DATA_REFETCH_INTERVAL_MS);
   const { refetch: refetchRooms } = roomsQuery;
   const { refetch: refetchGuests } = guestsQuery;
   const { refetch: refetchBookings } = bookingsQuery;
@@ -33,24 +33,29 @@ export function useRoomData(guestsEnabled = true) {
   }, [refetchRooms, t]);
 
   const loadBookings = useCallback(async () => {
+    if (!bookingsEnabled) return;
     try {
       await refetchBookings();
     } catch (err) {
       console.error('Failed to load bookings:', err);
     }
-  }, [refetchBookings]);
+  }, [bookingsEnabled, refetchBookings]);
 
   const loadGuests = useCallback(async () => {
+    if (!guestsEnabled) return;
     try {
       await refetchGuests();
     } catch (err) {
       setError(errorMessage(err, t('errors.loadGuests')));
     }
-  }, [refetchGuests, t]);
+  }, [guestsEnabled, refetchGuests, t]);
 
   const reload = useCallback(async () => {
-    await Promise.all([loadRooms(), loadGuests(), loadBookings()]);
-  }, [loadRooms, loadGuests, loadBookings]);
+    const tasks: Promise<unknown>[] = [loadRooms()];
+    if (guestsEnabled) tasks.push(loadGuests());
+    if (bookingsEnabled) tasks.push(loadBookings());
+    await Promise.all(tasks);
+  }, [bookingsEnabled, guestsEnabled, loadRooms, loadGuests, loadBookings]);
 
   const allBookingsData = useMemo(
     () => (bookingsQuery.data ?? []) as BookingWithDetails[],

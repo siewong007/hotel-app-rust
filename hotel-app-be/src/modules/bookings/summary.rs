@@ -205,6 +205,35 @@ fn board_summary_sql() -> String {
 
     format!(
         r#"
+WITH bk_charge AS (
+    SELECT DISTINCT ON (cl.booking_id)
+        cl.booking_id,
+        cl.amount,
+        cl.paid_amount
+    FROM customer_ledgers cl
+    WHERE cl.post_type = 'room_charge'
+      AND cl.status <> 'void'
+      AND COALESCE(cl.is_reversal, FALSE) = FALSE
+    ORDER BY cl.booking_id, cl.created_at DESC
+),
+bk_pay AS (
+    SELECT
+        p.booking_id,
+        GREATEST(
+            COALESCE(SUM(p.amount) FILTER (
+                WHERE p.status = 'completed'
+                  AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+            ), 0)
+            - COALESCE(SUM(p.amount) FILTER (
+                WHERE p.status <> 'void'
+                  AND COALESCE(p.payment_type, 'booking') = 'refund'
+                  AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+            ), 0),
+            0
+        ) AS completed_paid
+    FROM payments p
+    GROUP BY p.booking_id
+)
 SELECT
     COUNT(*) FILTER (WHERE {arriving}) AS arriving,
     -- `canCheckIn`: confirmed or pending, on or after the arrival date. Inside
@@ -225,10 +254,10 @@ SELECT
     COUNT(*) FILTER (WHERE {company}) AS company_due,
     COALESCE(SUM({balance}) FILTER (WHERE {company}), 0) AS company_due_amount
 FROM bookings b
-{joins}
+LEFT JOIN bk_charge ON bk_charge.booking_id = b.id
+LEFT JOIN bk_pay ON bk_pay.booking_id = b.id
 WHERE b.status <> 'voided'
 "#,
-        joins = BALANCE_LATERAL_JOINS.trim(),
     )
 }
 

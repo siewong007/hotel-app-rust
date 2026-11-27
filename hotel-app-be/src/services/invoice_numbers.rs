@@ -6,6 +6,8 @@
 //! tables so a number issued for a checkout invoice never collides with one
 //! issued for a city-ledger entry in the same month.
 
+use std::collections::BTreeMap;
+
 use crate::core::db::{DbPool, DbTransaction};
 use crate::core::error::ApiError;
 use crate::repositories::invoice_numbers as repo;
@@ -52,40 +54,88 @@ pub async fn backfill_missing_booking_invoices(pool: &DbPool) -> Result<usize, A
         return Ok(0);
     }
 
-    let mut inserted = 0usize;
+    // Group ordered booking IDs by YYYYMM so each month executes one locked
+    // set-based INSERT instead of opening thousands of serial transactions at boot.
+    let mut by_month: BTreeMap<String, Vec<i64>> = BTreeMap::new();
     for (booking_id, yyyymm) in rows {
+        by_month.entry(yyyymm).or_default().push(booking_id);
+    }
+
+    let mut inserted = 0usize;
+    for (yyyymm, booking_ids) in by_month {
         let prefix = format!("INV-{}-", yyyymm);
         let pattern = format!("{}%", prefix);
         let lock_key = format!("invoice_number:{yyyymm}");
 
-        let result: Result<bool, ApiError> = async {
+        let result: Result<u64, ApiError> = async {
             let mut tx = pool.begin().await.map_err(ApiError::from)?;
             sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
                 .bind(&lock_key)
                 .execute(&mut *tx)
                 .await
                 .map_err(ApiError::from)?;
-            let already_has_invoice: bool =
-                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM invoices WHERE booking_id = $1)")
-                    .bind(booking_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(ApiError::from)?;
-            if already_has_invoice {
-                tx.commit().await.map_err(ApiError::from)?;
-                return Ok(false);
-            }
-            let max_seq = repo::max_invoice_sequence(&mut *tx, &pattern).await?;
-            let next = max_seq.unwrap_or(0) + 1;
-            let invoice_number = format!("{}{:04}", prefix, next);
-            sqlx::query(
+            let max_seq = repo::max_invoice_sequence(&mut *tx, &pattern)
+                .await?
+                .unwrap_or(0);
+            let res = sqlx::query(
                 r#"
+                WITH target AS (
+                    SELECT u.booking_id, u.ord
+                    FROM UNNEST($1::bigint[]) WITH ORDINALITY AS u(booking_id, ord)
+                    INNER JOIN bookings b ON b.id = u.booking_id
+                    WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.booking_id = b.id)
+                ),
+                numbered AS (
+                    SELECT t.booking_id,
+                           $2 || CASE
+                               WHEN ($3 + ROW_NUMBER() OVER (ORDER BY t.ord)) < 10000
+                               THEN LPAD(($3 + ROW_NUMBER() OVER (ORDER BY t.ord))::text, 4, '0')
+                               ELSE ($3 + ROW_NUMBER() OVER (ORDER BY t.ord))::text
+                           END AS invoice_number
+                    FROM target t
+                ),
+                booking_paid AS (
+                    SELECT b.id AS booking_id,
+                           b.total_amount + COALESCE(b.tourism_tax_amount, 0) + COALESCE(b.extra_bed_charge, 0) AS invoice_total,
+                           COALESCE(
+                               bk_charge.paid_amount,
+                               GREATEST(
+                                   COALESCE(SUM(p.amount) FILTER (
+                                       WHERE p.status = 'completed'
+                                         AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                                   ), 0)
+                                   - COALESCE(SUM(p.amount) FILTER (
+                                       WHERE p.status <> 'void'
+                                         AND COALESCE(p.payment_type, 'booking') = 'refund'
+                                         AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+                                   ), 0),
+                                   0
+                               )
+                           ) AS completed_paid
+                    FROM bookings b
+                    INNER JOIN numbered n ON n.booking_id = b.id
+                    LEFT JOIN LATERAL (
+                        SELECT cl.paid_amount
+                        FROM customer_ledgers cl
+                        WHERE cl.booking_id = b.id
+                          AND cl.post_type = 'room_charge'
+                          AND cl.status <> 'void'
+                          AND cl.void_at IS NULL
+                          AND COALESCE(cl.is_reversal, FALSE) = FALSE
+                        ORDER BY cl.created_at DESC
+                        LIMIT 1
+                    ) bk_charge ON TRUE
+                    LEFT JOIN payments p ON p.booking_id = b.id
+                    GROUP BY b.id, b.total_amount, b.tourism_tax_amount, b.extra_bed_charge, bk_charge.paid_amount
+                )
                 INSERT INTO invoices (
-                    invoice_number, booking_id, billing_name, billing_email,
-                    subtotal, tax_amount, discount_amount, total_amount,
+                    invoice_number, booking_id, bill_to_guest_id, billing_name, billing_email,
+                    subtotal, tax_amount, discount_amount, total_amount, paid_amount,
                     line_items, status, invoice_type
                 )
-                SELECT $1, b.id,
+                SELECT n.invoice_number,
+                       b.id,
+                       b.guest_id,
                        CASE
                            WHEN NULLIF(BTRIM(g.first_name), '') IS NOT NULL
                             AND NULLIF(BTRIM(g.last_name), '') IS NOT NULL
@@ -97,35 +147,37 @@ pub async fn backfill_missing_booking_invoices(pool: &DbPool) -> Result<usize, A
                            + COALESCE(b.extra_bed_charge, 0),
                        COALESCE(b.tourism_tax_amount, 0),
                        COALESCE(b.discount_amount, 0),
-                       b.total_amount + COALESCE(b.tourism_tax_amount, 0)
-                           + COALESCE(b.extra_bed_charge, 0),
+                       bp.invoice_total,
+                       LEAST(GREATEST(bp.completed_paid, 0), GREATEST(bp.invoice_total, 0)),
                        '[]'::jsonb,
-                       'issued',
+                       CASE
+                           WHEN bp.invoice_total <= 0 OR bp.completed_paid >= bp.invoice_total
+                           THEN 'paid'
+                           ELSE 'issued'
+                       END,
                        'booking'
-                FROM bookings b
+                FROM numbered n
+                INNER JOIN bookings b ON b.id = n.booking_id
                 INNER JOIN guests g ON b.guest_id = g.id
-                WHERE b.id = $2
+                INNER JOIN booking_paid bp ON bp.booking_id = b.id
+                ORDER BY n.invoice_number
                 "#,
             )
-            .bind(&invoice_number)
-            .bind(booking_id)
+            .bind(&booking_ids)
+            .bind(&prefix)
+            .bind(max_seq)
             .execute(&mut *tx)
             .await
             .map_err(ApiError::from)?;
             tx.commit().await.map_err(ApiError::from)?;
-            Ok(true)
+            Ok(res.rows_affected())
         }
         .await;
 
         match result {
-            Ok(true) => inserted += 1,
-            Ok(false) => {}
+            Ok(count) => inserted += count as usize,
             Err(e) => {
-                log::warn!(
-                    "Failed to backfill invoice for booking {}: {}",
-                    booking_id,
-                    e
-                );
+                log::warn!("Failed to backfill invoices for month {}: {}", yyyymm, e);
             }
         }
     }

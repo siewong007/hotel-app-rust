@@ -2,6 +2,7 @@ import { Suspense, useEffect, type ComponentType } from 'react';
 import { createRootRoute, createRoute, createRouter, useNavigate } from '@tanstack/react-router';
 import { LogoLoader, StatusPage } from '../components';
 import { lazyRoute } from '../navigation/lazyRoute';
+import { parsePlainSearch, stringifyPlainSearch } from '../router/compat';
 import { useLocation } from '../router';
 import { UnauthOnlyRoute } from '../router/RouteGuards';
 import { GuestRootLayout } from './GuestRootLayout';
@@ -161,4 +162,6 @@ const routeTree = rootRoute.addChildren([
 export const guestRouter = createRouter({
   routeTree,
   defaultPreload: 'intent',
+  parseSearch: parsePlainSearch,
+  stringifySearch: stringifyPlainSearch,
 });

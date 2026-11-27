@@ -300,9 +300,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     const initializeAuth = async () => {
-      // No token survives a reload (it lives in memory only). Try to silently
-      // re-mint an access token from the HttpOnly refresh cookie; the browser
-      // sends it automatically. If there's no valid cookie, we're logged out.
+      // No token survives a reload (it lives in memory only). Avoid issuing a
+      // noisy POST /auth/refresh (401 + IP rate-limit burn) on public routes when
+      // there is neither a cached session nor an active server session hint.
+      const hasCachedUser = Boolean(storage.getItem('user'));
+      if (!hasCachedUser && typeof AuthService.getSessionHint === 'function') {
+        const hint = await AuthService.getSessionHint();
+        if (!hint.signed_in) {
+          setAuthState(prev => ({ ...prev, isLoading: false }));
+          return;
+        }
+      }
+
+      // Silently re-mint an access token from the HttpOnly refresh cookie; the
+      // browser sends it automatically. If there's no valid cookie, we're logged out.
       const refreshed = await refreshAccessToken();
       if (!refreshed) {
         setAuthState(prev => ({ ...prev, isLoading: false }));

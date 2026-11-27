@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   reload: vi.fn(),
   setRoomSearch: vi.fn(),
   setRoomStatusFilter: vi.fn(),
+  hasPermission: vi.fn<(permission: string) => boolean>(() => true),
+  useRoomDataArgs: vi.fn<(guestsEnabled?: boolean, bookingsEnabled?: boolean) => void>(),
   rooms: [] as import('../../../../types').Room[],
   roomBookings: new Map<string, import('../../../../types').BookingWithDetails>(),
   reservedBookings: new Map<string, import('../../../../types').BookingWithDetails>(),
@@ -62,22 +64,25 @@ vi.mock('../../../../hooks/useCurrency', () => ({
 }));
 
 vi.mock('../../../../auth/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({ hasPermission: (permission: string) => mocks.hasPermission(permission) }),
 }));
 
 vi.mock('../../hooks', () => ({
-  useRoomData: () => ({
-    rooms: mocks.rooms,
-    guests: [],
-    loading: mocks.roomData.loading,
-    error: mocks.roomData.error,
-    roomBookings: mocks.roomBookings,
-    reservedBookings: mocks.reservedBookings,
-    allBookingsData: [],
-    reload: mocks.reload,
-    reloadRooms: vi.fn(),
-    reloadBookings: vi.fn(),
-  }),
+  useRoomData: (guestsEnabled?: boolean, bookingsEnabled?: boolean) => {
+    mocks.useRoomDataArgs(guestsEnabled, bookingsEnabled);
+    return {
+      rooms: mocks.rooms,
+      guests: [],
+      loading: mocks.roomData.loading,
+      error: mocks.roomData.error,
+      roomBookings: mocks.roomBookings,
+      reservedBookings: mocks.reservedBookings,
+      allBookingsData: [],
+      reload: mocks.reload,
+      reloadRooms: vi.fn(),
+      reloadBookings: vi.fn(),
+    };
+  },
   useRoomNotes: () => ({
     notesDialogOpen: false,
     notesRoom: null,
@@ -340,6 +345,8 @@ const statusInfo = (overrides: Partial<RoomManagementStatusInfo>): RoomManagemen
 describe('RoomManagementPage', () => {
   beforeEach(() => {
     mocks.isPhone = false;
+    mocks.hasPermission.mockImplementation(() => true);
+    mocks.useRoomDataArgs.mockClear();
     mocks.roomData.loading = false;
     mocks.roomData.error = null;
     mocks.rooms = [];
@@ -618,5 +625,11 @@ describe('RoomManagementPage — awaiting-payment holds', () => {
     fireEvent.click(screen.getByRole('button', { name: /Room 102/ }));
     expect(await screen.findByText('Edit booking notes')).toBeTruthy();
     expect(screen.queryByText('Check-in guest')).toBeNull();
+  });
+
+  it('disables booking and guest fetches when bookings:read permission is absent', () => {
+    mocks.hasPermission.mockImplementation((perm: string) => perm === 'rooms:read');
+    renderPage();
+    expect(mocks.useRoomDataArgs).toHaveBeenCalledWith(false, false);
   });
 });

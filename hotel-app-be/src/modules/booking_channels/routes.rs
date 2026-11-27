@@ -22,6 +22,12 @@ use crate::models::{
 };
 
 pub fn routes() -> Router<DbPool> {
+    let preview_route = Router::new()
+        .route("/channel-pricing/preview", axum::routing::post(preview))
+        .route_layer(axum::middleware::from_fn(
+            crate::core::rate_limiter::limit_channel_preview,
+        ));
+
     Router::new()
         .route("/booking-channels", get(list_channels).post(create_channel))
         .route(
@@ -61,8 +67,8 @@ pub fn routes() -> Router<DbPool> {
             "/channel-rate-plan-mappings/{id}",
             axum::routing::delete(delete_rate_plan_mapping),
         )
-        .route("/channel-pricing/preview", axum::routing::post(preview))
         .route("/channel-pricing/matrix", get(matrix))
+        .merge(preview_route)
 }
 
 /// The channel registry powers both booking attribution (receptionists pick a

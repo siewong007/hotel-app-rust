@@ -1951,61 +1951,92 @@ async fn generate_payment_status_report(
     let balance_sql = LIVE_BALANCE_EXPR.trim();
     let joins = LIVE_PAYMENT_LATERAL_JOINS.trim();
 
-    // Bookings by live payment status (ledger-aware)
-    let by_status_sql = format!(
+    // Derive status & balance once per stay in the period instead of running the
+    // LATERAL joins twice across separate by-status and outstanding queries.
+    let period_sql = format!(
         r#"
-        SELECT {status_sql} AS payment_status,
+        WITH scoped AS (
+            SELECT b.total_amount,
+                   ({status_sql}) AS payment_status,
+                   ({balance_sql}) AS balance_due
+            FROM bookings b
+            {joins}
+            WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
+              AND b.status NOT IN ('voided')
+        )
+        SELECT payment_status,
                COUNT(*) AS bookings,
-               SUM(b.total_amount) AS total_amount
-        FROM bookings b
-        {joins}
-        WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-        AND b.status NOT IN ('voided')
-        GROUP BY 1
+               SUM(total_amount) AS total_amount,
+               COALESCE(SUM(balance_due) FILTER (WHERE payment_status IN ('unpaid', 'unpaid_deposit', 'partial')), 0) AS outstanding_balance
+        FROM scoped
+        GROUP BY payment_status
         ORDER BY COUNT(*) DESC
         "#
     );
-    let by_status = sqlx::query(sqlx::AssertSqlSafe(&*by_status_sql))
+    let by_status = sqlx::query(sqlx::AssertSqlSafe(&*period_sql))
         .bind(start_date)
         .bind(end_date)
         .fetch_all(pool)
         .await
         .map_err(|e| ApiError::Database(e.to_string()))?;
 
-    // Outstanding uses the live balance so a fully settled ledger stay is
-    // not still counted from the stale stored `unpaid` flag.
-    let outstanding_sql = format!(
-        r#"
-        SELECT SUM({balance_sql}) AS outstanding_balance
-        FROM bookings b
-        {joins}
-        WHERE b.check_in_date >= $1 AND b.check_in_date <= $2
-        AND b.status NOT IN ('voided')
-        AND ({status_sql}) IN ('unpaid', 'unpaid_deposit', 'partial')
-        "#
-    );
-    let outstanding_row = sqlx::query(sqlx::AssertSqlSafe(&*outstanding_sql))
-        .bind(start_date)
-        .bind(end_date)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| ApiError::Database(e.to_string()))?;
-    let outstanding = row_mappers::get_opt_decimal(&outstanding_row, "outstanding_balance");
+    let outstanding: Decimal = by_status
+        .iter()
+        .map(|row| {
+            row_mappers::get_opt_decimal(row, "outstanding_balance").unwrap_or(Decimal::ZERO)
+        })
+        .sum();
 
-    // Overdue payments (past check-out with live unpaid/partial status)
+    // Overdue payments (past check-out with live unpaid/partial status): pre-aggregate
+    // payments/ledgers once and resolve guest/room names only for the top 50 rows.
     let overdue_sql = format!(
         r#"
+        WITH bk_charge AS (
+            SELECT DISTINCT ON (cl.booking_id)
+                   cl.booking_id, cl.amount, cl.paid_amount
+            FROM customer_ledgers cl
+            WHERE cl.post_type = 'room_charge'
+              AND cl.status <> 'void'
+              AND cl.void_at IS NULL
+              AND COALESCE(cl.is_reversal, FALSE) = FALSE
+            ORDER BY cl.booking_id, cl.created_at DESC
+        ),
+        bk_pay AS (
+            SELECT p.booking_id,
+                   GREATEST(
+                       COALESCE(SUM(p.amount) FILTER (
+                           WHERE p.status = 'completed'
+                             AND COALESCE(p.payment_type, 'booking') NOT IN ('refund', 'deposit', 'deposit_forfeited', 'service', 'damage')
+                       ), 0)
+                       - COALESCE(SUM(p.amount) FILTER (
+                           WHERE p.status <> 'void'
+                             AND COALESCE(p.payment_type, 'booking') = 'refund'
+                             AND COALESCE(p.notes, '') LIKE 'Room charge refunded%'
+                       ), 0),
+                       0
+                   ) AS completed_paid
+            FROM payments p
+            GROUP BY p.booking_id
+        ),
+        overdue_ids AS (
+            SELECT b.id, b.booking_number, b.guest_id, b.room_id,
+                   b.total_amount, b.check_out_date,
+                   {status_sql} AS payment_status
+            FROM bookings b
+            LEFT JOIN bk_charge ON bk_charge.booking_id = b.id
+            LEFT JOIN bk_pay ON bk_pay.booking_id = b.id
+            WHERE b.check_out_date < CURRENT_DATE
+              AND b.status NOT IN ('voided')
+              AND ({status_sql}) IN ('unpaid', 'unpaid_deposit', 'partial')
+            ORDER BY b.check_out_date DESC
+            LIMIT 50
+        )
         SELECT b.id, b.booking_number, g.nick_name AS guest_name, r.room_number,
-               b.total_amount, b.check_out_date, {status_sql} AS payment_status
-        FROM bookings b
+               b.total_amount, b.check_out_date, b.payment_status
+        FROM overdue_ids b
         JOIN guests g ON b.guest_id = g.id
         JOIN rooms r ON b.room_id = r.id
-        {joins}
-        WHERE b.check_out_date < CURRENT_DATE
-        AND b.status NOT IN ('voided')
-        AND ({status_sql}) IN ('unpaid', 'unpaid_deposit', 'partial')
         ORDER BY b.check_out_date DESC
-        LIMIT 50
         "#
     );
     let overdue = sqlx::query(sqlx::AssertSqlSafe(&*overdue_sql))
@@ -2048,7 +2079,7 @@ async fn generate_payment_status_report(
             "end": end_date.to_string()
         },
         "by_status": by_status_json,
-        "outstanding_balance": outstanding.unwrap_or(Decimal::ZERO).to_string().parse::<f64>().unwrap_or(0.0),
+        "outstanding_balance": outstanding.to_string().parse::<f64>().unwrap_or(0.0),
         "overdue": overdue_json,
         "overdue_count": overdue_json.len()
     }))

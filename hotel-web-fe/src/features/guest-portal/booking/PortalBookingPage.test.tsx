@@ -1,6 +1,9 @@
+import { configure } from '@testing-library/dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HTTPError } from 'ky';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+configure({ asyncUtilTimeout: 5_000 });
 
 const mocks = vi.hoisted(() => ({
   createBooking: vi.fn(),

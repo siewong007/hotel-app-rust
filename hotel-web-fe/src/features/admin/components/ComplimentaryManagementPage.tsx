@@ -43,25 +43,46 @@ export default function ComplimentaryManagementPage() {
   const { t } = useTranslation('admin');
   const queryClient = useQueryClient();
 
+  // UI state
+  const [tabValue, setTabValue] = useState(0);
+
+  // Dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<BookingWithDetails | null>(null);
+
+  // Credit CRUD dialog state
+  const [addCreditDialogOpen, setAddCreditDialogOpen] = useState(false);
+  const [editCreditDialogOpen, setEditCreditDialogOpen] = useState(false);
+  const [deleteCreditDialogOpen, setDeleteCreditDialogOpen] = useState(false);
+  const [selectedCredit, setSelectedCredit] = useState<GuestCredit | null>(null);
+
   const complimentaryQuery = useQuery({
     queryKey: queryKeys.complimentary.list(),
     queryFn: async () => {
-      const [bookingsData, creditsData, summaryData, guestsData, roomTypesData] = await Promise.all([
+      const [bookingsData, creditsData, summaryData, roomTypesData] = await Promise.all([
         BookingsService.getComplimentaryBookings(),
         BookingsService.getGuestsWithCredits(),
         BookingsService.getComplimentarySummary(),
-        GuestsService.getAllGuests(),
         RoomsService.getRoomTypes(),
       ]);
       return {
         bookings: (bookingsData || []) as BookingWithDetails[],
         guestCredits: (creditsData?.credits || []) as GuestCredit[],
         summary: summaryData as ComplimentarySummary | null,
-        guests: (guestsData || []) as GuestOption[],
         roomTypes: (roomTypesData || []) as RoomTypeOption[],
       };
     },
     staleTime: queryStaleTime.short,
+  });
+
+  // Load the full guest picker list only when opening AddCreditDialog rather
+  // than pulling every guest row on initial page render.
+  const guestsQuery = useQuery({
+    queryKey: queryKeys.guests.list(),
+    queryFn: async () => (await GuestsService.getAllGuests()) as GuestOption[],
+    enabled: addCreditDialogOpen,
+    staleTime: queryStaleTime.standard,
   });
 
   const bookings = useMemo(
@@ -83,20 +104,7 @@ export default function ComplimentaryManagementPage() {
     queryClient.invalidateQueries({ queryKey: queryKeys.guests.all });
   };
 
-  // UI state
-  const [tabValue, setTabValue] = useState(0);
-
-  // Dialog state
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedBooking, setSelectedBooking] = useState<BookingWithDetails | null>(null);
-
-  // Credit CRUD dialog state
-  const [addCreditDialogOpen, setAddCreditDialogOpen] = useState(false);
-  const [editCreditDialogOpen, setEditCreditDialogOpen] = useState(false);
-  const [deleteCreditDialogOpen, setDeleteCreditDialogOpen] = useState(false);
-  const [selectedCredit, setSelectedCredit] = useState<GuestCredit | null>(null);
-  const guests = complimentaryQuery.data?.guests ?? [];
+  const guests = guestsQuery.data ?? [];
   const roomTypes = complimentaryQuery.data?.roomTypes ?? [];
 
   const handleEditClick = (booking: BookingWithDetails) => {

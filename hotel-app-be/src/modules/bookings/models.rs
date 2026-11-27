@@ -33,6 +33,9 @@ pub struct BookingPaginationParams {
     pub check_in_from: Option<NaiveDate>,
     /// Bookings with check-in <= this date.
     pub check_in_to: Option<NaiveDate>,
+    /// When set alongside a stay window, also retain currently in-house stays
+    /// (`checked_in`, `auto_checked_in`) even if overdue past `check_in_from`.
+    pub include_in_house: Option<bool>,
     /// Filter by calendar month (bookings overlapping this month). Pass a date in YYYY-MM-01 format.
     pub month_search: Option<NaiveDate>,
     /// Bookings board view: `arriving`, `in_house`, `departing`, `upcoming`,

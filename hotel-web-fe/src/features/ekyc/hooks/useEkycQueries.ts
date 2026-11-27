@@ -33,10 +33,11 @@ export function useEkycApplication(applicationId?: number) {
   });
 }
 
-export function useEkycReasonCodes() {
+export function useEkycReasonCodes(enabled = true) {
   return useQuery({
     queryKey: queryKeys.ekyc.reasonCodes(),
     queryFn: () => EkycService.getReasonCodes(),
+    enabled,
     staleTime: queryStaleTime.standard,
   });
 }

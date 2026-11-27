@@ -361,6 +361,13 @@ pub struct RateLimiters {
     pub grpc_user: KeyedRateLimiter,
     /// Per-email resend-verification budget: 3 attempts per 15 minutes.
     pub resend_verification_email: KeyedRateLimiter,
+    /// Per-user channel pricing preview budget: 60 calls per minute.
+    /// Bounds runaway client loops or scripts without affecting normal editing.
+    pub channel_preview: KeyedRateLimiter,
+    /// Per-IP access-token refresh budget: 60 calls per 5 minutes.
+    /// Kept separate from `sensitive` so normal multi-tab SPA restores and
+    /// shared hotel NATs cannot exhaust email-unsubscribe or verification limits.
+    pub refresh: RateLimiter,
 }
 
 impl RateLimiters {
@@ -476,8 +483,14 @@ impl RateLimiters {
             resend_verification_email: KeyedRateLimiter::postgres(
                 "resend_verification_email",
                 RateLimitConfig::new(3, 900),
-                pool,
+                pool.clone(),
             ),
+            channel_preview: KeyedRateLimiter::postgres(
+                "channel_preview",
+                RateLimitConfig::new(60, 60),
+                pool.clone(),
+            ),
+            refresh: RateLimiter::postgres("auth_refresh", RateLimitConfig::new(60, 300), pool),
         }
     }
 }
@@ -507,6 +520,34 @@ pub async fn limit_staff_admin(
         &limiters.admin_write
     };
     let (allowed, retry_after) = limiter.check_with_retry(user_id.to_string()).await;
+    if !allowed {
+        return ApiError::TooManyRequestsRetryAfter(
+            format!(
+                "Too many requests. Please try again in {} seconds.",
+                retry_after
+            ),
+            retry_after,
+        )
+        .into_response();
+    }
+    next.run(request).await
+}
+
+/// Rate limit for `POST /channel-pricing/preview`, keyed per signed-in user.
+/// Bounds accidental client polling loops or scripts while leaving normal
+/// booking edits and channel configuration unaffected.
+pub async fn limit_channel_preview(
+    Extension(limiters): Extension<RateLimiters>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Ok(user_id) = crate::core::middleware::require_auth(request.headers()).await else {
+        return next.run(request).await;
+    };
+    let (allowed, retry_after) = limiters
+        .channel_preview
+        .check_with_retry(user_id.to_string())
+        .await;
     if !allowed {
         return ApiError::TooManyRequestsRetryAfter(
             format!(
@@ -595,6 +636,26 @@ mod tests {
         assert!(retry_after > 0);
     }
 
+    fn test_limiters() -> RateLimiters {
+        let pool = DbPool::connect_lazy("postgres://unused@127.0.0.1:1/unused")
+            .expect("a lazy pool only parses its URL");
+        RateLimiters::new(pool)
+    }
+
+    fn test_bearer(user_id: i64) -> String {
+        let _ = crate::core::AuthService::init_jwt_secret(
+            "rate-limiter-unit-test-secret-at-least-32-characters",
+        );
+        let token = crate::core::AuthService::generate_session_jwt(
+            user_id,
+            format!("staff{user_id}"),
+            vec!["admin".to_string()],
+            format!("session-{user_id}"),
+        )
+        .expect("a test token encodes");
+        format!("Bearer {token}")
+    }
+
     mod staff_admin {
         use super::*;
         use axum::{Router, body::Body, http::StatusCode, routing::get};
@@ -604,29 +665,13 @@ mod tests {
         /// ones; the lazy pool is never connected, because nothing here
         /// reaches a Postgres-backed limiter.
         fn app(reads: u32, writes: u32) -> Router {
-            let pool = DbPool::connect_lazy("postgres://unused@127.0.0.1:1/unused")
-                .expect("a lazy pool only parses its URL");
-            let mut limiters = RateLimiters::new(pool);
+            let mut limiters = test_limiters();
             limiters.admin_read = KeyedRateLimiter::new(RateLimitConfig::new(reads, 300));
             limiters.admin_write = KeyedRateLimiter::new(RateLimitConfig::new(writes, 300));
             Router::new()
                 .route("/users", get(|| async { "ok" }).post(|| async { "ok" }))
                 .route_layer(axum::middleware::from_fn(limit_staff_admin))
                 .layer(Extension(limiters))
-        }
-
-        fn bearer(user_id: i64) -> String {
-            let _ = crate::core::AuthService::init_jwt_secret(
-                "rate-limiter-unit-test-secret-at-least-32-characters",
-            );
-            let token = crate::core::AuthService::generate_session_jwt(
-                user_id,
-                format!("staff{user_id}"),
-                vec!["admin".to_string()],
-                format!("session-{user_id}"),
-            )
-            .expect("a test token encodes");
-            format!("Bearer {token}")
         }
 
         async fn send(app: &Router, method: Method, auth: Option<&str>) -> Response {
@@ -643,8 +688,8 @@ mod tests {
         #[tokio::test]
         async fn reads_and_writes_spend_separate_budgets_per_staff_member() {
             let app = app(2, 1);
-            let alice = bearer(910_001);
-            let bob = bearer(910_002);
+            let alice = test_bearer(910_001);
+            let bob = test_bearer(910_002);
 
             for _ in 0..2 {
                 assert_eq!(
@@ -689,6 +734,83 @@ mod tests {
                 send(&app, Method::POST, None).await.status(),
                 StatusCode::OK
             );
+        }
+    }
+
+    mod channel_preview {
+        use super::*;
+        use axum::{Router, body::Body, http::StatusCode, routing::post};
+        use tower::ServiceExt;
+
+        fn app(limit: u32) -> Router {
+            let mut limiters = test_limiters();
+            limiters.channel_preview = KeyedRateLimiter::new(RateLimitConfig::new(limit, 60));
+            Router::new()
+                .route("/channel-pricing/preview", post(|| async { "ok" }))
+                .route_layer(axum::middleware::from_fn(limit_channel_preview))
+                .layer(Extension(limiters))
+        }
+
+        async fn send(app: &Router, auth: Option<&str>) -> Response {
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("/channel-pricing/preview");
+            if let Some(auth) = auth {
+                request = request.header("authorization", auth);
+            }
+            app.clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn enforces_budget_per_user_and_returns_retry_after() {
+            let app = app(2);
+            let alice = test_bearer(920_001);
+            let bob = test_bearer(920_002);
+
+            for _ in 0..2 {
+                assert_eq!(send(&app, Some(&alice)).await.status(), StatusCode::OK);
+            }
+            let refused = send(&app, Some(&alice)).await;
+            assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert!(
+                refused.headers().contains_key("retry-after"),
+                "a refusal must say when to come back"
+            );
+
+            // A second user keeps an independent preview budget.
+            assert_eq!(send(&app, Some(&bob)).await.status(), StatusCode::OK);
+        }
+
+        #[tokio::test]
+        async fn passes_unauthenticated_requests_to_route_auth() {
+            let app = app(0);
+            assert_eq!(send(&app, None).await.status(), StatusCode::OK);
+        }
+    }
+
+    mod refresh_limiter {
+        use super::*;
+
+        #[tokio::test]
+        async fn refresh_budget_is_independent_from_sensitive_and_higher() {
+            let mut limiters = test_limiters();
+            limiters.refresh = RateLimiter::new(RateLimitConfig::new(3, 300));
+            limiters.sensitive = RateLimiter::new(RateLimitConfig::new(1, 300));
+            let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+
+            assert!(limiters.sensitive.check_with_retry(ip).await.0);
+            assert!(!limiters.sensitive.check_with_retry(ip).await.0);
+
+            // Exhausting `sensitive` must not consume the dedicated `refresh` budget.
+            for _ in 0..3 {
+                assert!(limiters.refresh.check_with_retry(ip).await.0);
+            }
+            let (allowed, retry_after) = limiters.refresh.check_with_retry(ip).await;
+            assert!(!allowed);
+            assert!(retry_after > 0);
         }
     }
 }

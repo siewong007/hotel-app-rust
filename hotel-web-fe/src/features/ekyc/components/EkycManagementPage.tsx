@@ -367,10 +367,11 @@ const EkycManagementPage: React.FC = () => {
 
   const { hasPermission } = useAuth();
   const canCreate = hasPermission('ekyc:approve');
+  const canReview = hasPermission('ekyc:review');
 
   const listQuery = useAllEkycVerifications(filters);
   const detailQuery = useEkycApplication(selectedId);
-  const reasonCodesQuery = useEkycReasonCodes();
+  const reasonCodesQuery = useEkycReasonCodes(canReview);
   const reviewActionMutation = useReviewEkycAction();
   const revealMutation = useRevealEkycField();
 
@@ -892,7 +893,7 @@ const EkycManagementPage: React.FC = () => {
               <ActionBar
                 detail={detail}
                 onAction={openAction}
-                disabled={processing}
+                disabled={processing || !canReview}
               />
               <DocumentSection detail={detail} />
               <ReviewSignals detail={detail} />

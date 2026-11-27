@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use rust_decimal::{Decimal, RoundingStrategy};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write;
 
 use crate::core::db::{DbPool, DbTransaction, hotel_today};
@@ -116,6 +116,16 @@ const GET_LEDGER_BY_ID_QUERY: &str = r#"
         reversal_reason, tax_amount, service_charge, net_amount,
         is_posted, posted_at, void_at, void_by, void_reason
     FROM customer_ledgers WHERE id = $1
+"#;
+
+// PostgreSQL query for getting ledger payments across a batch of ledger IDs
+const GET_LEDGER_PAYMENTS_BATCH_QUERY: &str = r#"
+    SELECT id, ledger_id, payment_amount, payment_method, payment_reference,
+           payment_date, receipt_number, receipt_file_url, notes, processed_by, created_at,
+           idempotency_key, idempotency_fingerprint
+    FROM customer_ledger_payments
+    WHERE ledger_id = ANY($1::bigint[])
+    ORDER BY ledger_id, payment_date DESC, created_at DESC
 "#;
 
 // PostgreSQL query for getting ledger payments
@@ -1795,6 +1805,31 @@ pub async fn get_ledger_payments(
         rows.iter().map(row_to_customer_ledger_payment).collect();
 
     Ok(payments)
+}
+
+/// Get payment history across a batch of ledgers in one SQL round trip.
+pub async fn get_ledger_payments_batch(
+    pool: &DbPool,
+    ledger_ids: &[i64],
+) -> Result<HashMap<i64, Vec<CustomerLedgerPayment>>, ApiError> {
+    let mut grouped: HashMap<i64, Vec<CustomerLedgerPayment>> =
+        ledger_ids.iter().map(|&id| (id, Vec::new())).collect();
+    if grouped.is_empty() {
+        return Ok(grouped);
+    }
+
+    let rows = sqlx::query(GET_LEDGER_PAYMENTS_BATCH_QUERY)
+        .bind(ledger_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| ApiError::Database(e.to_string()))?;
+
+    for row in &rows {
+        let payment = row_to_customer_ledger_payment(row);
+        grouped.entry(payment.ledger_id).or_default().push(payment);
+    }
+
+    Ok(grouped)
 }
 
 /// Get summary statistics for ledgers (PostgreSQL version)

@@ -45,7 +45,7 @@ import { useCurrency } from '../../../hooks/useCurrency';
 import { useIsPhone } from '../../../hooks/useIsPhone';
 import { useBookingsWithDetails } from '../../bookings/hooks/useBookingQueries';
 import { useRooms } from '../hooks/useRoomQueries';
-import { formatLocalDate, parseLocalDate } from '../../../utils/date';
+import { addLocalDays, formatLocalDate, parseLocalDate, toHotelDateString } from '../../../utils/date';
 import { formatHoldRange, selectSoonestHoldingBooking } from '../utils/roomManagementUtils';
 import { useTranslation } from '../../../i18n/useTranslation';
 import { dateFormatter } from '../../../i18n/format';
@@ -204,8 +204,24 @@ const RoomReservationTimeline: React.FC = () => {
     d.setHours(0, 0, 0, 0);
     return d;
   });
+  // Scope the timeline fetch to in-house stays plus bookings overlapping the
+  // visible grid and upcoming hold window instead of downloading every historical row.
+  const timelineBookingFilters = useMemo(() => {
+    const today = toHotelDateString(new Date());
+    const minStart = addLocalDays(today, -1);
+    const viewPrev = addLocalDays(startDate, -1);
+    const checkInFrom = viewPrev < minStart ? viewPrev : minStart;
+    const minEnd = addLocalDays(today, 180);
+    const viewEnd = addLocalDays(startDate, daysToShow);
+    const checkInTo = viewEnd > minEnd ? viewEnd : minEnd;
+    return {
+      check_in_from: formatLocalDate(checkInFrom),
+      check_in_to: formatLocalDate(checkInTo),
+      include_in_house: true,
+    };
+  }, [daysToShow, startDate]);
   const roomsQuery = useRooms();
-  const bookingsQuery = useBookingsWithDetails();
+  const bookingsQuery = useBookingsWithDetails(timelineBookingFilters);
 
   // Hover popover (rich booking details)
   const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);

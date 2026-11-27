@@ -175,8 +175,11 @@ async fn refresh(
     jar: CookieJar,
 ) -> Result<(CookieJar, Json<models::RefreshTokenResponse>), ApiError> {
     crate::core::middleware::validate_request_origin(&headers)?;
+    // Require the HttpOnly cookie before spending an IP budget so cookie-less
+    // anonymous page loads cannot exhaust shared LAN NAT refresh quotas.
+    let req = refresh_request_from_cookie(&jar)?;
     let ip = extract_client_ip(&headers, peer_addr);
-    let (allowed, retry_after) = limiters.sensitive.check_with_retry(ip).await;
+    let (allowed, retry_after) = limiters.refresh.check_with_retry(ip).await;
     if !allowed {
         return Err(ApiError::TooManyRequestsRetryAfter(
             format!(
@@ -186,7 +189,6 @@ async fn refresh(
             retry_after,
         ));
     }
-    let req = refresh_request_from_cookie(&jar)?;
     handlers::refresh_token_handler(State(pool), jar, req).await
 }
 

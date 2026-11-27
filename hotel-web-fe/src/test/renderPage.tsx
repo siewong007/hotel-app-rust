@@ -27,6 +27,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
+import { parsePlainSearch, stringifyPlainSearch } from '../router/compat';
 import { AuthContext, type AuthContextType, type AuthState, type User } from '../auth/AuthContext';
 
 // Re-exported so a test that needs a custom auth state can mount
@@ -203,6 +204,8 @@ export function renderPage(ui: ReactElement, options: RenderPageOptions = {}) {
   const router = createRouter({
     routeTree: rootRoute,
     history: createMemoryHistory({ initialEntries: [route] }),
+    parseSearch: parsePlainSearch,
+    stringifySearch: stringifyPlainSearch,
   });
   return render(<RouterProvider router={router} />, renderOptions);
 }

@@ -171,6 +171,27 @@ export class LedgerService {
     return await api.get(`ledgers/${ledgerId}/payments`).json<CustomerLedgerPayment[]>();
   }
 
+  static async getLedgerPaymentsBatch(
+    ledgerIds: number[],
+  ): Promise<Record<number, CustomerLedgerPayment[]>> {
+    const uniqueIds = Array.from(
+      new Set(ledgerIds.filter((id) => Number.isInteger(id) && id > 0)),
+    );
+    if (uniqueIds.length === 0) return {};
+
+    const result: Record<number, CustomerLedgerPayment[]> = {};
+    for (let i = 0; i < uniqueIds.length; i += 500) {
+      const chunk = uniqueIds.slice(i, i + 500);
+      const batch = await api
+        .get('ledgers/payments', { searchParams: { ledger_ids: chunk.join(',') } })
+        .json<Record<number, CustomerLedgerPayment[]>>();
+      for (const id of chunk) {
+        result[id] = batch[id] ?? [];
+      }
+    }
+    return result;
+  }
+
   static async createLedgerPayment(ledgerId: number, data: CustomerLedgerPaymentRequest): Promise<CustomerLedgerPayment> {
     return await api.post(`ledgers/${ledgerId}/payments`, { json: data }).json<CustomerLedgerPayment>();
   }

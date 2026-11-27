@@ -27,6 +27,7 @@ pub fn routes() -> Router<DbPool> {
         .route("/ledgers", get(list_ledgers))
         .route("/ledgers", post(create_ledger))
         .route("/ledgers/summary", get(get_ledger_summary))
+        .route("/ledgers/payments", get(get_ledger_payments_batch))
         .route(
             "/ledgers/company-payments",
             post(create_company_ledger_payment),
@@ -73,6 +74,15 @@ async fn get_ledger_summary(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_permission_helper(&pool, &headers, LEDGERS_READ).await?;
     handlers::get_ledger_summary_handler(State(pool)).await
+}
+
+async fn get_ledger_payments_batch(
+    State(pool): State<DbPool>,
+    headers: HeaderMap,
+    query: Query<models::BatchLedgerPaymentsQuery>,
+) -> Result<Json<models::BatchLedgerPaymentsResponse>, ApiError> {
+    require_permission_helper(&pool, &headers, LEDGERS_READ).await?;
+    handlers::get_ledger_payments_batch_handler(State(pool), query).await
 }
 
 async fn get_ledger(

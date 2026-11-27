@@ -125,9 +125,10 @@ async fn is_enabled(pool: &DbPool) -> bool {
 static LAST_MAINTENANCE_EPOCH_DAY: std::sync::atomic::AtomicI64 =
     std::sync::atomic::AtomicI64::new(i64::MIN);
 
-/// `job_runs` is a heartbeat log: nothing reads rows older than the health
-/// window, and at ~10k rows/day across the loops it needs a bound.
-const JOB_RUNS_RETENTION_DAYS: i32 = 30;
+/// `job_runs` is a heartbeat log: admin health only aggregates the last 24h
+/// and recent failures, so 7 days keeps a full week of failure history while
+/// bounding table size on small instances.
+const JOB_RUNS_RETENTION_DAYS: i32 = 7;
 
 async fn ensure_audit_partitions_once_daily(pool: &DbPool) {
     let today_epoch_day: i64 = match hotel_local_now(pool).await {

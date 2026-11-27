@@ -129,31 +129,48 @@ impl GuestRepository {
 
         let like_op = "ILIKE";
 
-        let select_cols = r#"id, nick_name, first_name, last_name, email, phone, ic_number, nationality,
-            address_line_1 as address_line1, city, state as state_province,
-            postal_code, country, title, alt_phone, true as is_active,
-            guest_type, tourism_type, vip_status, is_blacklisted,
-            COALESCE(discount_percentage, 0) as discount_percentage, company_name,
-            COALESCE(complimentary_nights_credit, 0) as complimentary_nights_credit,
-            created_at, updated_at,
-            (SELECT username FROM users u
-                WHERE u.guest_id = guests.id
+        let select_cols = r#"p.id, p.nick_name, p.first_name, p.last_name, p.email, p.phone, p.ic_number, p.nationality,
+            p.address_line_1 as address_line1, p.city, p.state as state_province,
+            p.postal_code, p.country, p.title, p.alt_phone, true as is_active,
+            p.guest_type, p.tourism_type, p.vip_status, p.is_blacklisted,
+            COALESCE(p.discount_percentage, 0) as discount_percentage, p.company_name,
+            COALESCE(p.complimentary_nights_credit, 0) as complimentary_nights_credit,
+            p.created_at, p.updated_at,
+            gu.username AS account_username,
+            gu.is_active AS account_is_active,
+            COALESCE(gb.bookings_count, 0) AS bookings_count,
+            gb.last_stay_date,
+            (os.guest_id IS NOT NULL) AS has_open_support"#;
+
+        let enrich_ctes = r#"guest_users AS (
+                SELECT DISTINCT ON (u.guest_id) u.guest_id, u.username, u.is_active
+                FROM users u
+                WHERE u.guest_id IN (SELECT id FROM paged)
                   AND u.deleted_at IS NULL
-                ORDER BY u.is_active DESC, u.id
-                LIMIT 1) AS account_username,
-            (SELECT is_active FROM users u
-                WHERE u.guest_id = guests.id
-                  AND u.deleted_at IS NULL
-                ORDER BY u.is_active DESC, u.id
-                LIMIT 1) AS account_is_active,
-            (SELECT COUNT(*) FROM bookings b
-                WHERE b.guest_id = guests.id AND b.status != 'voided') AS bookings_count,
-            (SELECT MAX(b.check_in_date) FROM bookings b
-                WHERE b.guest_id = guests.id
-                  AND b.status IN ('checked_in', 'auto_checked_in', 'checked_out', 'completed')
-            ) AS last_stay_date,
-            (EXISTS (SELECT 1 FROM support_conversations sc
-                WHERE sc.guest_id = guests.id AND sc.status <> 'closed')) AS has_open_support"#;
+                ORDER BY u.guest_id, u.is_active DESC, u.id
+            ),
+            guest_bookings AS (
+                SELECT b.guest_id,
+                       COUNT(*) FILTER (WHERE b.status != 'voided') AS bookings_count,
+                       MAX(b.check_in_date) FILTER (
+                           WHERE b.status IN ('checked_in', 'auto_checked_in', 'checked_out', 'completed')
+                       ) AS last_stay_date
+                FROM bookings b
+                WHERE b.guest_id IN (SELECT id FROM paged)
+                GROUP BY b.guest_id
+            ),
+            open_support AS (
+                SELECT DISTINCT sc.guest_id
+                FROM support_conversations sc
+                WHERE sc.guest_id IN (SELECT id FROM paged)
+                  AND sc.status <> 'closed'
+            )"#;
+
+        let paged_cols = "id, nick_name, first_name, last_name, email, phone, ic_number, nationality, \
+            address_line_1, city, state, postal_code, country, title, alt_phone, \
+            guest_type, tourism_type, vip_status, is_blacklisted, \
+            discount_percentage, company_name, complimentary_nights_credit, \
+            created_at, updated_at";
 
         if let Some(q) = search {
             let pattern = format!(
@@ -184,9 +201,16 @@ impl GuestRepository {
                 "SELECT COUNT(*) FROM guests WHERE deleted_at IS NULL{filter_clause} AND {search_clause}"
             );
             let data_sql = format!(
-                "SELECT {select_cols} FROM guests \
-                 WHERE deleted_at IS NULL{filter_clause} AND {search_clause} \
-                 ORDER BY nick_name LIMIT {p_limit} OFFSET {p_offset}"
+                "WITH paged AS ( \
+                    SELECT {paged_cols} FROM guests \
+                    WHERE deleted_at IS NULL{filter_clause} AND {search_clause} \
+                    ORDER BY nick_name LIMIT {p_limit} OFFSET {p_offset} \
+                 ), {enrich_ctes} \
+                 SELECT {select_cols} FROM paged p \
+                 LEFT JOIN guest_users gu ON gu.guest_id = p.id \
+                 LEFT JOIN guest_bookings gb ON gb.guest_id = p.id \
+                 LEFT JOIN open_support os ON os.guest_id = p.id \
+                 ORDER BY p.nick_name"
             );
 
             let total = sqlx::query_scalar(sqlx::AssertSqlSafe(&*count_sql))
@@ -209,10 +233,16 @@ impl GuestRepository {
                 format!("SELECT COUNT(*) FROM guests WHERE deleted_at IS NULL{filter_clause}");
             let (p_limit, p_offset) = ("$1", "$2");
             let data_sql = format!(
-                "SELECT {select_cols} FROM guests \
-                 WHERE deleted_at IS NULL{filter_clause} \
-                 ORDER BY nick_name \
-                 LIMIT {p_limit} OFFSET {p_offset}"
+                "WITH paged AS ( \
+                    SELECT {paged_cols} FROM guests \
+                    WHERE deleted_at IS NULL{filter_clause} \
+                    ORDER BY nick_name LIMIT {p_limit} OFFSET {p_offset} \
+                 ), {enrich_ctes} \
+                 SELECT {select_cols} FROM paged p \
+                 LEFT JOIN guest_users gu ON gu.guest_id = p.id \
+                 LEFT JOIN guest_bookings gb ON gb.guest_id = p.id \
+                 LEFT JOIN open_support os ON os.guest_id = p.id \
+                 ORDER BY p.nick_name"
             );
 
             let total = sqlx::query_scalar(sqlx::AssertSqlSafe(&*count_sql))
@@ -1519,9 +1549,9 @@ fn list_filter_clause(params: &GuestPaginationParams) -> String {
     }
     match params.segment.as_deref() {
         Some("returning") => filter_clause.push_str(
-            " AND (SELECT COUNT(*) FROM bookings b \
-             WHERE b.guest_id = guests.id \
-               AND b.status IN ('checked_out', 'completed')) >= 2",
+            " AND guests.id IN (SELECT b.guest_id FROM bookings b \
+             WHERE b.status IN ('checked_out', 'completed') \
+             GROUP BY b.guest_id HAVING COUNT(*) >= 2)",
         ),
         Some("in_house") => filter_clause.push_str(
             " AND EXISTS (SELECT 1 FROM bookings b \

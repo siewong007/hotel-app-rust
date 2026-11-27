@@ -87,11 +87,22 @@ pub async fn create_company_ledger_payment_handler(
     ))
 }
 
+use std::collections::HashMap;
+
 pub async fn get_ledger_payments_handler(
     State(pool): State<DbPool>,
     Path(ledger_id): Path<i64>,
 ) -> Result<Json<Vec<CustomerLedgerPayment>>, ApiError> {
     Ok(Json(svc::get_ledger_payments(&pool, ledger_id).await?))
+}
+
+pub async fn get_ledger_payments_batch_handler(
+    State(pool): State<DbPool>,
+    axum::extract::Query(query): axum::extract::Query<BatchLedgerPaymentsQuery>,
+) -> Result<Json<HashMap<i64, Vec<CustomerLedgerPayment>>>, ApiError> {
+    Ok(Json(
+        svc::get_ledger_payments_batch(&pool, &query.ledger_ids).await?,
+    ))
 }
 
 pub async fn get_ledger_summary_handler(

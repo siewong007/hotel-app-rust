@@ -32,6 +32,7 @@ import {
   Build as BuildIcon,
 } from '@mui/icons-material';
 import { BookingsService, RoomsService } from '../../../../api';
+import { useAuth } from '../../../../auth/AuthContext';
 
 import { Room, Guest, Booking, BookingWithDetails, RoomHistory, RoomStatusUpdateInput } from '../../../../types';
 import { useCurrency } from '../../../../hooks/useCurrency';
@@ -115,6 +116,9 @@ const RoomManagementPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const theme = useTheme();
   const { format: formatCurrency, symbol: currencySymbol } = useCurrency();
+  const { hasPermission } = useAuth();
+  const canReadBookings = hasPermission('bookings:read');
+  const canReadGuests = hasPermission('guests:read');
   // Unified booking modal state — declared before useRoomData because it gates
   // the guest-list query (guests are only needed once the modal opens).
   const [unifiedBookingOpen, setUnifiedBookingOpen] = useState(false);
@@ -130,7 +134,7 @@ const RoomManagementPage: React.FC = () => {
     reload: loadData,
     reloadRooms: loadRooms,
     reloadBookings: loadBookings,
-  } = useRoomData(unifiedBookingOpen);
+  } = useRoomData(unifiedBookingOpen && canReadGuests, canReadBookings);
   const showSnackbar = useCallback((message: string, severity: ApiNotificationSeverity) => {
     emitApiNotification({ message, severity });
   }, []);

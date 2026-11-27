@@ -166,7 +166,7 @@ export class RoomsService {
         retry: {
           limit: 3,
           methods: ['get'],
-          statusCodes: [408, 413, 429, 500, 502, 503, 504],
+          statusCodes: [408, 413, 500, 502, 503, 504],
           backoffLimit: 3000
         }
       }).json<RoomHistory[]>();

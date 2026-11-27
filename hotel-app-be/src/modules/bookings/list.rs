@@ -279,10 +279,17 @@ pub fn build_booking_list_query(
             let to_p = param_placeholder(param_idx);
             let col_in = date_cast("b.check_in_date");
             let col_out = date_cast("b.check_out_date");
-            conditions.push(format!(
+            let window_pred = format!(
                 "(({col_in} <= {to_p} AND {col_out} > {from_p}) \
                   OR ({col_in} = {col_out} AND {col_in} >= {from_p} AND {col_in} <= {to_p}))"
-            ));
+            );
+            if params.include_in_house.unwrap_or(false) {
+                conditions.push(format!(
+                    "(b.status IN ('checked_in', 'auto_checked_in') OR {window_pred})"
+                ));
+            } else {
+                conditions.push(window_pred);
+            }
             binds.check_in_from = Some(from);
             binds.check_in_to = Some(to);
         } else if let Some(from) = params.check_in_from {
@@ -357,10 +364,35 @@ pub fn build_booking_list_query(
     //
     // `count_sql` is now always issued (see `BookingRepository`), not just as an
     // empty-page fallback. It stays cheap because it omits the LATERAL joins.
-    let data_sql = format!(
-        "{}{} ORDER BY {} {} LIMIT {} OFFSET {}",
-        base_query, where_clause, sort_col, sort_dir, pagination.page_size, pagination.offset
-    );
+    let can_push_pagination_before_laterals = pagination.offset > 0
+        && !board_view.as_ref().is_some_and(|f| f.needs_balance_joins)
+        && sort_col != "invoice_number"
+        && !base_query.trim_start().starts_with("WITH ");
+
+    let data_sql = if can_push_pagination_before_laterals {
+        // Resolve the requested page of booking ids before evaluating the five
+        // LATERAL balance/invoice subqueries so deep OFFSET pages do not compute
+        // LATERAL joins for rows discarded by OFFSET.
+        format!(
+            "WITH _paged_bookings AS (\
+                SELECT b.id FROM bookings b \
+                INNER JOIN guests g ON b.guest_id = g.id \
+                INNER JOIN rooms r ON b.room_id = r.id \
+                {where_clause} \
+                ORDER BY {sort_col} {sort_dir}, b.id DESC \
+                LIMIT {} OFFSET {}\
+             ) \
+             {base_query} \
+             INNER JOIN _paged_bookings _pb ON _pb.id = b.id \
+             ORDER BY {sort_col} {sort_dir}, b.id DESC",
+            pagination.page_size, pagination.offset
+        )
+    } else {
+        format!(
+            "{}{} ORDER BY {} {} LIMIT {} OFFSET {}",
+            base_query, where_clause, sort_col, sort_dir, pagination.page_size, pagination.offset
+        )
+    };
 
     BookingListQuery {
         count_sql,
@@ -412,6 +444,7 @@ mod tests {
             date_search: None,
             check_in_from: None,
             check_in_to: None,
+            include_in_house: None,
             month_search: None,
             view: None,
             sort_by: None,
@@ -802,5 +835,39 @@ mod tests {
         // The total comes from the standalone count, which stays a plain COUNT.
         assert!(query.count_sql.contains("SELECT COUNT(*)"));
         assert!(!query.count_sql.contains("OVER()"));
+    }
+
+    #[test]
+    fn include_in_house_retains_checked_in_bookings_with_date_range() {
+        let mut params = params();
+        params.check_in_from = NaiveDate::from_ymd_opt(2026, 6, 14);
+        params.check_in_to = NaiveDate::from_ymd_opt(2026, 6, 18);
+        params.include_in_house = Some(true);
+
+        let query = build_booking_list_query(&params, "SELECT * FROM bookings b ", pagination());
+        assert!(
+            query
+                .count_sql
+                .contains("b.status IN ('checked_in', 'auto_checked_in') OR")
+        );
+    }
+
+    #[test]
+    fn non_zero_offset_paginates_ids_in_cte_before_joining() {
+        let query = build_booking_list_query(
+            &params(),
+            "SELECT b.id FROM bookings b ",
+            Pagination {
+                page: 2,
+                page_size: 50,
+                offset: 50,
+            },
+        );
+        assert!(query.data_sql.starts_with("WITH _paged_bookings AS ("));
+        assert!(
+            query
+                .data_sql
+                .contains("INNER JOIN _paged_bookings _pb ON _pb.id = b.id")
+        );
     }
 }

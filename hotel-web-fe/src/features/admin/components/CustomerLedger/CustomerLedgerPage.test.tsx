@@ -65,6 +65,7 @@ const mocks = vi.hoisted(() => ({
     createLedgerPayment: vi.fn(),
     createCompanyLedgerPayment: vi.fn(),
     getLedgerPayments: vi.fn(),
+    getLedgerPaymentsBatch: vi.fn(),
     deleteLedgerPayment: vi.fn(),
     updateLedgerPaymentDate: vi.fn(),
   },
@@ -109,6 +110,7 @@ vi.mock('../../../../api', () => ({
     createLedgerPayment: (...args: unknown[]) => mocks.hotelApi.createLedgerPayment(...args),
     createCompanyLedgerPayment: (...args: unknown[]) => mocks.hotelApi.createCompanyLedgerPayment(...args),
     getLedgerPayments: (...args: unknown[]) => mocks.hotelApi.getLedgerPayments(...args),
+    getLedgerPaymentsBatch: (...args: unknown[]) => mocks.hotelApi.getLedgerPaymentsBatch(...args),
     deleteLedgerPayment: (...args: unknown[]) => mocks.hotelApi.deleteLedgerPayment(...args),
     updateLedgerPaymentDate: (...args: unknown[]) => mocks.hotelApi.updateLedgerPaymentDate(...args),
   },
@@ -434,8 +436,14 @@ function buildLedgerPayment(ledgerId: number, receiptNumber: string): CustomerLe
 }
 
 function mockReceiptOnLedger(ledgerId: number, receiptNumber: string) {
+  const payment = buildLedgerPayment(ledgerId, receiptNumber);
   mocks.hotelApi.getLedgerPayments.mockImplementation((requestedLedgerId: number) =>
-    Promise.resolve(requestedLedgerId === ledgerId ? [buildLedgerPayment(ledgerId, receiptNumber)] : []),
+    Promise.resolve(requestedLedgerId === ledgerId ? [payment] : []),
+  );
+  mocks.hotelApi.getLedgerPaymentsBatch.mockImplementation((ledgerIds: number[]) =>
+    Promise.resolve(
+      Object.fromEntries(ledgerIds.map((id) => [id, id === ledgerId ? [payment] : []])),
+    ),
   );
 }
 
@@ -489,6 +497,9 @@ describe('CustomerLedgerPage', () => {
     mocks.hotelApi.getBookingsWithDetails.mockResolvedValue([]);
     mocks.hotelApi.getAllRooms.mockResolvedValue([]);
     mocks.hotelApi.getLedgerPayments.mockResolvedValue([]);
+    mocks.hotelApi.getLedgerPaymentsBatch.mockImplementation((ledgerIds: number[]) =>
+      Promise.resolve(Object.fromEntries(ledgerIds.map((id) => [id, []]))),
+    );
 
     mocks.lastLedgersPageParams = null;
     mocks.lastLedgersPageEnabled = undefined;

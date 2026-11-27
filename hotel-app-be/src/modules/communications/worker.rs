@@ -19,8 +19,23 @@ use crate::core::db::{DbPool, generate_uuid};
 use crate::core::error::ApiError;
 
 const DEFAULT_INTERVAL_SECS: u64 = 15;
+const IDLE_HEARTBEAT_INTERVAL_SECS: u64 = 60;
 const DEFAULT_BATCH: i64 = 10;
 const MAX_BACKOFF_MINUTES: i64 = 60;
+
+fn should_record_heartbeat(
+    outcome: &Result<usize, ApiError>,
+    last_recorded_at: Option<std::time::Instant>,
+    now: std::time::Instant,
+    idle_interval: Duration,
+) -> bool {
+    match outcome {
+        Ok(0) => {
+            last_recorded_at.is_none_or(|last| now.saturating_duration_since(last) >= idle_interval)
+        }
+        Ok(_) | Err(_) => true,
+    }
+}
 
 fn env_u64(key: &str, default: u64) -> u64 {
     std::env::var(key)
@@ -62,21 +77,27 @@ pub async fn run(pool: DbPool) {
         "Email delivery worker started ({worker_id}, every {}s, batch {batch})",
         interval.as_secs()
     );
+    let idle_heartbeat_interval = Duration::from_secs(IDLE_HEARTBEAT_INTERVAL_SECS);
+    let mut last_heartbeat: Option<std::time::Instant> = None;
     loop {
         tokio::time::sleep(interval).await;
         let started = std::time::Instant::now();
         let outcome = tick(&pool, &transport, &worker_id, batch).await;
-        crate::core::job_runs::record(
-            &pool,
-            "email_delivery_worker",
-            outcome
-                .as_ref()
-                .ok()
-                .map(|n| serde_json::json!({ "claimed": n })),
-            outcome.as_ref().err().map(|e| e.to_string()),
-            started.elapsed(),
-        )
-        .await;
+        let now = std::time::Instant::now();
+        if should_record_heartbeat(&outcome, last_heartbeat, now, idle_heartbeat_interval) {
+            crate::core::job_runs::record(
+                &pool,
+                "email_delivery_worker",
+                outcome
+                    .as_ref()
+                    .ok()
+                    .map(|n| serde_json::json!({ "claimed": n })),
+                outcome.as_ref().err().map(|e| e.to_string()),
+                started.elapsed(),
+            )
+            .await;
+            last_heartbeat = Some(now);
+        }
         if let Err(e) = &outcome {
             log::warn!("Email delivery worker tick failed: {e}");
         }
@@ -288,7 +309,10 @@ async fn process_delivery(
 
 #[cfg(test)]
 mod tests {
-    use super::backoff_minutes;
+    use std::time::{Duration, Instant};
+
+    use super::{backoff_minutes, should_record_heartbeat};
+    use crate::core::error::ApiError;
 
     #[test]
     fn backoff_is_exponential_and_capped() {
@@ -297,5 +321,47 @@ mod tests {
         assert_eq!(backoff_minutes(4), 16);
         assert_eq!(backoff_minutes(10), 60);
         assert_eq!(backoff_minutes(30), 60);
+    }
+
+    #[test]
+    fn heartbeat_throttles_idle_ticks_but_records_work_and_errors_immediately() {
+        let interval = Duration::from_secs(60);
+        let t0 = Instant::now();
+
+        // First idle tick always records so startup health populates immediately.
+        assert!(should_record_heartbeat(&Ok(0), None, t0, interval));
+        // Subsequent idle ticks inside the 60s window are skipped.
+        assert!(!should_record_heartbeat(
+            &Ok(0),
+            Some(t0),
+            t0 + Duration::from_secs(15),
+            interval,
+        ));
+        assert!(!should_record_heartbeat(
+            &Ok(0),
+            Some(t0),
+            t0 + Duration::from_secs(59),
+            interval,
+        ));
+        // Once the idle interval elapses, idle heartbeat resumes.
+        assert!(should_record_heartbeat(
+            &Ok(0),
+            Some(t0),
+            t0 + Duration::from_secs(60),
+            interval,
+        ));
+        // Delivering emails or hitting an error always records immediately.
+        assert!(should_record_heartbeat(
+            &Ok(1),
+            Some(t0),
+            t0 + Duration::from_secs(15),
+            interval,
+        ));
+        assert!(should_record_heartbeat(
+            &Err(ApiError::Database("boom".into())),
+            Some(t0),
+            t0 + Duration::from_secs(15),
+            interval,
+        ));
     }
 }

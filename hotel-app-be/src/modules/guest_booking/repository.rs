@@ -161,10 +161,33 @@ impl GuestBookingRepository {
         let rows = sqlx::query(r#"
                 WITH dates AS (
                     SELECT generate_series($1::date, $2::date, interval '1 day')::date AS stay_date
+                ),
+                phys AS (
+                    SELECT r.room_type_id, COUNT(*)::bigint AS cnt
+                    FROM rooms r
+                    WHERE r.is_active = true
+                      AND COALESCE(r.status, 'available') NOT IN ('maintenance', 'out_of_order')
+                    GROUP BY r.room_type_id
+                ),
+                occupied AS (
+                    SELECT r.room_type_id, gs::date AS stay_date, COUNT(DISTINCT r.id)::bigint AS cnt
+                    FROM bookings b
+                    JOIN rooms r ON r.id = b.room_id
+                    CROSS JOIN LATERAL generate_series(
+                        GREATEST(b.check_in_date, $1::date),
+                        LEAST(b.check_out_date - 1, $2::date),
+                        interval '1 day'
+                    ) AS gs
+                    WHERE r.is_active = true
+                      AND COALESCE(r.status, 'available') NOT IN ('maintenance', 'out_of_order')
+                      AND b.status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')
+                      AND b.check_in_date <= $2::date
+                      AND b.check_out_date > $1::date
+                    GROUP BY r.room_type_id, gs::date
                 )
                 SELECT rt.id AS room_type_id, rt.code AS room_type_code, rt.name AS room_type_name,
                        d.stay_date,
-                       COALESCE(avail.cnt, 0)::bigint AS physical_available_rooms,
+                       GREATEST(COALESCE(p.cnt, 0) - COALESCE(o.cnt, 0), 0)::bigint AS physical_available_rooms,
                        COALESCE(a.walk_in_reserved_rooms, 0) AS walk_in_reserved_rooms,
                        COALESCE(a.online_booking_enabled, true) AS online_booking_enabled,
                        a.custom_price::text AS custom_price,
@@ -176,15 +199,8 @@ impl GuestBookingRepository {
                            rt.base_price)::text AS standard_price
                 FROM room_types rt
                 CROSS JOIN dates d
-                LEFT JOIN LATERAL (
-                    SELECT COUNT(*)::bigint AS cnt
-                    FROM rooms r
-                    WHERE r.room_type_id = rt.id AND r.is_active = true
-                      AND COALESCE(r.status, 'available') NOT IN ('maintenance', 'out_of_order')
-                      AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id
-                        AND b.status IN ('reserved', 'confirmed', 'checked_in', 'auto_checked_in', 'pending', 'pending_payment', 'pending_confirmation', 'partial_complimentary', 'fully_complimentary')
-                        AND b.check_in_date < d.stay_date + 1 AND b.check_out_date > d.stay_date)
-                ) avail ON true
+                LEFT JOIN phys p ON p.room_type_id = rt.id
+                LEFT JOIN occupied o ON o.room_type_id = rt.id AND o.stay_date = d.stay_date
                 LEFT JOIN online_inventory_allocations a ON a.room_type_id = rt.id AND a.stay_date = d.stay_date
                 WHERE rt.is_active = true
                 ORDER BY rt.name, d.stay_date

@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
     updated_at: '2026-01-01T00:00:00Z',
   },
   completeGuestProfile: vi.fn(),
+  useProfileQuery: vi.fn(),
 }));
 
 function createLocalStorageStub() {
@@ -68,7 +69,10 @@ vi.mock('../../../api/auth.service', () => ({
 }));
 
 vi.mock('../../user/hooks/useProfileQueries', () => ({
-  useProfileQuery: () => ({ data: mocks.profile }),
+  useProfileQuery: (enabled?: boolean) => {
+    mocks.useProfileQuery(enabled);
+    return { data: enabled === false ? undefined : mocks.profile };
+  },
 }));
 
 import CompleteProfilePage from './CompleteProfilePage';
@@ -90,6 +94,7 @@ describe('CompleteProfilePage', () => {
     vi.stubGlobal('localStorage', createLocalStorageStub());
     mocks.navigate.mockReset();
     mocks.completeGuestProfile.mockReset();
+    mocks.useProfileQuery.mockReset();
     mocks.authState.applyProfileUpdate.mockReset();
     mocks.search = '';
     mocks.authState.isAuthenticated = true;
@@ -209,10 +214,11 @@ describe('CompleteProfilePage', () => {
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/guest-portal', { replace: true }));
   });
 
-  it('redirects unauthenticated visitors to the guest login', () => {
+  it('redirects unauthenticated visitors to the guest login without fetching /profile', () => {
     mocks.authState.isAuthenticated = false;
     renderPage();
 
+    expect(mocks.useProfileQuery).toHaveBeenCalledWith(false);
     expect(screen.getByTestId('navigate').getAttribute('data-to')).toBe('/login');
   });
 

@@ -157,3 +157,23 @@ export function useChannelPreview() {
       ChannelsApi.preview(input),
   });
 }
+
+export function useChannelPreviewQuery(
+  input: ChannelPricePreviewRequest | null,
+) {
+  return useQuery({
+    queryKey: [
+      'channel-pricing-preview',
+      input?.channel_id ?? null,
+      input?.room_type_id ?? null,
+      input?.rate_plan_id ?? null,
+      input?.check_in ?? null,
+      input?.check_out ?? null,
+    ],
+    queryFn: () => ChannelsApi.preview(input as ChannelPricePreviewRequest),
+    enabled: input !== null,
+    staleTime: 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}

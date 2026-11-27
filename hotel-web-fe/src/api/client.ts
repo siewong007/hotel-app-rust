@@ -350,11 +350,12 @@ export const api = ky.create({
   retry: {
     limit: 2,
     methods: ['get'],
-    statusCodes: [408, 413, 429, 500, 502, 503, 504],
+    // Do not auto-retry 429 so rate-limited screens surface errors promptly instead of stalling on Retry-After.
+    statusCodes: [408, 413, 500, 502, 503, 504],
     // Ky uses this list to prefer the server-provided Retry-After delay over
     // its exponential fallback. Cap it so a malformed response cannot stall
     // the interface indefinitely.
-    afterStatusCodes: [413, 429, 503],
+    afterStatusCodes: [413, 503],
     maxRetryAfter: 30_000,
     jitter: true,
   },

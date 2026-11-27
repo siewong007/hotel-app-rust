@@ -82,8 +82,8 @@ export function useCompanyCheckIn({
   // Load bookings for a specific company
   const loadCompanyBookings = async (companyId: number) => {
     try {
-      const allBookings = await BookingsService.getBookingsWithDetails();
-      const filtered = allBookings.filter(b => b.company_id === companyId);
+      const companyBilledBookings = await BookingsService.getBookingsWithDetails({ company_billed: true });
+      const filtered = companyBilledBookings.filter(b => b.company_id === companyId);
       setCompanyBookings(filtered);
     } catch (err) {
       console.error('Failed to load company bookings:', err);
@@ -94,6 +94,9 @@ export function useCompanyCheckIn({
   // Handle opening company check-in dialog
   const handleOpenCheckInDialog = async (company?: Company) => {
     setCheckInDialogOpen(true);
+    if (guests.length === 0) {
+      void loadGuests();
+    }
     if (company) {
       setCheckInCompany(company);
       await loadCompanyBookings(company.id);

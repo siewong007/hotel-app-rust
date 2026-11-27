@@ -54,7 +54,7 @@ const emptyBookingStats: BookingStatsResponse = {
   revenue_last_7_days: [],
 };
 
-export interface BookingListFilters {
+export type BookingListFilters = {
   room_number?: string;
   company_billed?: boolean;
   status?: string;
@@ -62,7 +62,9 @@ export interface BookingListFilters {
   check_in_from?: string;
   /** End of the stay window. Must be sent together with check_in_from to get overlap semantics. */
   check_in_to?: string;
-}
+  /** Include currently in-house bookings even when their stay falls outside the overlap window. */
+  include_in_house?: boolean;
+};
 
 // How far ahead a "current and upcoming" window reaches. The backend's
 // two-sided date filter is an overlap test, so the upper bound only has to
@@ -115,6 +117,7 @@ export class BookingsService {
       if (filters?.status) baseParams.status = filters.status;
       if (filters?.check_in_from) baseParams.check_in_from = filters.check_in_from;
       if (filters?.check_in_to) baseParams.check_in_to = filters.check_in_to;
+      if (filters?.include_in_house) baseParams.include_in_house = true;
 
       const firstPage = await withRetry(
         () => api.get('bookings', { searchParams: baseParams }).json<any>(),
@@ -415,7 +418,7 @@ export class BookingsService {
     }
   }
 
-  static async getBookingsWithDetails(filters?: { room_number?: string; company_billed?: boolean }): Promise<BookingWithDetails[]> {
+  static async getBookingsWithDetails(filters?: BookingListFilters): Promise<BookingWithDetails[]> {
     try {
       const bookings = await this.getAllBookings(filters);
       return bookings.map(booking => enhanceBookingDetails(booking));

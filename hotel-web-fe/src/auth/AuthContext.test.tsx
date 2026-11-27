@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   refreshAccessToken: vi.fn(),
+  getSessionHint: vi.fn(),
   apiPost: vi.fn(),
   getUserProfile: vi.fn(),
   getAccessSnapshot: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('../api/client', () => {
 vi.mock('../api/auth.service', () => ({
   AuthService: {
     getAccessSnapshot: (...args: unknown[]) => mocks.getAccessSnapshot(...args),
+    getSessionHint: (...args: unknown[]) => mocks.getSessionHint(...args),
     listPasskeys: (...args: unknown[]) => mocks.listPasskeys(...args),
     loginWithGoogle: (...args: unknown[]) => mocks.loginWithGoogle(...args),
     register: (...args: unknown[]) => mocks.register(...args),
@@ -77,6 +79,7 @@ vi.mock('../api/users.service', () => ({
 import { APIError } from '../api/client';
 import { buildKyHttpError } from '../api/testSupport/httpError';
 import { isTwoFactorEnrollmentRequired } from '../features/auth/twoFactorEnrollment';
+import { storage } from '../utils/storage';
 import { AuthProvider, useAuth } from './AuthContext';
 
 function createLocalStorageStub() {
@@ -143,7 +146,10 @@ async function renderAuthenticated() {
 describe('AuthContext', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', createLocalStorageStub());
+    storage.clear();
     mocks.refreshAccessToken.mockReset();
+    mocks.getSessionHint.mockReset();
+    mocks.getSessionHint.mockResolvedValue({ signed_in: true });
     mocks.apiPost.mockReset();
     mocks.getUserProfile.mockReset();
     mocks.getAccessSnapshot.mockReset();
@@ -193,6 +199,19 @@ describe('AuthContext', () => {
       expect(result.current.isAuthenticated).toBe(false);
       expect(result.current.user).toBeNull();
       expect(mocks.getUserProfile).not.toHaveBeenCalled();
+    });
+
+    it('skips POST /auth/refresh when no cached user exists and session-hint reports signed_out', async () => {
+      mocks.getSessionHint.mockResolvedValue({ signed_in: false });
+
+      const { wrapper } = createWrapper();
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(result.current.isAuthenticated).toBe(false);
+      expect(mocks.getSessionHint).toHaveBeenCalledTimes(1);
+      expect(mocks.refreshAccessToken).not.toHaveBeenCalled();
     });
 
     it('remains unauthenticated without crashing when the post-refresh profile probe fails', async () => {

@@ -43,7 +43,9 @@ const CompleteProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { data: profile } = useProfileQuery();
+  const shouldLoadProfile =
+    !isLoading && isAuthenticated && user?.user_type === 'guest' && !user.profile_complete;
+  const { data: profile } = useProfileQuery(shouldLoadProfile);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');

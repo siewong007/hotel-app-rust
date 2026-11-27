@@ -254,11 +254,53 @@ pub async fn create_company_ledger_payment(
     Ok(outcome.response)
 }
 
+use std::collections::HashMap;
+
 pub async fn get_ledger_payments(
     pool: &DbPool,
     ledger_id: i64,
 ) -> Result<Vec<CustomerLedgerPayment>, ApiError> {
     repo::get_ledger_payments(pool, ledger_id).await
+}
+
+const MAX_BATCH_LEDGER_PAYMENT_IDS: usize = 500;
+
+/// Fetch payment histories for multiple ledgers in a single query.
+pub async fn get_ledger_payments_batch(
+    pool: &DbPool,
+    raw_ids: &str,
+) -> Result<HashMap<i64, Vec<CustomerLedgerPayment>>, ApiError> {
+    let trimmed = raw_ids.trim();
+    if trimmed.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for part in trimmed.split(',') {
+        let token = part.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let id = token.parse::<i64>().map_err(|_| {
+            ApiError::BadRequest(format!("Invalid ledger id in ledger_ids: {token}"))
+        })?;
+        if id <= 0 {
+            return Err(ApiError::BadRequest(
+                "ledger_ids entries must be positive integers".to_string(),
+            ));
+        }
+        if seen.insert(id) {
+            ids.push(id);
+            if ids.len() > MAX_BATCH_LEDGER_PAYMENT_IDS {
+                return Err(ApiError::BadRequest(format!(
+                    "Cannot request more than {MAX_BATCH_LEDGER_PAYMENT_IDS} ledger_ids at once"
+                )));
+            }
+        }
+    }
+
+    repo::get_ledger_payments_batch(pool, &ids).await
 }
 
 pub async fn get_ledger_summary(pool: &DbPool) -> Result<serde_json::Value, ApiError> {

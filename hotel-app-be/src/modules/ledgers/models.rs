@@ -1,5 +1,7 @@
 //! Customer ledger models
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -375,6 +377,16 @@ impl<'r> sqlx::FromRow<'r, crate::core::db::DbRow> for CustomerLedger {
         })
     }
 }
+
+/// Query params for `GET /ledgers/payments?ledger_ids=1,2,3`.
+#[derive(Debug, Deserialize)]
+pub struct BatchLedgerPaymentsQuery {
+    pub ledger_ids: String,
+}
+
+/// Response map keyed by ledger id string (`HashMap<i64, Vec<CustomerLedgerPayment>>`
+/// serializes keys as strings in JSON, matching frontend `Record<number, CustomerLedgerPayment[]>`).
+pub type BatchLedgerPaymentsResponse = HashMap<i64, Vec<CustomerLedgerPayment>>;
 
 impl<'r> sqlx::FromRow<'r, crate::core::db::DbRow> for CustomerLedgerPayment {
     fn from_row(row: &'r crate::core::db::DbRow) -> Result<Self, sqlx::Error> {

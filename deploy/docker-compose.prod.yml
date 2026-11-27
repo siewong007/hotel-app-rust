@@ -37,19 +37,18 @@ services:
       - max_connections=20
       - -c
       - shared_buffers=32MB
-      # Was 4MB-equivalent (1MB); 102 temp files / 31MB spilled to disk over 9 days.
-      # Worst case here is max_connections x work_mem = 80MB against mem_limit 256m,
-      # alongside 32MB of shared_buffers — bounded.
+      # Bounded sort/hash workspace per backend operation: 2MB x 20 max_connections
+      # = 40MB worst case against mem_limit 320m, leaving comfortable headroom above
+      # 32MB shared_buffers so concurrent complex queries do not OOM the container.
       - -c
-      - work_mem=4MB
+      - work_mem=2MB
       - -c
       - maintenance_work_mem=16MB
       - -c
       - max_parallel_workers=1
-      # PostgreSQL's 4GB default is meaningless in a 256m container on a 2GB host: it
-      # told the planner it had 16x the container's entire memory limit, biasing every
-      # plan toward repeated index probes. 192MB is what this container can actually
-      # cache, and the whole database is 85MB.
+      # PostgreSQL's 4GB default is meaningless inside a small container on a 2GB
+      # host: it told the planner it had 16x the container's memory limit, biasing
+      # plans toward repeated index probes. 192MB reflects realistic OS + DB cache.
       - -c
       - effective_cache_size=192MB
       # Default 4 assumes seek-bound spinning disks. This is SSD-backed.
@@ -87,7 +86,7 @@ services:
       retries: 12
       start_period: 20s
     shm_size: 64mb
-    mem_limit: ${POSTGRES_MEM_LIMIT:-256m}
+    mem_limit: ${POSTGRES_MEM_LIMIT:-320m}
     cpus: ${POSTGRES_CPUS:-0.30}
     pids_limit: 256
     cap_drop:

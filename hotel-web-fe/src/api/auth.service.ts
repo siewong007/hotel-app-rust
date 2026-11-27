@@ -1,4 +1,5 @@
 import { api, toApiError } from './client';
+import { apiUrl } from '../desktop/runtimeApi';
 import { SKIP_API_NOTIFICATION_HEADER } from '../utils/apiNotifications';
 import {
   UserProfile,
@@ -143,6 +144,24 @@ export class AuthService {
 
   static async getAccessSnapshot(): Promise<AccessSnapshot> {
     return await api.get('auth/access').json<AccessSnapshot>();
+  }
+
+  /**
+   * Read-only session hint (`200 OK`, never rotates cookies or throws on signed-out).
+   * Lets boot skip anonymous `POST /auth/refresh` calls when no refresh cookie exists.
+   */
+  static async getSessionHint(): Promise<{ signed_in: boolean; account?: string; display_name?: string }> {
+    try {
+      const response = await fetch(apiUrl('auth/session-hint'), {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        return { signed_in: true };
+      }
+      return await response.json();
+    } catch {
+      return { signed_in: true };
+    }
   }
 
   // Passkey Management

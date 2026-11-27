@@ -19,10 +19,14 @@ const mocks = vi.hoisted(() => ({
     error: null as Error | null,
     refetch: vi.fn(),
   },
+  lastBookingFilters: undefined as unknown,
 }));
 
 vi.mock('../../bookings/hooks/useBookingQueries', () => ({
-  useBookingsWithDetails: () => mocks.bookings,
+  useBookingsWithDetails: (filters?: unknown) => {
+    mocks.lastBookingFilters = filters;
+    return mocks.bookings;
+  },
 }));
 
 vi.mock('../hooks/useRoomQueries', () => ({
@@ -127,6 +131,11 @@ describe('RoomReservationTimeline', () => {
     expect(screen.getByText(/Reserved Oct 14–16/)).toBeTruthy();
     expect(screen.queryByText('Reserved Oct 1–3')).toBeNull();
     expect(screen.queryByText('Reserved Nov 2–4')).toBeNull();
+    expect(mocks.lastBookingFilters).toMatchObject({
+      include_in_house: true,
+      check_in_from: '2026-10-11',
+      check_in_to: '2027-04-10',
+    });
   });
 
   it('shows the loading state while queries are pending', async () => {

@@ -69,7 +69,7 @@ export const ProfileDetailRow = ({ label, value }: { label: string; value: React
         }}>
         {label}
       </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
+      <Typography component="div" variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
         {displayValue}
       </Typography>
     </Box>

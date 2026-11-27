@@ -26,6 +26,40 @@ export interface CompatNavigateFn {
 }
 
 /**
+ * Plain query-string parser/serializer for TanStack Router (`?create=1` stays
+ * `?create=1` instead of TanStack's default JSON-quoting `?create=%221%22`),
+ * matching `useSearchParams()` / `URLSearchParams` across every route.
+ */
+export function parsePlainSearch(searchStr: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const raw = searchStr.startsWith('?') ? searchStr.slice(1) : searchStr;
+  for (const [key, value] of new URLSearchParams(raw).entries()) {
+    result[key] = value;
+  }
+  return result;
+}
+
+export function stringifyPlainSearch(searchObj: Record<string, unknown>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchObj)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+  const str = params.toString();
+  return str ? `?${str}` : '';
+}
+
+function splitRouteTarget(to: string) {
+  const target = new URL(to, window.location.origin);
+  return {
+    pathname: target.pathname,
+    search: target.search ? Object.fromEntries(target.searchParams.entries()) : undefined,
+    hash: target.hash ? target.hash.replace(/^#/, '') : undefined,
+  };
+}
+
+/**
  * Returns a navigate function compatible with react-router-dom v6/v7:
  *   navigate('/foo')
  *   navigate('/foo?x=1')
@@ -56,12 +90,13 @@ export function useNavigate(): CompatNavigateFn {
         }
         return;
       }
+      const split = splitRouteTarget(to);
       tsNavigate({
         // Dynamic URL strings accepted by the compat shim cannot satisfy TanStack's static route union.
-        to: target.pathname as any,
+        to: split.pathname as any,
         // Query parameters parsed from arbitrary URLs have dynamic key/value shapes.
-        search: Object.fromEntries(target.searchParams.entries()) as any,
-        hash: target.hash.replace(/^#/, ''),
+        search: (split.search ?? {}) as any,
+        hash: split.hash ?? '',
         replace: options?.replace,
       });
       if (typeof window !== 'undefined') {
@@ -169,12 +204,25 @@ export const Link = React.forwardRef<HTMLAnchorElement, CompatLinkProps>(functio
   { to, replace, ...rest },
   ref
 ) {
+  if (!to.startsWith('/')) {
+    return (
+      <TanstackLink
+        ref={ref as any}
+        to={to as any}
+        replace={replace}
+        {...rest}
+      />
+    );
+  }
+  const split = splitRouteTarget(to);
   return (
     <TanstackLink
       // TanStack Link's polymorphic ref type does not accept a plain HTMLAnchorElement ref without widening.
       ref={ref as any}
       // String paths work at runtime even though the generic types prefer typed routes.
-      to={to as any}
+      to={split.pathname as any}
+      search={split.search as any}
+      hash={split.hash}
       replace={replace}
       {...rest}
     />
@@ -197,6 +245,14 @@ export const Navigate: React.FC<CompatNavigateProps> = ({ to, replace }) => {
     }
     return null;
   }
+  const split = splitRouteTarget(to);
   // Dynamic string destinations outside TanStack's static route union require widening.
-  return <TanstackNavigate to={to as any} replace={replace} />;
+  return (
+    <TanstackNavigate
+      to={split.pathname as any}
+      search={split.search as any}
+      hash={split.hash}
+      replace={replace}
+    />
+  );
 };

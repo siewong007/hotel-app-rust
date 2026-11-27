@@ -272,6 +272,24 @@ describe('LedgerService', () => {
     });
   });
 
+  describe('getLedgerPaymentsBatch', () => {
+    it('short-circuits empty input without issuing an HTTP request', async () => {
+      const result = await LedgerService.getLedgerPaymentsBatch([]);
+      expect(result).toEqual({});
+      expect(get).not.toHaveBeenCalled();
+    });
+
+    it('fetches payment histories for multiple deduplicated ledger ids in one call', async () => {
+      const payment = { id: 1, ledger_id: 9, payment_amount: 50, payment_method: 'cash', payment_date: '2026-07-01', created_at: '2026-07-01T00:00:00Z' };
+      get.mockReturnValue(mockJsonResponse({ 9: [payment], 12: [] }));
+
+      const result = await LedgerService.getLedgerPaymentsBatch([9, 12, 9]);
+
+      expect(get).toHaveBeenCalledWith('ledgers/payments', { searchParams: { ledger_ids: '9,12' } });
+      expect(result).toEqual({ 9: [payment], 12: [] });
+    });
+  });
+
   describe('createLedgerPayment', () => {
     it('posts the payment input as json to ledgers/<id>/payments', async () => {
       const input = { payment_amount: 50, payment_method: 'cash', idempotency_key: 'ledger-payment-attempt-1' };

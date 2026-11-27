@@ -4,8 +4,10 @@
 //! app's idempotency key for anonymous creates) and `pre_checkin_token` —
 //! the hashed, booking-scoped access token the guest portal authenticates
 //! with. Token value is `sha256:<hex>` exactly as `persist_booking_access_token`
-//! writes it, and the raw token is deterministic:
-//! `stg-anon-token-201` unlocks booking 802201, `stg-anon-token-203` → 802203.
+//! writes it, and the raw token is deterministic hex accepted by
+//! `ensure_plausible_portal_token`:
+//! `80220100-0000-4000-8000-000000802201` unlocks booking 802201,
+//! `80220300-0000-4000-8000-000000802203` unlocks booking 802203.
 
 use crate::engine::Tx;
 
@@ -32,7 +34,7 @@ SELECT * FROM (VALUES
         (SELECT today+30 FROM staging_ref),(SELECT today+32 FROM staging_ref),1,0,
         800501,90.00,180.00,14.40,194.40,'MYR',
         'pending_payment','unpaid',NULL,
-        'stg-req-anon-201','sha256:' || encode(sha256('stg-anon-token-201'::bytea),'hex'),
+        'stg-req-anon-201','sha256:' || encode(sha256('80220100-0000-4000-8000-000000802201'::bytea),'hex'),
         (SELECT today+32 FROM staging_ref)::timestamptz,
         NULL,NULL::bigint,NULL,
         'website','Direct Website',(SELECT id FROM booking_channels WHERE name='Direct Website'),
@@ -43,18 +45,18 @@ SELECT * FROM (VALUES
         (SELECT today+40 FROM staging_ref),(SELECT today+42 FROM staging_ref),1,0,
         800501,90.00,180.00,14.40,194.40,'MYR',
         'confirmed','paid','online_payment',
-        'stg-req-anon-202','sha256:' || encode(sha256('stg-anon-token-202'::bytea),'hex'),
+        'stg-req-anon-202','sha256:' || encode(sha256('80220200-0000-4000-8000-000000802202'::bytea),'hex'),
         (SELECT today+42 FROM staging_ref)::timestamptz,
         NULL,NULL,NULL,
         'website','Direct Website',(SELECT id FROM booking_channels WHERE name='Direct Website'),
         800003,((SELECT today FROM staging_ref)::timestamptz + interval '12 hours')-interval '2 days'),
     -- Anonymous confirmed booking with secure guest access (the canonical
-    -- "returning via access token" fixture — raw token stg-anon-token-203).
+    -- "returning via access token" fixture — raw token 80220300-0000-4000-8000-000000802203).
     (802203,'B-STG-0203',801052,'Anonymous','anon.b@staging.hotel-app.test',800303,
         (SELECT today+33 FROM staging_ref),(SELECT today+35 FROM staging_ref),1,0,
         800501,90.00,180.00,14.40,194.40,'MYR',
         'confirmed','paid','online_payment',
-        'stg-req-anon-203','sha256:' || encode(sha256('stg-anon-token-203'::bytea),'hex'),
+        'stg-req-anon-203','sha256:' || encode(sha256('80220300-0000-4000-8000-000000802203'::bytea),'hex'),
         (SELECT today+35 FROM staging_ref)::timestamptz,
         NULL,NULL,NULL,
         'website','Direct Website',(SELECT id FROM booking_channels WHERE name='Direct Website'),

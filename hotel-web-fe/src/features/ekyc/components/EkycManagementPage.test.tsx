@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
     error: null as unknown,
   },
   reasonCodes: { data: [] as EkycReasonCode[] },
+  lastReasonCodesEnabled: undefined as boolean | undefined,
+  hasPermission: vi.fn<(perm: string) => boolean>(() => true),
   reviewAction: { mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false },
   reveal: { mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false },
 }));
@@ -30,7 +32,7 @@ const mocks = vi.hoisted(() => ({
 const emptyMutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false };
 
 vi.mock('../../../auth/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true, user: { id: 'u1' } }),
+  useAuth: () => ({ hasPermission: (perm: string) => mocks.hasPermission(perm), user: { id: 'u1' } }),
 }));
 
 vi.mock('../../../hooks/useIsPhone', () => ({
@@ -40,7 +42,10 @@ vi.mock('../../../hooks/useIsPhone', () => ({
 vi.mock('../hooks/useEkycQueries', () => ({
   useAllEkycVerifications: () => mocks.list,
   useEkycApplication: () => mocks.detail,
-  useEkycReasonCodes: () => mocks.reasonCodes,
+  useEkycReasonCodes: (enabled?: boolean) => {
+    mocks.lastReasonCodesEnabled = enabled;
+    return mocks.reasonCodes;
+  },
   useRevealEkycField: () => mocks.reveal,
   useReviewEkycAction: () => mocks.reviewAction,
   useApproveEkyc: () => emptyMutation,
@@ -192,6 +197,8 @@ describe('EkycManagementPage', () => {
     };
     mocks.detail = { data: detailFixture(), isPending: false, isLoading: false, error: null };
     mocks.reasonCodes = { data: [] };
+    mocks.lastReasonCodesEnabled = undefined;
+    mocks.hasPermission.mockImplementation(() => true);
     mocks.reviewAction.mutateAsync.mockReset();
     mocks.reviewAction.mutateAsync.mockResolvedValue(detailFixture());
     mocks.reviewAction.mutate.mockReset();
@@ -315,5 +322,15 @@ describe('EkycManagementPage', () => {
       }),
     );
     expect(await within(revealDialog).findByDisplayValue('A12345678')).toBeTruthy();
+  });
+
+  it('disables eKYC reason-code lookup and review actions when ekyc:review permission is absent', async () => {
+    mocks.hasPermission.mockImplementation((perm: string) => perm === 'ekyc:read' || perm === 'ekyc:export');
+    render(<EkycManagementPage />);
+
+    expect(mocks.lastReasonCodesEnabled).toBe(false);
+    const detailDialog = await openDetailDialog();
+    expect((within(detailDialog).getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(detailDialog).getByRole('button', { name: 'Reject' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
